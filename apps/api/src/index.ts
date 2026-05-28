@@ -1,0 +1,48 @@
+import Fastify from "fastify";
+import type { FastifyInstance } from "fastify";
+import { loadConfig } from "./config.js";
+import type { Config } from "./config.js";
+import { errorHandlerPlugin } from "./plugins/errorHandler.js";
+import { healthRoutes } from "./routes/health.js";
+import { positionsRoutes } from "./routes/positions.js";
+import { pnlRoutes } from "./routes/pnl.js";
+import { ilRoutes } from "./routes/il.js";
+import { historyRoutes } from "./routes/history.js";
+
+export async function buildServer(config?: Config): Promise<FastifyInstance> {
+  const fastify = Fastify({ logger: true });
+
+  // Load config if not provided
+  const resolvedConfig = config ?? loadConfig();
+
+  // Decorate the instance with the config so route plugins can access it
+  fastify.decorate("lpConfig", resolvedConfig);
+
+  // Register error handler plugin first
+  await fastify.register(errorHandlerPlugin);
+
+  // Register route plugins
+  fastify.register(healthRoutes);
+  fastify.register(positionsRoutes);
+  fastify.register(pnlRoutes);
+  fastify.register(ilRoutes);
+  fastify.register(historyRoutes);
+
+  return fastify;
+}
+
+// Only start listening when run directly (not imported as a module)
+const isMain =
+  typeof process !== "undefined" &&
+  process.argv[1] != null &&
+  (import.meta.url === `file://${process.argv[1]}` ||
+    process.argv[1].endsWith("index.ts") ||
+    process.argv[1].endsWith("index.js"));
+
+if (isMain) {
+  const port = parseInt(process.env.PORT ?? "3000", 10);
+  const host = "0.0.0.0";
+
+  const server = await buildServer();
+  await server.listen({ port, host });
+}

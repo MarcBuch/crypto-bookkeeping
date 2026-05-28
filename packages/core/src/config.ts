@@ -1,0 +1,103 @@
+import { readFileSync, existsSync } from "fs";
+import { join, resolve } from "path";
+import type { Address } from "viem";
+
+export interface PositionConfig {
+  openTx: string;
+  closeTx?: string;
+}
+
+export interface Config {
+  rpc: string;
+  chainId: number;
+  wallet: Address;
+  contracts: {
+    factory: Address;
+    positionManager: Address;
+    quoter: Address;
+    swapRouter: Address;
+  };
+  /** Known position transaction hashes for fast lookups (keyed by tokenId) */
+  positions?: Record<string, PositionConfig>;
+}
+
+/**
+ * Resolve the config file path.
+ *
+ * Resolution order:
+ *   1. LP_TRACKER_CONFIG env var (absolute or relative to cwd)
+ *   2. config.json in the current working directory
+ *   3. config.json two levels up from this file (repo root, for development)
+ */
+export function resolveConfigPath(): string {
+  if (process.env.LP_TRACKER_CONFIG) {
+    return resolve(process.env.LP_TRACKER_CONFIG);
+  }
+  const cwdPath = join(process.cwd(), "config.json");
+  if (existsSync(cwdPath)) {
+    return cwdPath;
+  }
+  // Fallback: repo root relative to packages/core/src/config.ts → ../../../config.json
+  return join(import.meta.dir, "..", "..", "..", "config.json");
+}
+
+export function loadConfig(configPath?: string): Config {
+  const path = configPath ?? resolveConfigPath();
+
+  if (!existsSync(path)) {
+    throw new Error(
+      `Config file not found: ${path}\n` +
+        `Set LP_TRACKER_CONFIG env var or place config.json in the working directory.\n` +
+        `Copy config.example.json to config.json and fill in your details.`
+    );
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf-8");
+  } catch (err: any) {
+    throw new Error(`Failed to read config file at ${path}: ${err.message}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: any) {
+    throw new Error(`Config file at ${path} is not valid JSON: ${err.message}`);
+  }
+
+  validateConfig(parsed, path);
+  return parsed as Config;
+}
+
+function validateConfig(raw: unknown, path: string): void {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(`Config at ${path} must be a JSON object`);
+  }
+  const cfg = raw as Record<string, unknown>;
+
+  const required = ["rpc", "chainId", "wallet", "contracts"] as const;
+  for (const key of required) {
+    if (cfg[key] === undefined || cfg[key] === null) {
+      throw new Error(`Config at ${path} is missing required field: "${key}"`);
+    }
+  }
+
+  if (typeof cfg.contracts !== "object" || cfg.contracts === null) {
+    throw new Error(`Config at ${path}: "contracts" must be an object`);
+  }
+  const contracts = cfg.contracts as Record<string, unknown>;
+  const requiredContracts = [
+    "factory",
+    "positionManager",
+    "quoter",
+    "swapRouter",
+  ] as const;
+  for (const key of requiredContracts) {
+    if (!contracts[key]) {
+      throw new Error(
+        `Config at ${path} is missing required contract address: "contracts.${key}"`
+      );
+    }
+  }
+}

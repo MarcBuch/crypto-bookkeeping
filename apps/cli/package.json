@@ -1,0 +1,22 @@
+{
+  "name": "@lp-tracker/cli",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "positions": "bun run src/index.ts positions",
+    "snapshot": "bun run src/index.ts snapshot",
+    "il": "bun run src/index.ts il",
+    "history": "bun run src/index.ts history",
+    "pnl": "bun run src/index.ts pnl"
+  },
+  "dependencies": {
+    "@lp-tracker/core": "workspace:*",
+    "commander": "^12.1.0",
+    "cli-table3": "^0.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

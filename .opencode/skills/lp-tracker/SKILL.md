@@ -9,27 +9,32 @@ A CLI tool for tracking concentrated liquidity (Uniswap V3-style) positions on P
 
 ## How to Run Commands
 
-All commands are run from the project root (wherever you cloned/installed this repo).
+This is a monorepo. Use `git rev-parse --show-toplevel` to locate the repo root from any working directory, then reference the CLI entry point relative to it. This works regardless of where the agent or shell is currently sitting.
 
 Use `--json` flag for structured output that you can parse programmatically. Always use `--json` when you need to analyze the data or answer questions about it.
 
 ```bash
+# Resolve repo root dynamically — works from any directory inside the repo
+REPO=$(git rev-parse --show-toplevel)
+
 # Always redirect stderr when using --json to get clean output
-bun run src/index.ts --json <command> 2>/dev/null
+bun run "$REPO/apps/cli/src/index.ts" --json <command> 2>/dev/null
 ```
 
 ## Available Commands
 
 ### List Positions
 ```bash
-bun run src/index.ts --json positions 2>/dev/null
+REPO=$(git rev-parse --show-toplevel)
+bun run "$REPO/apps/cli/src/index.ts" --json positions 2>/dev/null
 ```
 Returns all LP positions (active and closed) with current amounts, price ranges, and status.
 
 ### Full P&L Analysis (Recommended)
 ```bash
-bun run src/index.ts --json pnl 2>/dev/null           # All positions
-bun run src/index.ts --json pnl <tokenId> 2>/dev/null  # Specific position
+REPO=$(git rev-parse --show-toplevel)
+bun run "$REPO/apps/cli/src/index.ts" --json pnl 2>/dev/null           # All positions
+bun run "$REPO/apps/cli/src/index.ts" --json pnl <tokenId> 2>/dev/null  # Specific position
 ```
 Returns comprehensive P&L data including:
 - `absolutePnlPercent`: Actual gain/loss vs initial deposit (positive = made money)
@@ -41,20 +46,23 @@ Returns comprehensive P&L data including:
 
 ### Divergence Loss (Impermanent Loss)
 ```bash
-bun run src/index.ts --json il 2>/dev/null           # All positions
-bun run src/index.ts --json il <tokenId> 2>/dev/null  # Specific position
+REPO=$(git rev-parse --show-toplevel)
+bun run "$REPO/apps/cli/src/index.ts" --json il 2>/dev/null           # All positions
+bun run "$REPO/apps/cli/src/index.ts" --json il <tokenId> 2>/dev/null  # Specific position
 ```
 Returns divergence loss metrics focused on IL comparison with HODL.
 
 ### Take Snapshot (for historical tracking)
 ```bash
-bun run src/index.ts snapshot 2>&1
+REPO=$(git rev-parse --show-toplevel)
+bun run "$REPO/apps/cli/src/index.ts" snapshot 2>&1
 ```
 Stores current state of all active positions to SQLite for historical analysis.
 
 ### View History
 ```bash
-bun run src/index.ts --json history <tokenId> 2>/dev/null
+REPO=$(git rev-parse --show-toplevel)
+bun run "$REPO/apps/cli/src/index.ts" --json history <tokenId> 2>/dev/null
 ```
 Returns historical snapshots for a position (requires prior snapshots).
 

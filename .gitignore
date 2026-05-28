@@ -17,3 +17,6 @@ apps/*/dist/
 packages/*/dist/
 apps/*/node_modules/
 packages/*/node_modules/
+*.tsbuildinfo
+apps/*/vite.config.js
+apps/*/vite.config.d.ts

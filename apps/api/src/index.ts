@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import type { FastifyInstance } from "fastify";
 import { loadConfig } from "./config.js";
 import type { Config } from "./config.js";
@@ -20,6 +21,12 @@ export async function buildServer(config?: Config): Promise<FastifyInstance> {
 
   // Register error handler plugin first
   await fastify.register(errorHandlerPlugin);
+
+  await fastify.register(cors, {
+    origin:
+      process.env.CORS_ORIGIN ??
+      (process.env.NODE_ENV === "production" ? false : true),
+  });
 
   // Register route plugins
   fastify.register(healthRoutes);

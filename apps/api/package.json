@@ -8,6 +8,7 @@
     "test": "bun test src/test"
   },
   "dependencies": {
+    "@fastify/cors": "^11.2.0",
     "@lp-tracker/core": "workspace:*",
     "fastify": "^5.0.0"
   },

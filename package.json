@@ -12,8 +12,12 @@
     "typescript": "^5.6.0"
   },
   "scripts": {
+    "dev": "bun run scripts/dev.ts",
     "cli": "bun run --filter @lp-tracker/cli start",
     "api": "bun run --filter @lp-tracker/api start",
-    "api:dev": "bun run --filter @lp-tracker/api dev"
+    "api:dev": "bun run --filter @lp-tracker/api dev",
+    "web": "bun run --filter @lp-tracker/web dev",
+    "web:build": "bun run --filter @lp-tracker/web build",
+    "web:preview": "bun run --filter @lp-tracker/web preview"
   }
 }

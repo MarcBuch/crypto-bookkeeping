@@ -9,6 +9,7 @@ A monorepo for tracking concentrated liquidity (Uniswap V3-style) positions on [
 | `packages/core` | Shared library — chain clients, math, DB, services |
 | `apps/cli` | CLI tool (all original commands) |
 | `apps/api` | Fastify REST API exposing LP position data |
+| `apps/web` | Vite React dashboard for LP positions, status, and P&L |
 
 ## Prerequisites
 
@@ -189,6 +190,41 @@ HTTP status codes:
 | `PORT` | `3000` | Port to listen on |
 | `LP_TRACKER_CONFIG` | auto-resolved | Path to config.json |
 | `LP_TRACKER_DATA_DIR` | auto-resolved | Directory for lp-tracker.db |
+
+---
+
+## Web (`apps/web`)
+
+The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position and P&L data. It reads `/positions` and `/pnl` from the API and merges rows by token ID.
+
+### Start the app
+
+Run the web app:
+
+```bash
+bun run web
+```
+
+The web app runs on `http://localhost:5173`.
+
+Run the API separately when you want live LP data:
+
+```bash
+bun run api:dev
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_BASE_URL` | `http://localhost:3000` | Base URL for the Fastify API |
+
+### Build
+
+```bash
+bun run web:build
+bun run web:preview
+```
 
 ---
 

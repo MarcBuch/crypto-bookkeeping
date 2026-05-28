@@ -1,22 +1,19 @@
 {
-  "name": "lp-tracker",
+  "name": "lp-tracker-monorepo",
   "version": "1.0.0",
-  "description": "CLI tool to track ProjectX concentrated liquidity positions on HyperEVM and calculate divergence loss",
+  "private": true,
   "type": "module",
-  "scripts": {
-    "start": "bun run src/index.ts",
-    "positions": "bun run src/index.ts positions",
-    "snapshot": "bun run src/index.ts snapshot",
-    "il": "bun run src/index.ts il",
-    "history": "bun run src/index.ts history"
-  },
-  "dependencies": {
-    "viem": "^2.21.0",
-    "commander": "^12.1.0",
-    "cli-table3": "^0.6.5"
-  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.6.0"
+  },
+  "scripts": {
+    "cli": "bun run --filter @lp-tracker/cli start",
+    "api": "bun run --filter @lp-tracker/api start",
+    "api:dev": "bun run --filter @lp-tracker/api dev"
   }
 }

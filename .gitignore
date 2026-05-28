@@ -5,3 +5,15 @@ data/*.db-wal
 data/*.db-shm
 bun.lockb
 config.json
+bunfig.toml
+ca.crt
+
+# OpenCode mission state
+.opencode/handoffs.jsonl
+.opencode/mission.json
+
+# Monorepo workspace artifacts
+apps/*/dist/
+packages/*/dist/
+apps/*/node_modules/
+packages/*/node_modules/

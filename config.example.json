@@ -1,0 +1,20 @@
+{
+  "rpc": "https://rpc.hyperliquid.xyz/evm",
+  "chainId": 999,
+  "wallet": "0xYOUR_WALLET_ADDRESS_HERE",
+  "contracts": {
+    "factory": "0xFf7B3e8C00e57ea31477c32A5B52a58Eea47b072",
+    "positionManager": "0xeaD19AE861c29bBb2101E834922B2FEee69B9091",
+    "quoter": "0x239F11a7A3E08f2B8110D4CA9F6B95d4c8865258",
+    "swapRouter": "0x1EbDFC75FfE3ba3de61E7138a3E8706aC841Af9B"
+  },
+  "positions": {
+    "TOKEN_ID_1": {
+      "openTx": "0xOPEN_TX_HASH",
+      "closeTx": "0xCLOSE_TX_HASH"
+    },
+    "TOKEN_ID_2": {
+      "openTx": "0xOPEN_TX_HASH"
+    }
+  }
+}

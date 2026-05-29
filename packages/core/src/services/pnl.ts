@@ -12,6 +12,7 @@ import {
 } from "../math/divergence-loss.js";
 import { upsertPosition, getPosition } from "../db/store.js";
 import { NotFoundError } from "./errors.js";
+import { getUsdPrices } from "./pricing.js";
 
 export interface PnLView {
   tokenId: string;
@@ -28,6 +29,12 @@ export interface PnLView {
   exitAmount1: number;
   feesCollected0: number;
   feesCollected1: number;
+  feesCollected0Usd: number | null;
+  feesCollected1Usd: number | null;
+  feesValueUsd: number | null;
+  token0UsdPrice: number | null;
+  token1UsdPrice: number | null;
+  usdPriceSource: "coingecko" | null;
   feesValueInToken1: number;
   entryValueInToken1: number;
   exitValueInToken1: number;
@@ -39,6 +46,39 @@ export interface PnLView {
   netVsHodlPercent: number;
   priceLower: number;
   priceUpper: number;
+}
+
+export interface UsdFeeIncome {
+  feesCollected0Usd: number | null;
+  feesCollected1Usd: number | null;
+  feesValueUsd: number | null;
+  usdPriceSource: "coingecko" | null;
+}
+
+export function calculateUsdFeeIncome(params: {
+  feesCollected0: number;
+  feesCollected1: number;
+  token0UsdPrice: number | null;
+  token1UsdPrice: number | null;
+}): UsdFeeIncome {
+  const feesCollected0Usd = params.feesCollected0 === 0
+    ? 0
+    : params.token0UsdPrice === null
+      ? null
+      : params.feesCollected0 * params.token0UsdPrice;
+  const feesCollected1Usd = params.feesCollected1 === 0
+    ? 0
+    : params.token1UsdPrice === null
+      ? null
+      : params.feesCollected1 * params.token1UsdPrice;
+  const feesValueUsd = feesCollected0Usd === null || feesCollected1Usd === null
+    ? null
+    : feesCollected0Usd + feesCollected1Usd;
+  const usdPriceSource = params.token0UsdPrice !== null || params.token1UsdPrice !== null
+    ? "coingecko"
+    : null;
+
+  return { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource };
 }
 
 export async function getPnLView(config: Config, tokenId?: string): Promise<PnLView[]> {
@@ -246,6 +286,28 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
 
     const t0sym = token0Info.symbol;
     const t1sym = token1Info.symbol;
+    const token0PriceKey = pos.token0.toLowerCase();
+    const token1PriceKey = pos.token1.toLowerCase();
+    let token0UsdPrice: number | null = null;
+    let token1UsdPrice: number | null = null;
+
+    try {
+      const usdPrices = await getUsdPrices(config, [
+        { symbol: t0sym, address: pos.token0 },
+        { symbol: t1sym, address: pos.token1 },
+      ]);
+      token0UsdPrice = usdPrices[token0PriceKey] ?? null;
+      token1UsdPrice = usdPrices[token1PriceKey] ?? null;
+    } catch {
+      // Live USD pricing is optional; token1-denominated P&L must still succeed.
+    }
+
+    const { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource } = calculateUsdFeeIncome({
+      feesCollected0: pnl.feesCollected0,
+      feesCollected1: pnl.feesCollected1,
+      token0UsdPrice,
+      token1UsdPrice,
+    });
 
     result.push({
       tokenId: pos.tokenId.toString(),
@@ -262,6 +324,12 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
       exitAmount1: pnl.exitAmount1,
       feesCollected0: pnl.feesCollected0,
       feesCollected1: pnl.feesCollected1,
+      feesCollected0Usd,
+      feesCollected1Usd,
+      feesValueUsd,
+      token0UsdPrice,
+      token1UsdPrice,
+      usdPriceSource,
       feesValueInToken1: pnl.feesValue,
       entryValueInToken1: pnl.entryValue,
       exitValueInToken1: pnl.exitValue,

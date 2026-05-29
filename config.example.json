@@ -16,5 +16,14 @@
     "TOKEN_ID_2": {
       "openTx": "0xOPEN_TX_HASH"
     }
+  },
+  "pricing": {
+    "coingeckoIds": {
+      "USDC": "usd-coin",
+      "UBTC": "bitcoin",
+      "WETH": "weth",
+      "WHYPE": "hyperliquid",
+      "0xTOKEN_ADDRESS_OR_PROJECTX_WRAPPED_TOKEN": "coingecko-token-id"
+    }
   }
 }

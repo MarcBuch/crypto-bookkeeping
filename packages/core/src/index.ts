@@ -35,3 +35,4 @@ export * from "./services/pnl.js";
 export * from "./services/il.js";
 export * from "./services/snapshot.js";
 export * from "./services/history.js";
+export * from "./services/pricing.js";

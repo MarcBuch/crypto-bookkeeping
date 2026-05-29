@@ -7,6 +7,11 @@ export interface PositionConfig {
   closeTx?: string;
 }
 
+export interface PricingConfig {
+  /** CoinGecko ids keyed by token symbol or token address */
+  coingeckoIds?: Record<string, string>;
+}
+
 export interface Config {
   rpc: string;
   chainId: number;
@@ -19,6 +24,8 @@ export interface Config {
   };
   /** Known position transaction hashes for fast lookups (keyed by tokenId) */
   positions?: Record<string, PositionConfig>;
+  /** Optional live USD pricing configuration */
+  pricing?: PricingConfig;
 }
 
 /**

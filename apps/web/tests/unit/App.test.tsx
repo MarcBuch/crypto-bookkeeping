@@ -5,8 +5,8 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
-} from "./App";
-import type { DashboardPosition } from "./api";
+} from "../../src/App";
+import type { DashboardPosition } from "../../src/api";
 
 const activePosition: DashboardPosition = {
   tokenId: "123",

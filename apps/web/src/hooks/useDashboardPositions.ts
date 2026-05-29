@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDashboardPositions } from "./api";
+import { getDashboardPositions } from "../api";
 
 export const queryKeys = {
   dashboardPositions: ["dashboardPositions"] as const,

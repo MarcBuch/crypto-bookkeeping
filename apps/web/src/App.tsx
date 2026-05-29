@@ -9,7 +9,7 @@ export function App() {
       <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
         <header className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
           <div className="border-b border-neutral-200 px-5 py-3 sm:px-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
               <span>HyperEVM ProjectX</span>
               <span className="flex items-center gap-2 text-neutral-700">
                 <span className="h-2 w-2 rounded-full bg-neutral-950" />
@@ -19,7 +19,7 @@ export function App() {
           </div>
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_420px] lg:items-end">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-neutral-500">
+              <p className="text-xs font-semibold tracking-[0.35em] text-neutral-500 uppercase">
                 Concentrated Liquidity Command Center
               </p>
               <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-[-0.04em] text-neutral-950 sm:text-6xl lg:text-7xl">
@@ -31,7 +31,7 @@ export function App() {
               </p>
             </div>
             <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.26em] text-neutral-500">
+              <p className="text-[0.65rem] font-semibold tracking-[0.26em] text-neutral-500 uppercase">
                 Operating Mode
               </p>
               <div className="mt-4 grid grid-cols-3 gap-2 text-center">
@@ -107,7 +107,7 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
       <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
           <div>
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-neutral-500">
+            <p className="text-[0.65rem] font-semibold tracking-[0.28em] text-neutral-500 uppercase">
               Blotter
             </p>
             <h2 className="mt-1 text-lg font-bold text-neutral-950">Position Detail Ledger</h2>
@@ -118,7 +118,7 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead className="bg-neutral-50 text-left text-[0.68rem] uppercase tracking-[0.18em] text-neutral-500">
+            <thead className="bg-neutral-50 text-left text-[0.68rem] tracking-[0.18em] text-neutral-500 uppercase">
               <tr>
                 <th className="px-5 py-3">Pair</th>
                 <th className="px-5 py-3">Status</th>
@@ -143,7 +143,7 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
 function HeaderStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
-      <p className="text-[0.62rem] uppercase tracking-[0.18em] text-neutral-500">{label}</p>
+      <p className="text-[0.62rem] tracking-[0.18em] text-neutral-500 uppercase">{label}</p>
       <p className="mt-1 font-mono text-sm font-bold text-neutral-950">{value}</p>
     </div>
   );
@@ -163,7 +163,7 @@ function MetricCard({
   return (
     <div className="group rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-50">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+        <p className="text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
           {label}
         </p>
         <span className="mt-1 h-1.5 w-1.5 rounded-full bg-neutral-300 transition group-hover:bg-neutral-950" />
@@ -307,28 +307,28 @@ function PositionRow({ position }: { position: DashboardPosition }) {
 
   return (
     <tr className="text-neutral-700 transition hover:bg-neutral-50">
-      <td className="whitespace-nowrap px-5 py-4 font-semibold text-neutral-950">
+      <td className="px-5 py-4 font-semibold whitespace-nowrap text-neutral-950">
         {position.token0.symbol}/{position.token1.symbol}
         <span className="ml-2 font-mono text-xs text-neutral-500">#{position.tokenId}</span>
       </td>
-      <td className="whitespace-nowrap px-5 py-4">
+      <td className="px-5 py-4 whitespace-nowrap">
         <div className="flex gap-2">
           <StatusBadge status={position.status} />
           <RangeBadge inRange={position.inRange} />
         </div>
       </td>
-      <td className="whitespace-nowrap px-5 py-4 font-mono">
+      <td className="px-5 py-4 font-mono whitespace-nowrap">
         {formatPrice(position.currentPrice)}
       </td>
-      <td className="whitespace-nowrap px-5 py-4 font-mono text-neutral-600">
+      <td className="px-5 py-4 font-mono whitespace-nowrap text-neutral-600">
         {formatPrice(position.priceLower)} - {formatPrice(position.priceUpper)}
       </td>
       <td
-        className={`whitespace-nowrap px-5 py-4 font-mono font-bold ${toneClass(pnl?.absolutePnlInToken1)}`}
+        className={`px-5 py-4 font-mono font-bold whitespace-nowrap ${toneClass(pnl?.absolutePnlInToken1)}`}
       >
         {pnl ? `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}` : "n/a"}
       </td>
-      <td className="whitespace-nowrap px-5 py-4 font-mono text-neutral-600">
+      <td className="px-5 py-4 font-mono whitespace-nowrap text-neutral-600">
         {pnl ? (
           <div>
             <p className={`font-bold ${toneClass(usdFeeValue(pnl.feesValueUsd))}`}>
@@ -354,7 +354,7 @@ function StatusBadge({ status }: { status: DashboardPosition["status"] }) {
 
   return (
     <span
-      className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${className}`}
+      className={`rounded-full border px-3 py-1 text-xs font-bold tracking-wide uppercase ${className}`}
     >
       {status}
     </span>
@@ -368,7 +368,7 @@ function RangeBadge({ inRange }: { inRange: boolean }) {
 
   return (
     <span
-      className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${className}`}
+      className={`rounded-full border px-3 py-1 text-xs font-bold tracking-wide uppercase ${className}`}
     >
       {inRange ? "in range" : "out of range"}
     </span>

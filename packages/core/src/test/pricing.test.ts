@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+
 import { getUsdPrices } from "../services/pricing.js";
 
 const originalFetch = globalThis.fetch;

@@ -1,4 +1,5 @@
 import type { Address } from "viem";
+
 import type { Config } from "../config.js";
 
 export type PricingToken =

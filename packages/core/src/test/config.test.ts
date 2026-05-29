@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
+
 import { loadConfig, resolveConfigPath } from "../config.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-config-tests";

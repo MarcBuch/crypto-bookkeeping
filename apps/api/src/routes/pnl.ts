@@ -1,5 +1,6 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPnLView, NotFoundError, RpcError } from "@lp-tracker/core";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+
 import { isNumericString } from "../utils/validation.js";
 
 export async function pnlRoutes(fastify: FastifyInstance): Promise<void> {

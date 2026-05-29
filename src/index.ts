@@ -1,19 +1,12 @@
 import { Command } from "commander";
-import { loadConfig } from "./config";
+import type { Address } from "viem";
+
 import { createClient } from "./chain/client";
-import { getAllPositions, type PositionData } from "./chain/positions";
-import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "./chain/pools";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "./chain/events";
-import {
-  calculateDivergenceLoss,
-  calculateUnclaimedFees,
-  calculateFeeGrowthInside,
-  calculateFullPnL,
-  deriveEntryPriceFromAmounts,
-  getTokenAmounts,
-  sqrtPriceX96ToPrice,
-  type FullPnLResult,
-} from "./math/divergence-loss";
+import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "./chain/pools";
+import { getAllPositions, type PositionData } from "./chain/positions";
+import { withRetry } from "./chain/rpc";
+import { loadConfig } from "./config";
 import { upsertPosition, getPosition, insertSnapshot, getSnapshots } from "./db/store";
 import {
   displayPositions,
@@ -29,8 +22,16 @@ import {
   type PnLDisplayData,
   type SnapshotDisplayData,
 } from "./display/table";
-import { withRetry } from "./chain/rpc";
-import type { Address } from "viem";
+import {
+  calculateDivergenceLoss,
+  calculateUnclaimedFees,
+  calculateFeeGrowthInside,
+  calculateFullPnL,
+  deriveEntryPriceFromAmounts,
+  getTokenAmounts,
+  sqrtPriceX96ToPrice,
+  type FullPnLResult,
+} from "./math/divergence-loss";
 
 const program = new Command();
 

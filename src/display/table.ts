@@ -1,4 +1,5 @@
 import Table from "cli-table3";
+
 import type { FullPnLResult } from "../math/divergence-loss";
 
 export interface PositionDisplayData {

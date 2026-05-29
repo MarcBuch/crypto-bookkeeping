@@ -1,8 +1,9 @@
-import type { Config } from "../config.js";
 import { createClient } from "../chain/client.js";
-import { getAllPositions } from "../chain/positions.js";
-import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { findOpenEvent } from "../chain/events.js";
+import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
+import { getAllPositions } from "../chain/positions.js";
+import type { Config } from "../config.js";
+import { upsertPosition, getPosition, insertSnapshot } from "../db/store.js";
 import {
   calculateFeeGrowthInside,
   calculateUnclaimedFees,
@@ -10,7 +11,6 @@ import {
   getTokenAmounts,
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
-import { upsertPosition, getPosition, insertSnapshot } from "../db/store.js";
 
 export interface SnapshotResult {
   tokenId: string;

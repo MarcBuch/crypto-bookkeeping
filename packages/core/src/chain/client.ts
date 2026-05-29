@@ -1,4 +1,5 @@
 import { createPublicClient, http, defineChain } from "viem";
+
 import type { Config } from "../config";
 
 // Both the Hyperliquid public RPC and Envio HyperRPC use certificates that

@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from "bun:test";
+
 import type { FastifyInstance } from "fastify";
+
 import type { Config } from "../config.js";
 
 const fakeConfig: Config = {

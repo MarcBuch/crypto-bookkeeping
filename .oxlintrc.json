@@ -24,6 +24,8 @@
     "dist/**",
     "apps/*/dist/**",
     "packages/*/dist/**",
+    "apps/*/vite.config.d.ts",
+    "apps/*/vite.config.js",
     "data/**",
     "bun.lock"
   ],
@@ -47,6 +49,12 @@
       },
       "globals": {
         "Bun": "readonly"
+      }
+    },
+    {
+      "files": ["**/*.css"],
+      "rules": {
+        "import/no-unassigned-import": "off"
       }
     }
   ]

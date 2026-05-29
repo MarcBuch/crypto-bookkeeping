@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
+
 import { renderToStaticMarkup } from "react-dom/server";
-import { Dashboard, EmptyState, ErrorState, LoadingState } from "../../src/App";
+
 import type { DashboardPosition } from "../../src/api";
+import { Dashboard, EmptyState, ErrorState, LoadingState } from "../../src/App";
 
 const activePosition: DashboardPosition = {
   tokenId: "123",

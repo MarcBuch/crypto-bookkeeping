@@ -1,4 +1,3 @@
-import { Command } from "commander";
 import {
   loadConfig,
   // Services
@@ -19,6 +18,8 @@ import {
   type ILDisplayData,
   type SnapshotDisplayData,
 } from "@lp-tracker/core";
+import { Command } from "commander";
+
 import { formatPnLDisplayData, formatPnLJsonPayload } from "./pnl-format.js";
 
 const program = new Command();

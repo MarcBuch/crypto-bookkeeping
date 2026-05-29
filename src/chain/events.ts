@@ -5,6 +5,7 @@ import {
   type Log,
   type TransactionReceipt,
 } from "viem";
+
 import type { Client } from "./client";
 import { withRetry, sleep } from "./rpc";
 

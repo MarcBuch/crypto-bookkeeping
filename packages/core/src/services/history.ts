@@ -31,8 +31,12 @@ export async function getHistoryView(tokenId: string, limit?: number): Promise<H
   const pair = `${storedPos.token0_symbol}/${storedPos.token1_symbol}`;
   const decimals0 = storedPos.token0_decimals ?? 18;
   const decimals1 = storedPos.token1_decimals ?? 18;
+  const snapshotsOldestFirst: typeof snapshots = [];
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    snapshotsOldestFirst.push(snapshots[i]);
+  }
 
-  return snapshots.reverse().map((snap) => {
+  return snapshotsOldestFirst.map((snap) => {
     const currentPrice = sqrtPriceX96ToPrice(
       BigInt(snap.current_sqrt_price_x96),
       decimals0,

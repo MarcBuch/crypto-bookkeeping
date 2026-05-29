@@ -1,7 +1,7 @@
-import type { Config } from "../config.js";
 import { createClient } from "../chain/client.js";
-import { getAllPositions } from "../chain/positions.js";
 import { getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
+import { getAllPositions } from "../chain/positions.js";
+import type { Config } from "../config.js";
 import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 
 export interface PositionView {

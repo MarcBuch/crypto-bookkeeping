@@ -1,5 +1,6 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getILView, NotFoundError, RpcError } from "@lp-tracker/core";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+
 import { isNumericString } from "../utils/validation.js";
 
 export async function ilRoutes(fastify: FastifyInstance): Promise<void> {

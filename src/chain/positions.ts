@@ -1,6 +1,7 @@
 import type { Address } from "viem";
-import type { Client } from "./client";
+
 import { positionManagerAbi } from "./abis";
+import type { Client } from "./client";
 import { withRetry } from "./rpc";
 
 export interface PositionData {

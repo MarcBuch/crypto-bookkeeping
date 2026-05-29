@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
+
 import { encodeAbiParameters, type TransactionReceipt } from "viem";
+
 import { findCloseEventFromTx } from "../chain/events.js";
 
 type Hex = `0x${string}`;

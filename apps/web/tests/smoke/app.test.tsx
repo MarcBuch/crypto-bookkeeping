@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { renderToStaticMarkup } from "react-dom/server";
+
 import { App, ErrorState } from "../../src/App";
 import { AppProviders } from "../../src/app-providers";
 import { queryKeys } from "../../src/hooks/useDashboardPositions";

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, mock } from "bun:test";
+
 import type { FastifyInstance } from "fastify";
 
 // --- Minimal fake config ---

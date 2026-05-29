@@ -1,5 +1,6 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getHistoryView, NotFoundError } from "@lp-tracker/core";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+
 import { isNumericString, parseLimit, ValidationError } from "../utils/validation.js";
 
 export async function historyRoutes(fastify: FastifyInstance): Promise<void> {

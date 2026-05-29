@@ -22,6 +22,7 @@ export async function rateLimit(): Promise<void> {
       await sleep(MIN_DELAY_MS - elapsed);
     }
     lastRequestTime = Date.now();
+    return undefined;
   });
   return rateLimitPromise;
 }

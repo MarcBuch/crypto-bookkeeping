@@ -1,6 +1,7 @@
 import type { Address } from "viem";
-import type { Client } from "./client";
+
 import { factoryAbi, poolAbi, erc20Abi } from "./abis";
+import type { Client } from "./client";
 import { withRetry } from "./rpc";
 
 export interface PoolState {

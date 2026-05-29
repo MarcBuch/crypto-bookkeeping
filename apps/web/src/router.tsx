@@ -1,11 +1,12 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+
 import { App } from "./App";
 
 export function NotFound() {
   return (
     <main className="min-h-screen bg-white px-4 py-10 text-neutral-950">
       <section className="mx-auto max-w-2xl rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-neutral-500">
+        <p className="text-xs font-semibold tracking-[0.28em] text-neutral-500 uppercase">
           Route Not Found
         </p>
         <h1 className="mt-3 text-3xl font-black tracking-[-0.03em]">

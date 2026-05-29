@@ -1,8 +1,9 @@
-import type { Config } from "../config.js";
 import { createClient } from "../chain/client.js";
-import { getAllPositions } from "../chain/positions.js";
-import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
+import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
+import { getAllPositions } from "../chain/positions.js";
+import type { Config } from "../config.js";
+import { upsertPosition, getPosition } from "../db/store.js";
 import {
   calculateDivergenceLoss,
   calculateFeeGrowthInside,
@@ -11,7 +12,6 @@ import {
   getTokenAmounts,
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
-import { upsertPosition, getPosition } from "../db/store.js";
 import { NotFoundError } from "./errors.js";
 
 export interface ILView {

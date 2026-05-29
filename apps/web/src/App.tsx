@@ -210,7 +210,7 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         detail={pnl ? `Fees ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}` : undefined}
       />
       <DarkStat
-        label="APR"
+        label="ROI"
         value={pnl ? formatPercent(pnl.absolutePnlPercent) : "n/a"}
         valueClassName={pnl ? darkToneClass(pnl.absolutePnlPercent) : undefined}
       />

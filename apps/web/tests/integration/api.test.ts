@@ -6,7 +6,7 @@ import {
   getPositions,
   type PnLView,
   type PositionView,
-} from "./api";
+} from "../../src/api";
 
 const originalFetch = globalThis.fetch;
 

@@ -214,7 +214,7 @@ HTTP status codes:
 
 ## Web (`apps/web`)
 
-The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position and P&L data. It reads `/positions` and `/pnl` from the API and merges rows by token ID. P&L cards prioritize Fee Income USD when available and show USD unavailable for missing or `null` pricing values.
+The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position and P&L data. It uses TanStack Router for client routing, reads `/positions` and `/pnl` from the API, and merges rows by token ID. P&L cards prioritize Fee Income USD when available and show USD unavailable for missing or `null` pricing values.
 
 ### Start the app
 
@@ -245,6 +245,28 @@ bun run web:build
 bun run web:preview
 ```
 
+### Web tests
+
+Web tests live outside `src` in `apps/web/tests` and are grouped by type:
+
+| Folder | Purpose |
+|--------|---------|
+| `tests/unit` | Pure component or function tests with no app shell or API boundary. |
+| `tests/integration` | Tests that cross module boundaries, such as API client behavior or router composition. |
+| `tests/smoke` | High-level checks that the routed app shell renders critical loading, error, and empty states. |
+
+Run the web tests from the repo root with:
+
+```bash
+bun run --filter @lp-tracker/web test
+```
+
+Or from `apps/web` with:
+
+```bash
+bun run test
+```
+
 ---
 
 ## Rate limits
@@ -263,6 +285,9 @@ cd packages/core && bun test src/test
 
 # API tests (in-process, no network required)
 cd apps/api && bun test src/test
+
+# Web tests (unit + integration + smoke)
+cd apps/web && bun test tests
 ```
 
 ## License

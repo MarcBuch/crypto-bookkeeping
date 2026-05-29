@@ -334,26 +334,6 @@ function RangeBadge({ inRange }: { inRange: boolean }) {
   );
 }
 
-function DataPoint({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-  tone?: number;
-}) {
-  return (
-    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3">
-      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-neutral-500">{label}</p>
-      <p className={`mt-2 break-words font-mono text-sm font-semibold ${toneClass(tone)}`}>{value}</p>
-      {detail ? <p className="mt-1 text-xs font-medium text-neutral-500">{detail}</p> : null}
-    </div>
-  );
-}
-
 export function LoadingState() {
   return (
     <div className="rounded-3xl border border-neutral-200 bg-white p-8 text-neutral-600 shadow-sm">

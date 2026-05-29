@@ -31,7 +31,9 @@ describe("router shell", () => {
     expect(element.type).toBe(QueryClientProvider);
     expect(element.props.client).toBe(queryClient);
 
-    const routerElement = element.props.children as ReactElement<{ router: typeof router }>;
+    const child = element.props.children;
+    expect(isValidElement(child)).toBe(true);
+    const routerElement = child as ReactElement<{ router: typeof router }>;
     expect(routerElement.type).toBe(RouterProvider);
     expect(routerElement.props.router).toBe(router);
   });

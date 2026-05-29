@@ -17,8 +17,8 @@
     "web:preview": "bun run --filter @lp-tracker/web preview",
     "lint": "oxlint apps packages scripts",
     "lint:fix": "oxlint apps packages scripts --fix",
-    "format": "oxfmt apps packages scripts src README.md package.json",
-    "format:check": "oxfmt --check apps packages scripts src README.md package.json",
+    "format": "oxfmt apps packages scripts README.md package.json",
+    "format:check": "oxfmt --check apps packages scripts README.md package.json",
     "check": "bun run lint && bun run format:check && bun run --filter @lp-tracker/core check && bun run --filter @lp-tracker/web check"
   },
   "devDependencies": {

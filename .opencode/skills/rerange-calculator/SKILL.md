@@ -18,7 +18,7 @@ Calculates optimal rerange scenarios for a concentrated liquidity (Uniswap V3-st
 
 ### Step 1: Get current position data
 ```bash
-bun run src/index.ts --json positions 2>/dev/null
+bun run apps/cli/src/index.ts --json positions 2>/dev/null
 ```
 Extract: `currentPrice`, `priceLower`, `priceUpper`, `currentAmount0`, `currentAmount1`, `token0Symbol`, `token1Symbol`.
 

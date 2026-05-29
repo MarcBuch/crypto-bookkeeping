@@ -18,7 +18,7 @@ Determines whether an LP position is working for or against you given the curren
 
 ### Step 1: Get current position data
 ```bash
-bun run src/index.ts --json pnl 2>/dev/null
+bun run apps/cli/src/index.ts --json pnl 2>/dev/null
 ```
 Extract for the active position: `entryPrice`, `exitPrice` (current), `divergenceLossPercent`, `feesValueInToken1`, `entryValueInToken1`.
 

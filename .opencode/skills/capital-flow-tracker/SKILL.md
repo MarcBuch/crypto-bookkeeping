@@ -66,7 +66,7 @@ Add the missing tx hashes:
 
 ### Step 4: Run P&L for all positions
 ```bash
-bun run src/index.ts --json pnl 2>/dev/null
+bun run apps/cli/src/index.ts --json pnl 2>/dev/null
 ```
 
 ### Step 5: Compute end-to-end capital flow
@@ -126,7 +126,7 @@ Show a clear table:
 The HyperEVM RPC rate limits aggressively. If calls fail:
 - Wait 15–20 seconds between RPC calls
 - Use the block explorer web UI as a fallback for transaction lookup
-- Run `bun run src/index.ts` commands with gaps between them
+- Run `bun run apps/cli/src/index.ts` commands with gaps between them
 
 ## Important notes
 

@@ -54,7 +54,13 @@ const fakePnLView = {
   exitAmount1: 1900,
   feesCollected0: 0.01,
   feesCollected1: 10,
+  feesCollected0Usd: 20,
+  feesCollected1Usd: 10,
   feesValueInToken1: 30,
+  feesValueUsd: 30,
+  token0UsdPrice: 2000,
+  token1UsdPrice: 1,
+  usdPriceSource: "coingecko" as const,
   entryValueInToken1: 3600,
   exitValueInToken1: 3700,
   holdValueInToken1: 3800,
@@ -65,6 +71,20 @@ const fakePnLView = {
   netVsHodlPercent: -0.025,
   priceLower: 1600,
   priceUpper: 2400,
+};
+
+const nullableUsdFields = {
+  feesCollected0Usd: null,
+  feesCollected1Usd: null,
+  feesValueUsd: null,
+  token0UsdPrice: null,
+  token1UsdPrice: null,
+  usdPriceSource: null,
+};
+
+const fakePnLViewWithNullUsd = {
+  ...fakePnLView,
+  ...nullableUsdFields,
 };
 
 // --- Minimal fake ILView object ---
@@ -125,6 +145,24 @@ describe("GET /pnl", () => {
     const body = res.json();
     expect(body.positions).toHaveLength(1);
     expect(body.positions[0].tokenId).toBe("123");
+    expect(body.positions[0]).toMatchObject({
+      feesCollected0Usd: 20,
+      feesCollected1Usd: 10,
+      feesValueUsd: 30,
+      token0UsdPrice: 2000,
+      token1UsdPrice: 1,
+      usdPriceSource: "coingecko",
+    });
+  });
+
+  it("preserves nullable USD fields as null", async () => {
+    mockGetPnLView = async () => [fakePnLViewWithNullUsd];
+
+    const res = await server.inject({ method: "GET", url: "/pnl" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.positions).toHaveLength(1);
+    expect(body.positions[0]).toMatchObject(nullableUsdFields);
   });
 });
 
@@ -166,7 +204,31 @@ describe("GET /positions/:tokenId/pnl", () => {
 
     const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ position: { tokenId: "123", pair: "WETH/USDC" } });
+    expect(res.json()).toMatchObject({
+      position: {
+        tokenId: "123",
+        pair: "WETH/USDC",
+        feesCollected0Usd: 20,
+        feesCollected1Usd: 10,
+        feesValueUsd: 30,
+        token0UsdPrice: 2000,
+        token1UsdPrice: 1,
+        usdPriceSource: "coingecko",
+      },
+    });
+  });
+
+  it("preserves nullable USD fields as null without returning a route-level 500", async () => {
+    mockGetPnLView = async () => [fakePnLViewWithNullUsd];
+
+    const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      position: {
+        tokenId: "123",
+        ...nullableUsdFields,
+      },
+    });
   });
 });
 

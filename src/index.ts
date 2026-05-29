@@ -2,17 +2,8 @@ import { Command } from "commander";
 import { loadConfig } from "./config";
 import { createClient } from "./chain/client";
 import { getAllPositions, type PositionData } from "./chain/positions";
-import {
-  getPoolAddress,
-  getPoolState,
-  getTickData,
-  getTokenInfo,
-} from "./chain/pools";
-import {
-  findOpenEvent,
-  findCloseEvent,
-  getPoolPriceAtBlock,
-} from "./chain/events";
+import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "./chain/pools";
+import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "./chain/events";
 import {
   calculateDivergenceLoss,
   calculateUnclaimedFees,
@@ -23,12 +14,7 @@ import {
   sqrtPriceX96ToPrice,
   type FullPnLResult,
 } from "./math/divergence-loss";
-import {
-  upsertPosition,
-  getPosition,
-  insertSnapshot,
-  getSnapshots,
-} from "./db/store";
+import { upsertPosition, getPosition, insertSnapshot, getSnapshots } from "./db/store";
 import {
   displayPositions,
   displayIL,
@@ -51,7 +37,7 @@ const program = new Command();
 program
   .name("lp-tracker")
   .description(
-    "Track ProjectX concentrated liquidity positions on HyperEVM and calculate divergence loss"
+    "Track ProjectX concentrated liquidity positions on HyperEVM and calculate divergence loss",
   )
   .version("1.0.0")
   .option("--json", "Output results as JSON (for agent/programmatic use)");
@@ -92,7 +78,7 @@ program
     const positions = await getAllPositions(
       client,
       config.contracts.positionManager,
-      config.wallet
+      config.wallet,
     );
 
     if (positions.length === 0) {
@@ -114,7 +100,7 @@ program
         config.contracts.factory,
         pos.token0,
         pos.token1,
-        pos.fee
+        pos.fee,
       );
 
       const poolState = await getPoolState(client, poolAddress);
@@ -123,24 +109,21 @@ program
         pos.liquidity,
         poolState.sqrtPriceX96,
         pos.tickLower,
-        pos.tickUpper
+        pos.tickUpper,
       );
 
       const priceLower =
-        1.0001 ** pos.tickLower *
-        10 ** (token0Info.decimals - token1Info.decimals);
+        1.0001 ** pos.tickLower * 10 ** (token0Info.decimals - token1Info.decimals);
       const priceUpper =
-        1.0001 ** pos.tickUpper *
-        10 ** (token0Info.decimals - token1Info.decimals);
+        1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
 
       const currentPrice = sqrtPriceX96ToPrice(
         poolState.sqrtPriceX96,
         token0Info.decimals,
-        token1Info.decimals
+        token1Info.decimals,
       );
 
-      const inRange =
-        poolState.tick >= pos.tickLower && poolState.tick < pos.tickUpper;
+      const inRange = poolState.tick >= pos.tickLower && poolState.tick < pos.tickUpper;
       const isActive = pos.liquidity > 0n;
 
       const amount0Human = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;
@@ -196,7 +179,7 @@ program
     const positions = await getAllPositions(
       client,
       config.contracts.positionManager,
-      config.wallet
+      config.wallet,
     );
 
     if (positions.length === 0) {
@@ -227,7 +210,7 @@ program
         config.contracts.factory,
         pos.token0,
         pos.token1,
-        pos.fee
+        pos.fee,
       );
 
       const poolState = await getPoolState(client, poolAddress);
@@ -255,7 +238,7 @@ program
           config.contracts.positionManager,
           pos.tokenId,
           config.wallet,
-          posConfig?.openTx
+          posConfig?.openTx,
         );
 
         if (openEvent) {
@@ -269,7 +252,7 @@ program
             entryAmount1,
             entryLiquidity,
             pos.tickLower,
-            pos.tickUpper
+            pos.tickUpper,
           );
           upsertPosition({
             token_id: pos.tokenId.toString(),
@@ -307,7 +290,7 @@ program
           pos.liquidity,
           poolState.sqrtPriceX96,
           pos.tickLower,
-          pos.tickUpper
+          pos.tickUpper,
         );
         exitAmount0 = currentAmounts.amount0;
         exitAmount1 = currentAmounts.amount1;
@@ -328,7 +311,7 @@ program
             tickLowerData.feeGrowthOutside0X128,
             tickLowerData.feeGrowthOutside1X128,
             tickUpperData.feeGrowthOutside0X128,
-            tickUpperData.feeGrowthOutside1X128
+            tickUpperData.feeGrowthOutside1X128,
           );
 
           const feeResult = calculateUnclaimedFees(
@@ -340,7 +323,7 @@ program
             pos.tokensOwed0,
             pos.tokensOwed1,
             token0Info.decimals,
-            token1Info.decimals
+            token1Info.decimals,
           );
 
           feesCollected0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
@@ -351,9 +334,7 @@ program
       } else {
         // Closed position: find the close event
         // Pass entry_block as fromBlock so the log scan starts there, not from block 0
-        const entryBlock = storedPos?.entry_block
-          ? BigInt(storedPos.entry_block)
-          : undefined;
+        const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
         console.log(`  Finding close data for position #${pos.tokenId}...`);
         const closeEvent = await findCloseEvent(
           client,
@@ -361,7 +342,7 @@ program
           pos.tokenId,
           config.wallet,
           posConfig?.closeTx,
-          entryBlock
+          entryBlock,
         );
 
         if (closeEvent) {
@@ -371,11 +352,7 @@ program
           feesCollected1 = closeEvent.collectedFees1;
 
           // Get pool price at close block for accurate exit price
-          const closePrice = await getPoolPriceAtBlock(
-            client,
-            poolAddress,
-            closeEvent.blockNumber
-          );
+          const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
           if (closePrice) {
             exitSqrtPriceX96 = closePrice.sqrtPriceX96;
           }
@@ -467,7 +444,7 @@ program
     const positions = await getAllPositions(
       client,
       config.contracts.positionManager,
-      config.wallet
+      config.wallet,
     );
 
     if (positions.length === 0) {
@@ -497,7 +474,7 @@ program
         config.contracts.factory,
         pos.token0,
         pos.token1,
-        pos.fee
+        pos.fee,
       );
 
       const poolState = await getPoolState(client, poolAddress);
@@ -522,7 +499,7 @@ program
           config.contracts.positionManager,
           pos.tokenId,
           config.wallet,
-          posConfigIL?.openTx
+          posConfigIL?.openTx,
         );
 
         if (openEvent) {
@@ -534,7 +511,7 @@ program
             openEvent.amount1,
             openEvent.liquidity,
             pos.tickLower,
-            pos.tickUpper
+            pos.tickUpper,
           );
 
           // Store for future use
@@ -571,31 +548,25 @@ program
           pos.liquidity,
           poolState.sqrtPriceX96,
           pos.tickLower,
-          pos.tickUpper
+          pos.tickUpper,
         );
         exitAmount0 = currentAmounts.amount0;
         exitAmount1 = currentAmounts.amount1;
       } else {
         // Closed: find close event — start from entry_block to avoid scanning from block 0
-        const entryBlockIL = storedPos?.entry_block
-          ? BigInt(storedPos.entry_block)
-          : undefined;
+        const entryBlockIL = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
         const closeEvent = await findCloseEvent(
           client,
           config.contracts.positionManager,
           pos.tokenId,
           config.wallet,
           posConfigIL?.closeTx,
-          entryBlockIL
+          entryBlockIL,
         );
         if (closeEvent) {
           exitAmount0 = closeEvent.amount0;
           exitAmount1 = closeEvent.amount1;
-          const closePrice = await getPoolPriceAtBlock(
-            client,
-            poolAddress,
-            closeEvent.blockNumber
-          );
+          const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
           if (closePrice) currentSqrtPriceX96 = closePrice.sqrtPriceX96;
         }
       }
@@ -608,13 +579,17 @@ program
         entrySqrtPriceX96,
         currentSqrtPriceX96,
         token0Info.decimals,
-        token1Info.decimals
+        token1Info.decimals,
       );
 
       // For closed positions, override with actual amounts
       let valueLp: number;
       let valueHold: number;
-      const exitPrice = sqrtPriceX96ToPrice(currentSqrtPriceX96, token0Info.decimals, token1Info.decimals);
+      const exitPrice = sqrtPriceX96ToPrice(
+        currentSqrtPriceX96,
+        token0Info.decimals,
+        token1Info.decimals,
+      );
       const entryAmt0H = Number(entryAmount0) / 10 ** token0Info.decimals;
       const entryAmt1H = Number(entryAmount1) / 10 ** token1Info.decimals;
       const exitAmt0H = Number(exitAmount0) / 10 ** token0Info.decimals;
@@ -644,7 +619,7 @@ program
             tickLowerData.feeGrowthOutside0X128,
             tickLowerData.feeGrowthOutside1X128,
             tickUpperData.feeGrowthOutside0X128,
-            tickUpperData.feeGrowthOutside1X128
+            tickUpperData.feeGrowthOutside1X128,
           );
 
           const feeResult = calculateUnclaimedFees(
@@ -656,7 +631,7 @@ program
             pos.tokensOwed0,
             pos.tokensOwed1,
             token0Info.decimals,
-            token1Info.decimals
+            token1Info.decimals,
           );
 
           fees0 = feeResult.fees0;
@@ -670,11 +645,9 @@ program
       const netVsHodl = valueHold > 0 ? (valueLp + feesValue - valueHold) / valueHold : 0;
 
       const priceLower =
-        1.0001 ** pos.tickLower *
-        10 ** (token0Info.decimals - token1Info.decimals);
+        1.0001 ** pos.tickLower * 10 ** (token0Info.decimals - token1Info.decimals);
       const priceUpper =
-        1.0001 ** pos.tickUpper *
-        10 ** (token0Info.decimals - token1Info.decimals);
+        1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
 
       displayData.push({
         tokenId: pos.tokenId.toString(),
@@ -726,7 +699,7 @@ program
     const positions = await getAllPositions(
       client,
       config.contracts.positionManager,
-      config.wallet
+      config.wallet,
     );
 
     if (positions.length === 0) {
@@ -753,7 +726,7 @@ program
         config.contracts.factory,
         pos.token0,
         pos.token1,
-        pos.fee
+        pos.fee,
       );
 
       const poolState = await getPoolState(client, poolAddress);
@@ -776,7 +749,7 @@ program
           config.contracts.positionManager,
           pos.tokenId,
           config.wallet,
-          posConfigSnap?.openTx
+          posConfigSnap?.openTx,
         );
 
         if (openEvent) {
@@ -787,7 +760,7 @@ program
             openEvent.amount1,
             openEvent.liquidity,
             pos.tickLower,
-            pos.tickUpper
+            pos.tickUpper,
           );
 
           upsertPosition({
@@ -814,7 +787,7 @@ program
             pos.liquidity,
             poolState.sqrtPriceX96,
             pos.tickLower,
-            pos.tickUpper
+            pos.tickUpper,
           );
           entryAmount0 = currentAmounts.amount0;
           entryAmount1 = currentAmounts.amount1;
@@ -826,10 +799,14 @@ program
         pos.liquidity,
         poolState.sqrtPriceX96,
         pos.tickLower,
-        pos.tickUpper
+        pos.tickUpper,
       );
 
-      const exitPrice = sqrtPriceX96ToPrice(poolState.sqrtPriceX96, token0Info.decimals, token1Info.decimals);
+      const exitPrice = sqrtPriceX96ToPrice(
+        poolState.sqrtPriceX96,
+        token0Info.decimals,
+        token1Info.decimals,
+      );
       const entryAmt0H = Number(entryAmount0) / 10 ** token0Info.decimals;
       const entryAmt1H = Number(entryAmount1) / 10 ** token1Info.decimals;
       const curAmt0H = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;
@@ -857,7 +834,7 @@ program
           tickLowerData.feeGrowthOutside0X128,
           tickLowerData.feeGrowthOutside1X128,
           tickUpperData.feeGrowthOutside0X128,
-          tickUpperData.feeGrowthOutside1X128
+          tickUpperData.feeGrowthOutside1X128,
         );
 
         const feeResult = calculateUnclaimedFees(
@@ -869,7 +846,7 @@ program
           pos.tokensOwed0,
           pos.tokensOwed1,
           token0Info.decimals,
-          token1Info.decimals
+          token1Info.decimals,
         );
 
         fees0 = feeResult.fees0;
@@ -879,7 +856,7 @@ program
       }
 
       const feesValue = fees0 * exitPrice + fees1;
-      const netPnl = (valueLp - valueHold) + feesValue;
+      const netPnl = valueLp - valueHold + feesValue;
 
       // Store snapshot
       insertSnapshot({
@@ -903,7 +880,7 @@ program
 
       snapshotCount++;
       console.log(
-        `  Snapshot saved for #${pos.tokenId} (${token0Info.symbol}/${token1Info.symbol}) - DL: ${(divergenceLoss * 100).toFixed(4)}%`
+        `  Snapshot saved for #${pos.tokenId} (${token0Info.symbol}/${token1Info.symbol}) - DL: ${(divergenceLoss * 100).toFixed(4)}%`,
       );
     }
 
@@ -919,18 +896,14 @@ program
   .action(async (tokenId: string, options: { limit: string }) => {
     const storedPos = getPosition(tokenId);
     if (!storedPos) {
-      console.log(
-        `No stored data for position #${tokenId}. Run 'snapshot' first.`
-      );
+      console.log(`No stored data for position #${tokenId}. Run 'snapshot' first.`);
       return;
     }
 
     const snapshots = getSnapshots(tokenId, parseInt(options.limit));
 
     if (snapshots.length === 0) {
-      console.log(
-        `No snapshots found for position #${tokenId}. Run 'snapshot' first.`
-      );
+      console.log(`No snapshots found for position #${tokenId}. Run 'snapshot' first.`);
       return;
     }
 
@@ -938,24 +911,22 @@ program
     const decimals0 = storedPos.token0_decimals || 18;
     const decimals1 = storedPos.token1_decimals || 18;
 
-    const displayData: SnapshotDisplayData[] = snapshots
-      .reverse()
-      .map((snap) => {
-        const currentPrice = sqrtPriceX96ToPrice(
-          BigInt(snap.current_sqrt_price_x96),
-          decimals0,
-          decimals1
-        );
+    const displayData: SnapshotDisplayData[] = snapshots.reverse().map((snap) => {
+      const currentPrice = sqrtPriceX96ToPrice(
+        BigInt(snap.current_sqrt_price_x96),
+        decimals0,
+        decimals1,
+      );
 
-        return {
-          timestamp: new Date(snap.timestamp).toLocaleString(),
-          currentPrice: formatPrice(currentPrice),
-          divergenceLoss: `${(snap.divergence_loss * 100).toFixed(4)}%`,
-          fees: `${formatNumber(snap.fees_value, 4)} ${storedPos.token1_symbol}`,
-          netPnl: `${formatNumber(snap.net_pnl, 4)} ${storedPos.token1_symbol}`,
-          valueLp: `${formatNumber(snap.value_lp, 4)} ${storedPos.token1_symbol}`,
-        };
-      });
+      return {
+        timestamp: new Date(snap.timestamp).toLocaleString(),
+        currentPrice: formatPrice(currentPrice),
+        divergenceLoss: `${(snap.divergence_loss * 100).toFixed(4)}%`,
+        fees: `${formatNumber(snap.fees_value, 4)} ${storedPos.token1_symbol}`,
+        netPnl: `${formatNumber(snap.net_pnl, 4)} ${storedPos.token1_symbol}`,
+        valueLp: `${formatNumber(snap.value_lp, 4)} ${storedPos.token1_symbol}`,
+      };
+    });
 
     displayHistory(tokenId, pair, displayData);
   });

@@ -177,7 +177,9 @@ describe("GET /positions/:tokenId/pnl", () => {
   });
 
   it("returns 404 when service throws NotFoundError", async () => {
-    mockGetPnLView = async () => { throw new MockNotFoundError("Position #999 not found."); };
+    mockGetPnLView = async () => {
+      throw new MockNotFoundError("Position #999 not found.");
+    };
 
     const res = await server.inject({ method: "GET", url: "/positions/999/pnl" });
     expect(res.statusCode).toBe(404);
@@ -185,7 +187,9 @@ describe("GET /positions/:tokenId/pnl", () => {
   });
 
   it("returns 503 when service throws RpcError with code -32005", async () => {
-    mockGetPnLView = async () => { throw new MockRpcError("Rate limited", -32005); };
+    mockGetPnLView = async () => {
+      throw new MockRpcError("Rate limited", -32005);
+    };
 
     const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
     expect(res.statusCode).toBe(503);
@@ -193,7 +197,9 @@ describe("GET /positions/:tokenId/pnl", () => {
   });
 
   it("returns 500 when service throws generic Error", async () => {
-    mockGetPnLView = async () => { throw new Error("Unexpected failure"); };
+    mockGetPnLView = async () => {
+      throw new Error("Unexpected failure");
+    };
 
     const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
     expect(res.statusCode).toBe(500);
@@ -258,7 +264,9 @@ describe("GET /positions/:tokenId/il", () => {
   });
 
   it("returns 404 when service throws NotFoundError", async () => {
-    mockGetILView = async () => { throw new MockNotFoundError("Position #999 not found."); };
+    mockGetILView = async () => {
+      throw new MockNotFoundError("Position #999 not found.");
+    };
 
     const res = await server.inject({ method: "GET", url: "/positions/999/il" });
     expect(res.statusCode).toBe(404);
@@ -266,7 +274,9 @@ describe("GET /positions/:tokenId/il", () => {
   });
 
   it("returns 503 when service throws RpcError with code -32005", async () => {
-    mockGetILView = async () => { throw new MockRpcError("Rate limited", -32005); };
+    mockGetILView = async () => {
+      throw new MockRpcError("Rate limited", -32005);
+    };
 
     const res = await server.inject({ method: "GET", url: "/positions/123/il" });
     expect(res.statusCode).toBe(503);
@@ -274,7 +284,9 @@ describe("GET /positions/:tokenId/il", () => {
   });
 
   it("returns 500 when service throws generic Error", async () => {
-    mockGetILView = async () => { throw new Error("Unexpected failure"); };
+    mockGetILView = async () => {
+      throw new Error("Unexpected failure");
+    };
 
     const res = await server.inject({ method: "GET", url: "/positions/123/il" });
     expect(res.statusCode).toBe(500);

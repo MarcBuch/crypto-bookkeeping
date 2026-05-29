@@ -34,7 +34,7 @@ export function getDb(): Database {
     } catch (err: any) {
       throw new Error(
         `Cannot create data directory at ${dataDir}: ${err.message}\n` +
-          `Set LP_TRACKER_DATA_DIR to a writable path.`
+          `Set LP_TRACKER_DATA_DIR to a writable path.`,
       );
     }
     db = new Database(dbPath, { create: true });

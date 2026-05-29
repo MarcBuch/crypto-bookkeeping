@@ -23,9 +23,7 @@ export async function buildServer(config?: Config): Promise<FastifyInstance> {
   await fastify.register(errorHandlerPlugin);
 
   await fastify.register(cors, {
-    origin:
-      process.env.CORS_ORIGIN ??
-      (process.env.NODE_ENV === "production" ? false : true),
+    origin: process.env.CORS_ORIGIN ?? (process.env.NODE_ENV === "production" ? false : true),
   });
 
   // Register route plugins

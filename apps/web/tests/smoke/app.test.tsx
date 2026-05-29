@@ -11,7 +11,7 @@ function renderAppWithQueryClient(queryClient: QueryClient): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <App />
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -50,9 +50,7 @@ describe("app smoke", () => {
     // Test ErrorState directly — avoids coupling to React Query's internal
     // cache API to force an error state, while still verifying the component
     // that App renders when useDashboardPositions returns an error.
-    const html = renderToStaticMarkup(
-      <ErrorState error={new Error("RPC rate limited")} />
-    );
+    const html = renderToStaticMarkup(<ErrorState error={new Error("RPC rate limited")} />);
 
     expect(html).toContain("Could not load LP positions");
     expect(html).toContain("RPC rate limited");

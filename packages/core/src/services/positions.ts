@@ -25,11 +25,7 @@ export interface PositionView {
 export async function getPositionsView(config: Config): Promise<PositionView[]> {
   const client = createClient(config);
 
-  const positions = await getAllPositions(
-    client,
-    config.contracts.positionManager,
-    config.wallet
-  );
+  const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
   if (positions.length === 0) {
     return [];
@@ -48,7 +44,7 @@ export async function getPositionsView(config: Config): Promise<PositionView[]> 
       config.contracts.factory,
       pos.token0,
       pos.token1,
-      pos.fee
+      pos.fee,
     );
 
     const poolState = await getPoolState(client, poolAddress);
@@ -57,24 +53,19 @@ export async function getPositionsView(config: Config): Promise<PositionView[]> 
       pos.liquidity,
       poolState.sqrtPriceX96,
       pos.tickLower,
-      pos.tickUpper
+      pos.tickUpper,
     );
 
-    const priceLower =
-      1.0001 ** pos.tickLower *
-      10 ** (token0Info.decimals - token1Info.decimals);
-    const priceUpper =
-      1.0001 ** pos.tickUpper *
-      10 ** (token0Info.decimals - token1Info.decimals);
+    const priceLower = 1.0001 ** pos.tickLower * 10 ** (token0Info.decimals - token1Info.decimals);
+    const priceUpper = 1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
 
     const currentPrice = sqrtPriceX96ToPrice(
       poolState.sqrtPriceX96,
       token0Info.decimals,
-      token1Info.decimals
+      token1Info.decimals,
     );
 
-    const inRange =
-      poolState.tick >= pos.tickLower && poolState.tick < pos.tickUpper;
+    const inRange = poolState.tick >= pos.tickLower && poolState.tick < pos.tickUpper;
     const isActive = pos.liquidity > 0n;
 
     const amount0Human = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;

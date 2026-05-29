@@ -11,5 +11,5 @@ const router = createAppRouter();
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppProviders queryClient={queryClient} router={router} />
-  </React.StrictMode>
+  </React.StrictMode>,
 );

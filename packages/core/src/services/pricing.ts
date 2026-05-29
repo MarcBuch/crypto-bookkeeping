@@ -23,7 +23,7 @@ const priceCache = new Map<string, PriceCacheEntry>();
 
 export async function getUsdPrices(
   config: Pick<Config, "pricing">,
-  tokens: PricingToken[]
+  tokens: PricingToken[],
 ): Promise<UsdPriceMap> {
   const idsByResultKey = new Map<string, string>();
   const result: UsdPriceMap = {};
@@ -40,7 +40,9 @@ export async function getUsdPrices(
     }
   }
 
-  const idsToFetch = [...new Set([...idsByResultKey.values()].filter((id) => getCachedPrice(id) === undefined))];
+  const idsToFetch = [
+    ...new Set([...idsByResultKey.values()].filter((id) => getCachedPrice(id) === undefined)),
+  ];
   if (idsToFetch.length > 0) {
     await fetchAndCachePrices(idsToFetch);
   }
@@ -73,15 +75,16 @@ function resolveCoinGeckoId(config: Pick<Config, "pricing">, token: PricingToken
   const ids = config.pricing?.coingeckoIds;
   if (!ids) return null;
 
-  const candidates = typeof token === "string"
-    ? [token, token.toLowerCase(), token.toUpperCase()]
-    : [
-        token.address,
-        token.address?.toLowerCase(),
-        token.symbol,
-        token.symbol?.toLowerCase(),
-        token.symbol?.toUpperCase(),
-      ];
+  const candidates =
+    typeof token === "string"
+      ? [token, token.toLowerCase(), token.toUpperCase()]
+      : [
+          token.address,
+          token.address?.toLowerCase(),
+          token.symbol,
+          token.symbol?.toLowerCase(),
+          token.symbol?.toUpperCase(),
+        ];
 
   for (const candidate of candidates) {
     if (candidate && ids[candidate]) return ids[candidate];
@@ -110,9 +113,10 @@ async function fetchAndCachePrices(coinGeckoIds: string[]): Promise<void> {
 
     for (const coinGeckoId of coinGeckoIds) {
       const responsePrice = (data as Record<string, unknown>)[coinGeckoId];
-      const usd = typeof responsePrice === "object" && responsePrice !== null
-        ? (responsePrice as Record<string, unknown>).usd
-        : undefined;
+      const usd =
+        typeof responsePrice === "object" && responsePrice !== null
+          ? (responsePrice as Record<string, unknown>).usd
+          : undefined;
       const price = typeof usd === "number" && Number.isFinite(usd) && usd >= 0 ? usd : null;
       cachePrice(coinGeckoId, price, price === null ? NEGATIVE_CACHE_TTL_MS : PRICE_CACHE_TTL_MS);
     }

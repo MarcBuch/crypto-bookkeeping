@@ -12,11 +12,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { NotFoundError, RpcError } from "../services/errors.js";
-import {
-  formatNumber,
-  formatPrice,
-  formatPercent,
-} from "../display/table.js";
+import { formatNumber, formatPrice, formatPercent } from "../display/table.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // 1. isJsonMode() — simulated via process.argv manipulation

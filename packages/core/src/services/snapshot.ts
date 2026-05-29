@@ -21,11 +21,7 @@ export interface SnapshotResult {
 export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
   const client = createClient(config);
 
-  const positions = await getAllPositions(
-    client,
-    config.contracts.positionManager,
-    config.wallet
-  );
+  const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
   if (positions.length === 0) {
     return [];
@@ -54,7 +50,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
       config.contracts.factory,
       pos.token0,
       pos.token1,
-      pos.fee
+      pos.fee,
     );
 
     const poolState = await getPoolState(client, poolAddress);
@@ -76,7 +72,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         config.contracts.positionManager,
         pos.tokenId,
         config.wallet,
-        posConfigSnap?.openTx
+        posConfigSnap?.openTx,
       );
 
       if (openEvent) {
@@ -87,7 +83,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
           openEvent.amount1,
           openEvent.liquidity,
           pos.tickLower,
-          pos.tickUpper
+          pos.tickUpper,
         );
 
         upsertPosition({
@@ -114,7 +110,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
           pos.liquidity,
           poolState.sqrtPriceX96,
           pos.tickLower,
-          pos.tickUpper
+          pos.tickUpper,
         );
         entryAmount0 = currentAmounts.amount0;
         entryAmount1 = currentAmounts.amount1;
@@ -126,10 +122,14 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
       pos.liquidity,
       poolState.sqrtPriceX96,
       pos.tickLower,
-      pos.tickUpper
+      pos.tickUpper,
     );
 
-    const exitPrice = sqrtPriceX96ToPrice(poolState.sqrtPriceX96, token0Info.decimals, token1Info.decimals);
+    const exitPrice = sqrtPriceX96ToPrice(
+      poolState.sqrtPriceX96,
+      token0Info.decimals,
+      token1Info.decimals,
+    );
     const entryAmt0H = Number(entryAmount0) / 10 ** token0Info.decimals;
     const entryAmt1H = Number(entryAmount1) / 10 ** token1Info.decimals;
     const curAmt0H = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;
@@ -157,7 +157,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         tickLowerData.feeGrowthOutside0X128,
         tickLowerData.feeGrowthOutside1X128,
         tickUpperData.feeGrowthOutside0X128,
-        tickUpperData.feeGrowthOutside1X128
+        tickUpperData.feeGrowthOutside1X128,
       );
 
       const feeResult = calculateUnclaimedFees(
@@ -169,17 +169,17 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         pos.tokensOwed0,
         pos.tokensOwed1,
         token0Info.decimals,
-        token1Info.decimals
+        token1Info.decimals,
       );
 
       fees0 = feeResult.fees0;
       fees1 = feeResult.fees1;
-    } catch (e) {
+    } catch {
       // Fees calculation may fail — leave as 0
     }
 
     const feesValue = fees0 * exitPrice + fees1;
-    const netPnl = (valueLp - valueHold) + feesValue;
+    const netPnl = valueLp - valueHold + feesValue;
 
     // Store snapshot
     insertSnapshot({

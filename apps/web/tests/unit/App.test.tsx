@@ -1,11 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  Dashboard,
-  EmptyState,
-  ErrorState,
-  LoadingState,
-} from "../../src/App";
+import { Dashboard, EmptyState, ErrorState, LoadingState } from "../../src/App";
 import type { DashboardPosition } from "../../src/api";
 
 const activePosition: DashboardPosition = {
@@ -76,7 +71,7 @@ const closedPosition: DashboardPosition = {
 function withoutUsdFee(
   position: DashboardPosition,
   tokenId: string,
-  feesValueUsd?: number | null
+  feesValueUsd?: number | null,
 ): DashboardPosition {
   const pnl = { ...position.pnl!, tokenId };
 
@@ -115,9 +110,7 @@ describe("dashboard rendering", () => {
   });
 
   it("renders mixed active, closed, in-range, and out-of-range positions", () => {
-    const html = renderToStaticMarkup(
-      <Dashboard positions={[activePosition, closedPosition]} />
-    );
+    const html = renderToStaticMarkup(<Dashboard positions={[activePosition, closedPosition]} />);
 
     expect(html).toContain("WHYPE/USDC");
     expect(html).toContain("active");
@@ -128,9 +121,7 @@ describe("dashboard rendering", () => {
   });
 
   it("formats positive and negative P&L values and decimal percentages", () => {
-    const html = renderToStaticMarkup(
-      <Dashboard positions={[activePosition, closedPosition]} />
-    );
+    const html = renderToStaticMarkup(<Dashboard positions={[activePosition, closedPosition]} />);
 
     expect(html).toContain("25.5 USDC");
     expect(html).toContain("-10 USDC");
@@ -140,9 +131,7 @@ describe("dashboard rendering", () => {
   });
 
   it("prioritizes USD fee income when values are available", () => {
-    const html = renderToStaticMarkup(
-      <Dashboard positions={[activePosition, closedPosition]} />
-    );
+    const html = renderToStaticMarkup(<Dashboard positions={[activePosition, closedPosition]} />);
 
     expect(html).toContain("Fee Income USD");
     expect(html).toContain("$6.46");
@@ -154,7 +143,7 @@ describe("dashboard rendering", () => {
     const positionWithoutUsdFees = withoutUsdFee(activePosition, "789", null);
 
     const html = renderToStaticMarkup(
-      <Dashboard positions={[activePosition, positionWithoutUsdFees]} />
+      <Dashboard positions={[activePosition, positionWithoutUsdFees]} />,
     );
 
     expect(html).toMatch(/Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
@@ -171,10 +160,12 @@ describe("dashboard rendering", () => {
     const positionWithMissingUsdFees = withoutUsdFee(closedPosition, "999");
 
     const html = renderToStaticMarkup(
-      <Dashboard positions={[positionWithNullUsdFees, positionWithMissingUsdFees]} />
+      <Dashboard positions={[positionWithNullUsdFees, positionWithMissingUsdFees]} />,
     );
 
-    expect(html).toMatch(/Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/);
+    expect(html).toMatch(
+      /Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/,
+    );
     expect(html).not.toContain("$0.00");
     expect(html).toContain("Net P&amp;L 15.5 USDC");
     expect(html).toContain("closed");
@@ -184,8 +175,10 @@ describe("dashboard rendering", () => {
   it("renders ledger USD fee as primary and token1 fees as secondary context", () => {
     const html = renderToStaticMarkup(<Dashboard positions={[activePosition]} />);
 
-    expect(html).toContain("<th class=\"px-5 py-3\">Fees</th>");
-    expect(html).toMatch(/<td class="[^"]*"><div><p class="font-bold[^"]*">\$3\.23<\/p><p class="mt-1 text-xs text-neutral-500">12\.35 USDC<\/p><\/div><\/td>/);
+    expect(html).toContain('<th class="px-5 py-3">Fees</th>');
+    expect(html).toMatch(
+      /<td class="[^"]*"><div><p class="font-bold[^"]*">\$3\.23<\/p><p class="mt-1 text-xs text-neutral-500">12\.35 USDC<\/p><\/div><\/td>/,
+    );
     expect(html).toContain("Fees 12.35 USDC");
   });
 

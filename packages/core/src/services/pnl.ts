@@ -61,22 +61,24 @@ export function calculateUsdFeeIncome(params: {
   token0UsdPrice: number | null;
   token1UsdPrice: number | null;
 }): UsdFeeIncome {
-  const feesCollected0Usd = params.feesCollected0 === 0
-    ? 0
-    : params.token0UsdPrice === null
+  const feesCollected0Usd =
+    params.feesCollected0 === 0
+      ? 0
+      : params.token0UsdPrice === null
+        ? null
+        : params.feesCollected0 * params.token0UsdPrice;
+  const feesCollected1Usd =
+    params.feesCollected1 === 0
+      ? 0
+      : params.token1UsdPrice === null
+        ? null
+        : params.feesCollected1 * params.token1UsdPrice;
+  const feesValueUsd =
+    feesCollected0Usd === null || feesCollected1Usd === null
       ? null
-      : params.feesCollected0 * params.token0UsdPrice;
-  const feesCollected1Usd = params.feesCollected1 === 0
-    ? 0
-    : params.token1UsdPrice === null
-      ? null
-      : params.feesCollected1 * params.token1UsdPrice;
-  const feesValueUsd = feesCollected0Usd === null || feesCollected1Usd === null
-    ? null
-    : feesCollected0Usd + feesCollected1Usd;
-  const usdPriceSource = params.token0UsdPrice !== null || params.token1UsdPrice !== null
-    ? "coingecko"
-    : null;
+      : feesCollected0Usd + feesCollected1Usd;
+  const usdPriceSource =
+    params.token0UsdPrice !== null || params.token1UsdPrice !== null ? "coingecko" : null;
 
   return { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource };
 }
@@ -84,11 +86,7 @@ export function calculateUsdFeeIncome(params: {
 export async function getPnLView(config: Config, tokenId?: string): Promise<PnLView[]> {
   const client = createClient(config);
 
-  const positions = await getAllPositions(
-    client,
-    config.contracts.positionManager,
-    config.wallet
-  );
+  const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
   if (positions.length === 0) {
     return [];
@@ -115,7 +113,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
       config.contracts.factory,
       pos.token0,
       pos.token1,
-      pos.fee
+      pos.fee,
     );
 
     const poolState = await getPoolState(client, poolAddress);
@@ -142,7 +140,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         config.contracts.positionManager,
         pos.tokenId,
         config.wallet,
-        posConfig?.openTx
+        posConfig?.openTx,
       );
 
       if (openEvent) {
@@ -156,7 +154,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
           entryAmount1,
           entryLiquidity,
           pos.tickLower,
-          pos.tickUpper
+          pos.tickUpper,
         );
         upsertPosition({
           token_id: pos.tokenId.toString(),
@@ -194,7 +192,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         pos.liquidity,
         poolState.sqrtPriceX96,
         pos.tickLower,
-        pos.tickUpper
+        pos.tickUpper,
       );
       exitAmount0 = currentAmounts.amount0;
       exitAmount1 = currentAmounts.amount1;
@@ -215,7 +213,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
           tickLowerData.feeGrowthOutside0X128,
           tickLowerData.feeGrowthOutside1X128,
           tickUpperData.feeGrowthOutside0X128,
-          tickUpperData.feeGrowthOutside1X128
+          tickUpperData.feeGrowthOutside1X128,
         );
 
         const feeResult = calculateUnclaimedFees(
@@ -227,26 +225,24 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
           pos.tokensOwed0,
           pos.tokensOwed1,
           token0Info.decimals,
-          token1Info.decimals
+          token1Info.decimals,
         );
 
         feesCollected0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
         feesCollected1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
-      } catch (e) {
+      } catch {
         // Fees calculation may fail — leave as 0
       }
     } else {
       // Closed position: find the close event
-      const entryBlock = storedPos?.entry_block
-        ? BigInt(storedPos.entry_block)
-        : undefined;
+      const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
       const closeEvent = await findCloseEvent(
         client,
         config.contracts.positionManager,
         pos.tokenId,
         config.wallet,
         posConfig?.closeTx,
-        entryBlock
+        entryBlock,
       );
 
       if (closeEvent) {
@@ -256,11 +252,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         feesCollected1 = closeEvent.collectedFees1;
 
         // Get pool price at close block for accurate exit price
-        const closePrice = await getPoolPriceAtBlock(
-          client,
-          poolAddress,
-          closeEvent.blockNumber
-        );
+        const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
         if (closePrice) {
           exitSqrtPriceX96 = closePrice.sqrtPriceX96;
         }
@@ -302,12 +294,13 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
       // Live USD pricing is optional; token1-denominated P&L must still succeed.
     }
 
-    const { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource } = calculateUsdFeeIncome({
-      feesCollected0: pnl.feesCollected0,
-      feesCollected1: pnl.feesCollected1,
-      token0UsdPrice,
-      token1UsdPrice,
-    });
+    const { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource } =
+      calculateUsdFeeIncome({
+        feesCollected0: pnl.feesCollected0,
+        feesCollected1: pnl.feesCollected1,
+        token0UsdPrice,
+        token1UsdPrice,
+      });
 
     result.push({
       tokenId: pos.tokenId.toString(),

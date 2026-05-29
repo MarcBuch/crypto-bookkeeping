@@ -54,14 +54,12 @@ export interface DashboardPosition extends PositionView {
   pnl?: PnLView;
 }
 
-const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
-  "http://localhost:3000";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
 
 export class ApiError extends Error {
   constructor(
     message: string,
-    public readonly status?: number
+    public readonly status?: number,
   ) {
     super(message);
     this.name = "ApiError";

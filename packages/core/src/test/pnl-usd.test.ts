@@ -10,7 +10,7 @@ describe("calculateUsdFeeIncome", () => {
         feesCollected1: 2,
         token0UsdPrice: 10,
         token1UsdPrice: 0.5,
-      })
+      }),
     ).toEqual({
       feesCollected0Usd: 12.5,
       feesCollected1Usd: 1,
@@ -26,7 +26,7 @@ describe("calculateUsdFeeIncome", () => {
         feesCollected1: 4,
         token0UsdPrice: 2,
         token1UsdPrice: null,
-      })
+      }),
     ).toEqual({
       feesCollected0Usd: 6,
       feesCollected1Usd: null,
@@ -42,7 +42,7 @@ describe("calculateUsdFeeIncome", () => {
         feesCollected1: 4,
         token0UsdPrice: null,
         token1UsdPrice: 2.5,
-      })
+      }),
     ).toEqual({
       feesCollected0Usd: 0,
       feesCollected1Usd: 10,
@@ -58,7 +58,7 @@ describe("calculateUsdFeeIncome", () => {
         feesCollected1: 2,
         token0UsdPrice: null,
         token1UsdPrice: null,
-      })
+      }),
     ).toEqual({
       feesCollected0Usd: null,
       feesCollected1Usd: null,

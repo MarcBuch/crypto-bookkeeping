@@ -8,11 +8,9 @@ const fakeConfig: Config = {
   wallet: "0xdeadbeef" as `0x${string}`,
   contracts: {
     factory: "0x0000000000000000000000000000000000000001" as `0x${string}`,
-    positionManager:
-      "0x0000000000000000000000000000000000000002" as `0x${string}`,
+    positionManager: "0x0000000000000000000000000000000000000002" as `0x${string}`,
     quoter: "0x0000000000000000000000000000000000000003" as `0x${string}`,
-    swapRouter:
-      "0x0000000000000000000000000000000000000004" as `0x${string}`,
+    swapRouter: "0x0000000000000000000000000000000000000004" as `0x${string}`,
   },
 };
 
@@ -45,9 +43,7 @@ afterEach(() => {
   delete process.env.NODE_ENV;
 });
 
-async function withServer(
-  run: (server: FastifyInstance) => Promise<void>
-): Promise<void> {
+async function withServer(run: (server: FastifyInstance) => Promise<void>): Promise<void> {
   const server = await buildServer(fakeConfig);
   try {
     await server.ready();
@@ -67,9 +63,7 @@ describe("CORS", () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.headers["access-control-allow-origin"]).toBe(
-        "http://localhost:5173"
-      );
+      expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
     });
   });
 
@@ -88,9 +82,7 @@ describe("CORS", () => {
       });
 
       expect(res.statusCode).toBe(204);
-      expect(res.headers["access-control-allow-origin"]).toBe(
-        "http://localhost:5173"
-      );
+      expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
       expect(res.headers["access-control-allow-methods"]).toContain("GET");
       expect(res.headers["access-control-allow-headers"]).toBe("content-type");
     });
@@ -107,12 +99,8 @@ describe("CORS", () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.headers["access-control-allow-origin"]).toBe(
-        "http://localhost:5173"
-      );
-      expect(res.headers["access-control-allow-origin"]).not.toBe(
-        "http://evil.example"
-      );
+      expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+      expect(res.headers["access-control-allow-origin"]).not.toBe("http://evil.example");
     });
   });
 
@@ -142,9 +130,7 @@ describe("CORS", () => {
       });
 
       expect(res.statusCode).toBe(400);
-      expect(res.headers["access-control-allow-origin"]).toBe(
-        "http://localhost:5173"
-      );
+      expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
       expect(res.json() as unknown).toEqual({
         error: "tokenId must be a numeric string",
       });

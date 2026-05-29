@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "plugins": ["eslint", "typescript", "oxc", "unicorn", "import", "promise", "node"],
+  "env": {
+    "builtin": true,
+    "node": true
+  },
+  "globals": {
+    "Bun": "readonly"
+  },
+  "settings": {
+    "react": {
+      "version": "19.2.6"
+    }
+  },
+  "ignorePatterns": [
+    ".opencode/**",
+    ".worktrees/**",
+    "node_modules/**",
+    "dist/**",
+    "apps/*/dist/**",
+    "packages/*/dist/**",
+    "data/**",
+    "bun.lock"
+  ],
+  "overrides": [
+    {
+      "files": ["apps/web/**/*.{ts,tsx}"],
+      "plugins": ["eslint", "typescript", "oxc", "unicorn", "import", "promise", "react", "jsx-a11y"],
+      "env": {
+        "browser": true,
+        "builtin": true
+      },
+      "rules": {
+        "react/react-in-jsx-scope": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.{ts,tsx}", "**/src/test/**", "**/tests/**"],
+      "env": {
+        "builtin": true,
+        "node": true
+      },
+      "globals": {
+        "Bun": "readonly"
+      }
+    }
+  ]
+}

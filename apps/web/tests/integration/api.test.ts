@@ -83,7 +83,7 @@ const pnl: PnLView = {
 describe("API client", () => {
   it("propagates network failures when fetch rejects", async () => {
     globalThis.fetch = mock(() =>
-      Promise.reject(new TypeError("fetch failed"))
+      Promise.reject(new TypeError("fetch failed")),
     ) as unknown as typeof fetch;
 
     await expect(getPositions()).rejects.toThrow("fetch failed");
@@ -106,9 +106,7 @@ describe("API client", () => {
   });
 
   it("throws stable generic errors for non-JSON failures", async () => {
-    mockFetch(
-      () => new Response("bad gateway", { status: 502, statusText: "Bad Gateway" })
-    );
+    mockFetch(() => new Response("bad gateway", { status: 502, statusText: "Bad Gateway" }));
 
     await expect(getPositions()).rejects.toMatchObject({
       message: "API request failed with status 502",
@@ -120,17 +118,13 @@ describe("API client", () => {
     mockFetch(() => jsonResponse({ positions: null }));
 
     await expect(getPositions()).rejects.toBeInstanceOf(ApiError);
-    await expect(getPositions()).rejects.toThrow(
-      "API response did not include positions."
-    );
+    await expect(getPositions()).rejects.toThrow("API response did not include positions.");
   });
 
   it("throws when P&L response has malformed shape", async () => {
     mockFetch(() => jsonResponse({ data: [] }));
 
-    await expect(getPnL()).rejects.toThrow(
-      "API response did not include P&L positions."
-    );
+    await expect(getPnL()).rejects.toThrow("API response did not include P&L positions.");
   });
 
   it("merges positions and P&L by tokenId", async () => {
@@ -235,8 +229,6 @@ describe("API client", () => {
       return jsonResponse({ positions: [] });
     });
 
-    await expect(getDashboardPositions()).resolves.toEqual([
-      { ...position, pnl: undefined },
-    ]);
+    await expect(getDashboardPositions()).resolves.toEqual([{ ...position, pnl: undefined }]);
   });
 });

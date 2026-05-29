@@ -15,9 +15,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
       const { tokenId } = request.params;
 
       if (!isNumericString(tokenId)) {
-        return reply
-          .status(400)
-          .send({ error: "tokenId must be a numeric string" });
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
       const config = fastify.lpConfig;
@@ -29,6 +27,6 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       return { position };
-    }
+    },
   );
 }

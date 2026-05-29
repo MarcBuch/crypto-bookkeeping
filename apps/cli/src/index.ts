@@ -15,8 +15,6 @@ import {
   displayHistory,
   formatNumber,
   formatPrice,
-  formatPercent,
-  sqrtPriceX96ToPrice,
   type PositionDisplayData,
   type ILDisplayData,
   type SnapshotDisplayData,
@@ -28,7 +26,7 @@ const program = new Command();
 program
   .name("lp-tracker")
   .description(
-    "Track ProjectX concentrated liquidity positions on HyperEVM and calculate divergence loss"
+    "Track ProjectX concentrated liquidity positions on HyperEVM and calculate divergence loss",
   )
   .version("1.0.0")
   .option("--json", "Output results as JSON (for agent/programmatic use)");
@@ -76,9 +74,10 @@ program
       tickRange: `${pos.tickLower} / ${pos.tickUpper}`,
       priceRange: `${formatPrice(pos.priceLower)} - ${formatPrice(pos.priceUpper)}`,
       liquidity: pos.liquidity,
-      currentAmounts: pos.status === "active"
-        ? `${formatNumber(pos.currentAmount0)} ${pos.token0.symbol}\n${formatNumber(pos.currentAmount1)} ${pos.token1.symbol}`
-        : "0 (closed)",
+      currentAmounts:
+        pos.status === "active"
+          ? `${formatNumber(pos.currentAmount0)} ${pos.token0.symbol}\n${formatNumber(pos.currentAmount1)} ${pos.token1.symbol}`
+          : "0 (closed)",
       inRange: pos.inRange,
       status: pos.status,
     }));

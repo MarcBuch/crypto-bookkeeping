@@ -33,7 +33,7 @@ export function createClient(config: Config) {
     chain: hyperEvm,
     transport: http(config.rpc, {
       timeout: 30_000, // 30s — prevents hung requests stalling the process
-      retryCount: 0,   // retries handled by withRetry in rpc.ts
+      retryCount: 0, // retries handled by withRetry in rpc.ts
     }),
   });
 }

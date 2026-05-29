@@ -55,7 +55,7 @@ export function loadConfig(configPath?: string): Config {
     throw new Error(
       `Config file not found: ${path}\n` +
         `Set LP_TRACKER_CONFIG env var or place config.json in the working directory.\n` +
-        `Copy config.example.json to config.json and fill in your details.`
+        `Copy config.example.json to config.json and fill in your details.`,
     );
   }
 
@@ -94,17 +94,10 @@ function validateConfig(raw: unknown, path: string): void {
     throw new Error(`Config at ${path}: "contracts" must be an object`);
   }
   const contracts = cfg.contracts as Record<string, unknown>;
-  const requiredContracts = [
-    "factory",
-    "positionManager",
-    "quoter",
-    "swapRouter",
-  ] as const;
+  const requiredContracts = ["factory", "positionManager", "quoter", "swapRouter"] as const;
   for (const key of requiredContracts) {
     if (!contracts[key]) {
-      throw new Error(
-        `Config at ${path} is missing required contract address: "contracts.${key}"`
-      );
+      throw new Error(`Config at ${path} is missing required contract address: "contracts.${key}"`);
     }
   }
 }

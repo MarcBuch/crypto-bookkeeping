@@ -4,12 +4,12 @@ A monorepo for tracking concentrated liquidity (Uniswap V3-style) positions on [
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `packages/core` | Shared library — chain clients, math, DB, services |
-| `apps/cli` | CLI tool (all original commands) |
-| `apps/api` | Fastify REST API exposing LP position data |
-| `apps/web` | Vite React dashboard for LP positions, status, and P&L |
+| Package         | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `packages/core` | Shared library — chain clients, math, DB, services     |
+| `apps/cli`      | CLI tool (all original commands)                       |
+| `apps/api`      | Fastify REST API exposing LP position data             |
+| `apps/web`      | Vite React dashboard for LP positions, status, and P&L |
 
 ## Prerequisites
 
@@ -33,14 +33,14 @@ cp config.example.json config.json
 
 Edit `config.json`:
 
-| Field | Description |
-|-------|-------------|
-| `wallet` | Your wallet address to track |
-| `rpc` | HyperEVM RPC endpoint (default works out of the box) |
-| `chainId` | HyperEVM chain ID (999) |
-| `contracts` | ProjectX contract addresses — defaults are correct for mainnet |
-| `positions` | *(Optional)* Known open/close tx hashes per token ID for faster event lookups |
-| `pricing.coingeckoIds` | *(Optional)* CoinGecko token IDs for live USD pricing |
+| Field                  | Description                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `wallet`               | Your wallet address to track                                                  |
+| `rpc`                  | HyperEVM RPC endpoint (default works out of the box)                          |
+| `chainId`              | HyperEVM chain ID (999)                                                       |
+| `contracts`            | ProjectX contract addresses — defaults are correct for mainnet                |
+| `positions`            | _(Optional)_ Known open/close tx hashes per token ID for faster event lookups |
+| `pricing.coingeckoIds` | _(Optional)_ CoinGecko token IDs for live USD pricing                         |
 
 The `positions` map speeds up on-chain event lookups by narrowing the block range:
 
@@ -74,11 +74,13 @@ Pricing depends on CoinGecko's live simple-price API. P&L output includes USD fe
 > **Note:** `config.json` is gitignored and will never be committed.
 
 Config resolution order (for both CLI and API):
+
 1. `LP_TRACKER_CONFIG` env var (absolute or relative to cwd)
 2. `config.json` in the current working directory
 3. `config.json` at the repo root (development fallback)
 
 Database path resolution:
+
 1. `LP_TRACKER_DATA_DIR` env var → `<dir>/lp-tracker.db`
 2. `data/` in the current working directory
 3. `data/lp-tracker.db` at the repo root (development fallback)
@@ -175,28 +177,30 @@ PORT=8080 bun run start
 
 ### REST Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/positions` | All LP positions |
-| `GET` | `/positions/:tokenId` | Single position by token ID |
-| `GET` | `/pnl` | P&L for all positions |
-| `GET` | `/positions/:tokenId/pnl` | P&L for a specific position |
-| `GET` | `/il` | Divergence loss for all positions |
-| `GET` | `/positions/:tokenId/il` | Divergence loss for a specific position |
-| `GET` | `/positions/:tokenId/history` | Historical snapshots (`?limit=20`) |
-| `GET` | `/positions/:tokenId/snapshots` | All recent snapshots (up to 200) |
+| Method | Path                            | Description                             |
+| ------ | ------------------------------- | --------------------------------------- |
+| `GET`  | `/health`                       | Health check                            |
+| `GET`  | `/positions`                    | All LP positions                        |
+| `GET`  | `/positions/:tokenId`           | Single position by token ID             |
+| `GET`  | `/pnl`                          | P&L for all positions                   |
+| `GET`  | `/positions/:tokenId/pnl`       | P&L for a specific position             |
+| `GET`  | `/il`                           | Divergence loss for all positions       |
+| `GET`  | `/positions/:tokenId/il`        | Divergence loss for a specific position |
+| `GET`  | `/positions/:tokenId/history`   | Historical snapshots (`?limit=20`)      |
+| `GET`  | `/positions/:tokenId/snapshots` | All recent snapshots (up to 200)        |
 
 ### Response format
 
 Success responses follow the shape of the corresponding CLI `--json` output, including best-effort USD fee fields such as `feesValueUsd`, per-token USD fee values, token USD prices, and `usdPriceSource` when pricing is available.
 
 Error responses:
+
 ```json
 { "error": "<message>" }
 ```
 
 HTTP status codes:
+
 - `400` — invalid parameter (non-numeric tokenId, bad limit)
 - `404` — position not found or unknown route
 - `503` — RPC rate limited (retry after a few seconds)
@@ -204,10 +208,10 @@ HTTP status codes:
 
 ### Environment variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Port to listen on |
-| `LP_TRACKER_CONFIG` | auto-resolved | Path to config.json |
+| Variable              | Default       | Description                 |
+| --------------------- | ------------- | --------------------------- |
+| `PORT`                | `3000`        | Port to listen on           |
+| `LP_TRACKER_CONFIG`   | auto-resolved | Path to config.json         |
 | `LP_TRACKER_DATA_DIR` | auto-resolved | Directory for lp-tracker.db |
 
 ---
@@ -234,8 +238,8 @@ bun run api:dev
 
 ### Environment variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable            | Default                 | Description                  |
+| ------------------- | ----------------------- | ---------------------------- |
 | `VITE_API_BASE_URL` | `http://localhost:3000` | Base URL for the Fastify API |
 
 ### Build
@@ -249,11 +253,11 @@ bun run web:preview
 
 Web tests live outside `src` in `apps/web/tests` and are grouped by type:
 
-| Folder | Purpose |
-|--------|---------|
-| `tests/unit` | Pure component or function tests with no app shell or API boundary. |
-| `tests/integration` | Tests that cross module boundaries, such as API client behavior or router composition. |
-| `tests/smoke` | High-level checks that the routed app shell renders critical loading, error, and empty states. |
+| Folder              | Purpose                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `tests/unit`        | Pure component or function tests with no app shell or API boundary.                            |
+| `tests/integration` | Tests that cross module boundaries, such as API client behavior or router composition.         |
+| `tests/smoke`       | High-level checks that the routed app shell renders critical loading, error, and empty states. |
 
 Run the web tests from the repo root with:
 
@@ -280,6 +284,18 @@ Snapshots and cached entry data are stored in `data/lp-tracker.db` (SQLite, giti
 ## Testing
 
 ```bash
+# Lint, format check, and TypeScript checks
+bun run check
+
+# Fast lint only
+bun run lint
+
+# Check formatting without writing files
+bun run format:check
+
+# Format the repo
+bun run format
+
 # Core package tests (unit + adversarial)
 cd packages/core && bun test src/test
 

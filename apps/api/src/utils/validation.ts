@@ -9,17 +9,11 @@ export class ValidationError extends Error {
   }
 }
 
-export function parseLimit(
-  raw: string | undefined,
-  defaultVal = 20,
-  max = 200
-): number {
+export function parseLimit(raw: string | undefined, defaultVal = 20, max = 200): number {
   if (raw === undefined) return defaultVal;
   const n = parseInt(raw, 10);
   if (isNaN(n) || n < 1) {
-    throw new ValidationError(
-      `limit must be a positive integer, got: ${raw}`
-    );
+    throw new ValidationError(`limit must be a positive integer, got: ${raw}`);
   }
   return Math.min(n, max);
 }

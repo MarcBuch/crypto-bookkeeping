@@ -4,7 +4,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 import { App } from "../../src/App";
 import { AppProviders } from "../../src/app-providers";
-import { queryKeys } from "../../src/queries";
+import { queryKeys } from "../../src/hooks/useDashboardPositions";
 import { createAppRouter } from "../../src/router";
 
 function renderAppWithQueryClient(queryClient: QueryClient): string {

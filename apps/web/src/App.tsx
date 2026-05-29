@@ -1,5 +1,5 @@
 import type { DashboardPosition } from "./api";
-import { useDashboardPositions } from "./queries";
+import { useDashboardPositions } from "./hooks/useDashboardPositions";
 
 export function App() {
   const { data: positions, error, isLoading, isFetching } = useDashboardPositions();

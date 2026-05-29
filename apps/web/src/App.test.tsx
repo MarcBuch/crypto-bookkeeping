@@ -39,7 +39,13 @@ const activePosition: DashboardPosition = {
     exitAmount1: 120,
     feesCollected0: 0.1,
     feesCollected1: 2,
+    feesCollected0Usd: 1.23,
+    feesCollected1Usd: 2,
     feesValueInToken1: 12.345,
+    feesValueUsd: 3.23,
+    token0UsdPrice: 12.3,
+    token1UsdPrice: 1,
+    usdPriceSource: "coingecko",
     entryValueInToken1: 100,
     exitValueInToken1: 125,
     holdValueInToken1: 120,
@@ -66,6 +72,26 @@ const closedPosition: DashboardPosition = {
     netVsHodlPercent: -0.04,
   },
 };
+
+function withoutUsdFee(
+  position: DashboardPosition,
+  tokenId: string,
+  feesValueUsd?: number | null
+): DashboardPosition {
+  const pnl = { ...position.pnl!, tokenId };
+
+  if (arguments.length === 3) {
+    pnl.feesValueUsd = feesValueUsd;
+  } else {
+    delete pnl.feesValueUsd;
+  }
+
+  return {
+    ...position,
+    tokenId,
+    pnl,
+  };
+}
 
 describe("dashboard rendering", () => {
   it("renders loading state", () => {
@@ -111,5 +137,84 @@ describe("dashboard rendering", () => {
     expect(html).toContain("25.5%");
     expect(html).toContain("text-neutral-950");
     expect(html).toContain("text-neutral-500");
+  });
+
+  it("prioritizes USD fee income when values are available", () => {
+    const html = renderToStaticMarkup(
+      <Dashboard positions={[activePosition, closedPosition]} />
+    );
+
+    expect(html).toContain("Fee Income USD");
+    expect(html).toContain("$6.46");
+    expect(html).toContain("Net P&amp;L 15.5 USDC");
+    expect(html).toContain("Fees 12.35 USDC");
+  });
+
+  it("sums only numeric USD fees across mixed positions", () => {
+    const positionWithoutUsdFees = withoutUsdFee(activePosition, "789", null);
+
+    const html = renderToStaticMarkup(
+      <Dashboard positions={[activePosition, positionWithoutUsdFees]} />
+    );
+
+    expect(html).toMatch(/Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
+    expect(html).toContain("USD unavailable");
+    expect(html).not.toContain("$0.00");
+    expect(html).toContain("Net P&amp;L 51 USDC");
+    expect(html).toContain("active");
+    expect(html).toContain("in range");
+    expect(html).toContain("1 - 2");
+  });
+
+  it("shows unavailable portfolio USD fees when every position lacks USD fees", () => {
+    const positionWithNullUsdFees = withoutUsdFee(activePosition, "789", null);
+    const positionWithMissingUsdFees = withoutUsdFee(closedPosition, "999");
+
+    const html = renderToStaticMarkup(
+      <Dashboard positions={[positionWithNullUsdFees, positionWithMissingUsdFees]} />
+    );
+
+    expect(html).toMatch(/Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/);
+    expect(html).not.toContain("$0.00");
+    expect(html).toContain("Net P&amp;L 15.5 USDC");
+    expect(html).toContain("closed");
+    expect(html).toContain("out of range");
+  });
+
+  it("renders ledger USD fee as primary and token1 fees as secondary context", () => {
+    const html = renderToStaticMarkup(<Dashboard positions={[activePosition]} />);
+
+    expect(html).toContain("<th class=\"px-5 py-3\">Fees</th>");
+    expect(html).toMatch(/<td class="[^"]*"><div><p class="font-bold[^"]*">\$3\.23<\/p><p class="mt-1 text-xs text-neutral-500">12\.35 USDC<\/p><\/div><\/td>/);
+    expect(html).toContain("Fees 12.35 USDC");
+  });
+
+  it("shows USD unavailable instead of zero for missing USD fees", () => {
+    const positionWithoutUsdFees: DashboardPosition = {
+      ...activePosition,
+      pnl: {
+        ...activePosition.pnl!,
+        feesValueUsd: null,
+      },
+    };
+
+    const html = renderToStaticMarkup(<Dashboard positions={[positionWithoutUsdFees]} />);
+
+    expect(html).toContain("USD unavailable");
+    expect(html).not.toContain("$0.00");
+  });
+
+  it("renders numeric zero USD fees as dollars", () => {
+    const positionWithZeroUsdFees: DashboardPosition = {
+      ...activePosition,
+      pnl: {
+        ...activePosition.pnl!,
+        feesValueUsd: 0,
+      },
+    };
+
+    const html = renderToStaticMarkup(<Dashboard positions={[positionWithZeroUsdFees]} />);
+
+    expect(html).toContain("$0.00");
   });
 });

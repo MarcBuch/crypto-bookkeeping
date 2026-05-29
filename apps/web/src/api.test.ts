@@ -61,7 +61,13 @@ const pnl: PnLView = {
   exitAmount1: 1.5,
   feesCollected0: 0.01,
   feesCollected1: 0.02,
+  feesCollected0Usd: 0.03,
+  feesCollected1Usd: 0.02,
   feesValueInToken1: 0.03,
+  feesValueUsd: 0.05,
+  token0UsdPrice: 3,
+  token1UsdPrice: 1,
+  usdPriceSource: "coingecko",
   entryValueInToken1: 2,
   exitValueInToken1: 2.25,
   holdValueInToken1: 2.5,
@@ -136,9 +142,88 @@ describe("API client", () => {
       return jsonResponse({ positions: [pnl] });
     });
 
-    await expect(getDashboardPositions()).resolves.toEqual([
-      { ...position, pnl },
-    ]);
+    const dashboardPositions = await getDashboardPositions();
+    expect(dashboardPositions).toEqual([{ ...position, pnl }]);
+    expect(dashboardPositions[0]?.pnl?.feesValueUsd).toBe(0.05);
+    expect(dashboardPositions[0]?.pnl?.usdPriceSource).toBe("coingecko");
+  });
+
+  it("preserves complete USD fee fields through dashboard merge", async () => {
+    mockFetch((url) => {
+      if (url.endsWith("/positions")) {
+        return jsonResponse({ positions: [position] });
+      }
+
+      return jsonResponse({ positions: [pnl] });
+    });
+
+    const dashboardPositions = await getDashboardPositions();
+
+    expect(dashboardPositions[0]?.pnl).toMatchObject({
+      feesCollected0Usd: 0.03,
+      feesCollected1Usd: 0.02,
+      feesValueUsd: 0.05,
+      token0UsdPrice: 3,
+      token1UsdPrice: 1,
+      usdPriceSource: "coingecko",
+    });
+  });
+
+  it("preserves null USD fee fields through dashboard merge", async () => {
+    const nullUsdPnl: PnLView = {
+      ...pnl,
+      feesCollected0Usd: null,
+      feesCollected1Usd: null,
+      feesValueUsd: null,
+      token0UsdPrice: null,
+      token1UsdPrice: null,
+      usdPriceSource: null,
+    };
+
+    mockFetch((url) => {
+      if (url.endsWith("/positions")) {
+        return jsonResponse({ positions: [position] });
+      }
+
+      return jsonResponse({ positions: [nullUsdPnl] });
+    });
+
+    const dashboardPositions = await getDashboardPositions();
+
+    expect(dashboardPositions[0]?.pnl).toMatchObject({
+      feesCollected0Usd: null,
+      feesCollected1Usd: null,
+      feesValueUsd: null,
+      token0UsdPrice: null,
+      token1UsdPrice: null,
+      usdPriceSource: null,
+    });
+  });
+
+  it("keeps older P&L responses with missing USD fee fields stable", async () => {
+    const {
+      feesCollected0Usd: _feesCollected0Usd,
+      feesCollected1Usd: _feesCollected1Usd,
+      feesValueUsd: _feesValueUsd,
+      token0UsdPrice: _token0UsdPrice,
+      token1UsdPrice: _token1UsdPrice,
+      usdPriceSource: _usdPriceSource,
+      ...legacyPnl
+    } = pnl;
+
+    mockFetch((url) => {
+      if (url.endsWith("/positions")) {
+        return jsonResponse({ positions: [position] });
+      }
+
+      return jsonResponse({ positions: [legacyPnl] });
+    });
+
+    const dashboardPositions = await getDashboardPositions();
+
+    expect(dashboardPositions).toEqual([{ ...position, pnl: legacyPnl }]);
+    expect(dashboardPositions[0]?.pnl?.feesValueUsd).toBeUndefined();
+    expect(dashboardPositions[0]?.pnl?.usdPriceSource).toBeUndefined();
   });
 
   it("keeps positions when no matching P&L exists", async () => {

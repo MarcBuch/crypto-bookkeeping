@@ -31,7 +31,13 @@ export interface PnLView {
   exitAmount1: number;
   feesCollected0: number;
   feesCollected1: number;
+  feesCollected0Usd?: number | null;
+  feesCollected1Usd?: number | null;
   feesValueInToken1: number;
+  feesValueUsd?: number | null;
+  token0UsdPrice?: number | null;
+  token1UsdPrice?: number | null;
+  usdPriceSource?: "coingecko" | null;
   entryValueInToken1: number;
   exitValueInToken1: number;
   holdValueInToken1: number;

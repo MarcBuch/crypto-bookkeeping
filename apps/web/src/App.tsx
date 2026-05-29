@@ -65,9 +65,13 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
       acc.inRange += position.inRange ? 1 : 0;
       acc.pnl += position.pnl?.absolutePnlInToken1 ?? 0;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
+      if (typeof position.pnl?.feesValueUsd === "number") {
+        acc.feesUsd += position.pnl.feesValueUsd;
+        acc.feesUsdCount += 1;
+      }
       return acc;
     },
-    { active: 0, inRange: 0, pnl: 0, fees: 0 }
+    { active: 0, inRange: 0, pnl: 0, fees: 0, feesUsd: 0, feesUsdCount: 0 }
   );
 
   const token1Symbol = positions.find((p) => p.pnl)?.pnl?.token1Symbol ?? "token1";
@@ -81,10 +85,10 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
         <MetricCard label="Active Capital" value={totals.active.toString()} detail={formatPercent(activePercent)} />
         <MetricCard label="Range Compliance" value={`${totals.inRange}/${positions.length}`} detail={formatPercent(inRangePercent)} />
         <MetricCard
-          label={`Net P&L ${token1Symbol}`}
-          value={formatNumber(totals.pnl)}
-          detail={`Fees ${formatNumber(totals.fees)}`}
-          tone={totals.pnl}
+          label="Fee Income USD"
+          value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
+          detail={`Net P&L ${formatNumber(totals.pnl)} ${token1Symbol}`}
+          tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
         />
       </section>
 
@@ -215,6 +219,12 @@ function PositionCard({ position }: { position: DashboardPosition }) {
         {pnl ? (
           <div className="grid gap-3 sm:grid-cols-3">
             <DataPoint
+              label="Fee Income USD"
+              value={formatUsdFeeValue(pnl.feesValueUsd)}
+              detail={`Fees ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}`}
+              tone={usdFeeValue(pnl.feesValueUsd)}
+            />
+            <DataPoint
               label="Absolute P&L"
               value={`${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`}
               tone={pnl.absolutePnlInToken1}
@@ -261,7 +271,16 @@ function PositionRow({ position }: { position: DashboardPosition }) {
         {pnl ? `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}` : "n/a"}
       </td>
       <td className="whitespace-nowrap px-5 py-4 font-mono text-neutral-600">
-        {pnl ? `${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
+        {pnl ? (
+          <div>
+            <p className={`font-bold ${toneClass(usdFeeValue(pnl.feesValueUsd))}`}>{formatUsdFeeValue(pnl.feesValueUsd)}</p>
+            <p className="mt-1 text-xs text-neutral-500">
+              {formatNumber(pnl.feesValueInToken1)} {pnl.token1Symbol}
+            </p>
+          </div>
+        ) : (
+          "n/a"
+        )}
       </td>
     </tr>
   );
@@ -291,16 +310,19 @@ function RangeBadge({ inRange }: { inRange: boolean }) {
 function DataPoint({
   label,
   value,
+  detail,
   tone,
 }: {
   label: string;
   value: string;
+  detail?: string;
   tone?: number;
 }) {
   return (
     <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3">
       <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-neutral-500">{label}</p>
       <p className={`mt-2 break-words font-mono text-sm font-semibold ${toneClass(tone)}`}>{value}</p>
+      {detail ? <p className="mt-1 text-xs font-medium text-neutral-500">{detail}</p> : null}
     </div>
   );
 }
@@ -339,6 +361,22 @@ export function EmptyState() {
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: Math.abs(value) < 1 ? 6 : 2,
+  }).format(value);
+}
+
+function usdFeeValue(value: number | null | undefined): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function formatUsdFeeValue(value: number | null | undefined): string {
+  return typeof value === "number" ? formatUsd(value) : "USD unavailable";
+}
+
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: Math.abs(value) < 1 && value !== 0 ? 6 : 2,
   }).format(value);
 }
 

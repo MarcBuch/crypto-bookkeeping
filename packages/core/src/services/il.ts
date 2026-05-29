@@ -1,8 +1,9 @@
-import type { Config } from "../config.js";
 import { createClient } from "../chain/client.js";
-import { getAllPositions } from "../chain/positions.js";
-import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
+import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
+import { getAllPositions } from "../chain/positions.js";
+import type { Config } from "../config.js";
+import { upsertPosition, getPosition } from "../db/store.js";
 import {
   calculateDivergenceLoss,
   calculateFeeGrowthInside,
@@ -11,7 +12,6 @@ import {
   getTokenAmounts,
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
-import { upsertPosition, getPosition } from "../db/store.js";
 import { NotFoundError } from "./errors.js";
 
 export interface ILView {
@@ -37,11 +37,7 @@ export interface ILView {
 export async function getILView(config: Config, tokenId?: string): Promise<ILView[]> {
   const client = createClient(config);
 
-  const positions = await getAllPositions(
-    client,
-    config.contracts.positionManager,
-    config.wallet
-  );
+  const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
   if (positions.length === 0) {
     return [];
@@ -68,7 +64,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
       config.contracts.factory,
       pos.token0,
       pos.token1,
-      pos.fee
+      pos.fee,
     );
 
     const poolState = await getPoolState(client, poolAddress);
@@ -92,7 +88,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         config.contracts.positionManager,
         pos.tokenId,
         config.wallet,
-        posConfigIL?.openTx
+        posConfigIL?.openTx,
       );
 
       if (openEvent) {
@@ -104,7 +100,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
           openEvent.amount1,
           openEvent.liquidity,
           pos.tickLower,
-          pos.tickUpper
+          pos.tickUpper,
         );
 
         // Store for future use
@@ -141,31 +137,25 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         pos.liquidity,
         poolState.sqrtPriceX96,
         pos.tickLower,
-        pos.tickUpper
+        pos.tickUpper,
       );
       exitAmount0 = currentAmounts.amount0;
       exitAmount1 = currentAmounts.amount1;
     } else {
       // Closed: find close event — start from entry_block to avoid scanning from block 0
-      const entryBlockIL = storedPos?.entry_block
-        ? BigInt(storedPos.entry_block)
-        : undefined;
+      const entryBlockIL = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
       const closeEvent = await findCloseEvent(
         client,
         config.contracts.positionManager,
         pos.tokenId,
         config.wallet,
         posConfigIL?.closeTx,
-        entryBlockIL
+        entryBlockIL,
       );
       if (closeEvent) {
         exitAmount0 = closeEvent.amount0;
         exitAmount1 = closeEvent.amount1;
-        const closePrice = await getPoolPriceAtBlock(
-          client,
-          poolAddress,
-          closeEvent.blockNumber
-        );
+        const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
         if (closePrice) currentSqrtPriceX96 = closePrice.sqrtPriceX96;
       }
     }
@@ -178,11 +168,15 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
       entrySqrtPriceX96,
       currentSqrtPriceX96,
       token0Info.decimals,
-      token1Info.decimals
+      token1Info.decimals,
     );
 
     // For closed positions, override with actual amounts
-    const exitPrice = sqrtPriceX96ToPrice(currentSqrtPriceX96, token0Info.decimals, token1Info.decimals);
+    const exitPrice = sqrtPriceX96ToPrice(
+      currentSqrtPriceX96,
+      token0Info.decimals,
+      token1Info.decimals,
+    );
     const entryAmt0H = Number(entryAmount0) / 10 ** token0Info.decimals;
     const entryAmt1H = Number(entryAmount1) / 10 ** token1Info.decimals;
     const exitAmt0H = Number(exitAmount0) / 10 ** token0Info.decimals;
@@ -212,7 +206,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
           tickLowerData.feeGrowthOutside0X128,
           tickLowerData.feeGrowthOutside1X128,
           tickUpperData.feeGrowthOutside0X128,
-          tickUpperData.feeGrowthOutside1X128
+          tickUpperData.feeGrowthOutside1X128,
         );
 
         const feeResult = calculateUnclaimedFees(
@@ -224,12 +218,12 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
           pos.tokensOwed0,
           pos.tokensOwed1,
           token0Info.decimals,
-          token1Info.decimals
+          token1Info.decimals,
         );
 
         fees0 = feeResult.fees0;
         fees1 = feeResult.fees1;
-      } catch (e) {
+      } catch {
         // Fees calculation may fail — leave as 0
       }
     }
@@ -237,12 +231,8 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
     const feesValue = fees0 * exitPrice + fees1;
     const netVsHodl = valueHold > 0 ? (valueLp + feesValue - valueHold) / valueHold : 0;
 
-    const priceLower =
-      1.0001 ** pos.tickLower *
-      10 ** (token0Info.decimals - token1Info.decimals);
-    const priceUpper =
-      1.0001 ** pos.tickUpper *
-      10 ** (token0Info.decimals - token1Info.decimals);
+    const priceLower = 1.0001 ** pos.tickLower * 10 ** (token0Info.decimals - token1Info.decimals);
+    const priceUpper = 1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
 
     result.push({
       tokenId: pos.tokenId.toString(),

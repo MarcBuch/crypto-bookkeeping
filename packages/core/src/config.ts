@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
+
 import type { Address } from "viem";
 
 export interface PositionConfig {
@@ -55,7 +56,7 @@ export function loadConfig(configPath?: string): Config {
     throw new Error(
       `Config file not found: ${path}\n` +
         `Set LP_TRACKER_CONFIG env var or place config.json in the working directory.\n` +
-        `Copy config.example.json to config.json and fill in your details.`
+        `Copy config.example.json to config.json and fill in your details.`,
     );
   }
 
@@ -63,14 +64,14 @@ export function loadConfig(configPath?: string): Config {
   try {
     raw = readFileSync(path, "utf-8");
   } catch (err: any) {
-    throw new Error(`Failed to read config file at ${path}: ${err.message}`);
+    throw new Error(`Failed to read config file at ${path}: ${err.message}`, { cause: err });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err: any) {
-    throw new Error(`Config file at ${path} is not valid JSON: ${err.message}`);
+    throw new Error(`Config file at ${path} is not valid JSON: ${err.message}`, { cause: err });
   }
 
   validateConfig(parsed, path);
@@ -94,17 +95,10 @@ function validateConfig(raw: unknown, path: string): void {
     throw new Error(`Config at ${path}: "contracts" must be an object`);
   }
   const contracts = cfg.contracts as Record<string, unknown>;
-  const requiredContracts = [
-    "factory",
-    "positionManager",
-    "quoter",
-    "swapRouter",
-  ] as const;
+  const requiredContracts = ["factory", "positionManager", "quoter", "swapRouter"] as const;
   for (const key of requiredContracts) {
     if (!contracts[key]) {
-      throw new Error(
-        `Config at ${path} is missing required contract address: "contracts.${key}"`
-      );
+      throw new Error(`Config at ${path} is missing required contract address: "contracts.${key}"`);
     }
   }
 }

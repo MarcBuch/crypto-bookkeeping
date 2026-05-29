@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
+
 import { loadConfig, resolveConfigPath } from "../config.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-config-tests";
@@ -68,9 +69,7 @@ describe("loadConfig — adversarial tests", () => {
 
   // ── Missing file ──────────────────────────────────────────────────────────
   it("throws a clear error when config file does not exist", () => {
-    expect(() => loadConfig(tmpFile("does-not-exist.json"))).toThrow(
-      /Config file not found/
-    );
+    expect(() => loadConfig(tmpFile("does-not-exist.json"))).toThrow(/Config file not found/);
   });
 
   it("throws when LP_TRACKER_CONFIG points to a non-existent file", () => {
@@ -101,25 +100,29 @@ describe("loadConfig — adversarial tests", () => {
 
   // ── Missing required top-level fields ─────────────────────────────────────
   it("throws when 'rpc' is missing", () => {
-    const { rpc, ...rest } = JSON.parse(validConfigJson());
+    const rest = JSON.parse(validConfigJson());
+    delete rest.rpc;
     const path = writeConfig("no-rpc.json", JSON.stringify(rest));
     expect(() => loadConfig(path)).toThrow(/"rpc"/);
   });
 
   it("throws when 'wallet' is missing", () => {
-    const { wallet, ...rest } = JSON.parse(validConfigJson());
+    const rest = JSON.parse(validConfigJson());
+    delete rest.wallet;
     const path = writeConfig("no-wallet.json", JSON.stringify(rest));
     expect(() => loadConfig(path)).toThrow(/"wallet"/);
   });
 
   it("throws when 'contracts' is missing", () => {
-    const { contracts, ...rest } = JSON.parse(validConfigJson());
+    const rest = JSON.parse(validConfigJson());
+    delete rest.contracts;
     const path = writeConfig("no-contracts.json", JSON.stringify(rest));
     expect(() => loadConfig(path)).toThrow(/"contracts"/);
   });
 
   it("throws when 'chainId' is missing", () => {
-    const { chainId, ...rest } = JSON.parse(validConfigJson());
+    const rest = JSON.parse(validConfigJson());
+    delete rest.chainId;
     const path = writeConfig("no-chainid.json", JSON.stringify(rest));
     expect(() => loadConfig(path)).toThrow(/"chainId"/);
   });

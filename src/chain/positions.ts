@@ -1,6 +1,7 @@
 import type { Address } from "viem";
-import type { Client } from "./client";
+
 import { positionManagerAbi } from "./abis";
+import type { Client } from "./client";
 import { withRetry } from "./rpc";
 
 export interface PositionData {
@@ -22,7 +23,7 @@ export interface PositionData {
 export async function getPositionCount(
   client: Client,
   positionManager: Address,
-  wallet: Address
+  wallet: Address,
 ): Promise<number> {
   const balance = await withRetry(() =>
     client.readContract({
@@ -30,7 +31,7 @@ export async function getPositionCount(
       abi: positionManagerAbi,
       functionName: "balanceOf",
       args: [wallet],
-    })
+    }),
   );
   return Number(balance);
 }
@@ -39,7 +40,7 @@ export async function getTokenId(
   client: Client,
   positionManager: Address,
   wallet: Address,
-  index: number
+  index: number,
 ): Promise<bigint> {
   return withRetry(() =>
     client.readContract({
@@ -47,14 +48,14 @@ export async function getTokenId(
       abi: positionManagerAbi,
       functionName: "tokenOfOwnerByIndex",
       args: [wallet, BigInt(index)],
-    })
+    }),
   );
 }
 
 export async function getPositionData(
   client: Client,
   positionManager: Address,
-  tokenId: bigint
+  tokenId: bigint,
 ): Promise<PositionData> {
   const result = await withRetry(() =>
     client.readContract({
@@ -62,7 +63,7 @@ export async function getPositionData(
       abi: positionManagerAbi,
       functionName: "positions",
       args: [tokenId],
-    })
+    }),
   );
 
   return {
@@ -85,7 +86,7 @@ export async function getPositionData(
 export async function getAllPositions(
   client: Client,
   positionManager: Address,
-  wallet: Address
+  wallet: Address,
 ): Promise<PositionData[]> {
   const count = await getPositionCount(client, positionManager, wallet);
   console.log(`Found ${count} position(s) for wallet ${wallet}`);
@@ -93,10 +94,10 @@ export async function getAllPositions(
   // Fetch all tokenIds in parallel, then all position data in parallel
   const indices = Array.from({ length: count }, (_, i) => i);
   const tokenIds = await Promise.all(
-    indices.map((i) => getTokenId(client, positionManager, wallet, i))
+    indices.map((i) => getTokenId(client, positionManager, wallet, i)),
   );
   const positions = await Promise.all(
-    tokenIds.map((tokenId) => getPositionData(client, positionManager, tokenId))
+    tokenIds.map((tokenId) => getPositionData(client, positionManager, tokenId)),
   );
 
   return positions;

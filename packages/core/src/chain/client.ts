@@ -1,4 +1,5 @@
 import { createPublicClient, http, defineChain } from "viem";
+
 import type { Config } from "../config";
 
 // Both the Hyperliquid public RPC and Envio HyperRPC use certificates that
@@ -33,7 +34,7 @@ export function createClient(config: Config) {
     chain: hyperEvm,
     transport: http(config.rpc, {
       timeout: 30_000, // 30s — prevents hung requests stalling the process
-      retryCount: 0,   // retries handled by withRetry in rpc.ts
+      retryCount: 0, // retries handled by withRetry in rpc.ts
     }),
   });
 }

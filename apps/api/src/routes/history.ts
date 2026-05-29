@@ -1,5 +1,6 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getHistoryView, NotFoundError } from "@lp-tracker/core";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+
 import { isNumericString, parseLimit, ValidationError } from "../utils/validation.js";
 
 export async function historyRoutes(fastify: FastifyInstance): Promise<void> {
@@ -10,15 +11,13 @@ export async function historyRoutes(fastify: FastifyInstance): Promise<void> {
         Params: { tokenId: string };
         Querystring: { limit?: string };
       }>,
-      reply: FastifyReply
+      reply: FastifyReply,
     ) => {
       const { tokenId } = request.params;
       const { limit: limitRaw } = request.query;
 
       if (!isNumericString(tokenId)) {
-        return reply
-          .status(400)
-          .send({ error: "tokenId must be a numeric string" });
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
       let limit: number;
@@ -40,21 +39,16 @@ export async function historyRoutes(fastify: FastifyInstance): Promise<void> {
         }
         throw err;
       }
-    }
+    },
   );
 
   fastify.get<{ Params: { tokenId: string } }>(
     "/positions/:tokenId/snapshots",
-    async (
-      request: FastifyRequest<{ Params: { tokenId: string } }>,
-      reply: FastifyReply
-    ) => {
+    async (request: FastifyRequest<{ Params: { tokenId: string } }>, reply: FastifyReply) => {
       const { tokenId } = request.params;
 
       if (!isNumericString(tokenId)) {
-        return reply
-          .status(400)
-          .send({ error: "tokenId must be a numeric string" });
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
       try {
@@ -66,6 +60,6 @@ export async function historyRoutes(fastify: FastifyInstance): Promise<void> {
         }
         throw err;
       }
-    }
+    },
   );
 }

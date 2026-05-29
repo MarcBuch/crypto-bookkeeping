@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+
 import {
   calculateDivergenceLoss,
   sqrtPriceX96ToPrice,
@@ -41,13 +42,13 @@ describe("calculateDivergenceLoss — holdValue = 0 edge case", () => {
     // Force valueHold = 0: set both entry amounts to 0 by using 0 liquidity.
     // With liquidity = 0, all getTokenAmounts calls return {amount0: 0n, amount1: 0n}.
     const result = calculateDivergenceLoss(
-      0n,         // liquidity = 0 → both entry & current amounts are 0
+      0n, // liquidity = 0 → both entry & current amounts are 0
       TICK_LOWER,
       TICK_UPPER,
       SQRT_PRICE_1_0,
       SQRT_PRICE_2_0,
       18,
-      18
+      18,
     );
 
     expect(result.divergenceLoss).toBe(0);
@@ -57,7 +58,13 @@ describe("calculateDivergenceLoss — holdValue = 0 edge case", () => {
 
   it("divergenceLossPercent string is parseable even with 0 liquidity", () => {
     const result = calculateDivergenceLoss(
-      0n, TICK_LOWER, TICK_UPPER, SQRT_PRICE_1_0, SQRT_PRICE_2_0, 18, 18
+      0n,
+      TICK_LOWER,
+      TICK_UPPER,
+      SQRT_PRICE_1_0,
+      SQRT_PRICE_2_0,
+      18,
+      18,
     );
     const pct = parseFloat(result.divergenceLossPercent);
     expect(isNaN(pct)).toBe(false);
@@ -67,7 +74,13 @@ describe("calculateDivergenceLoss — holdValue = 0 edge case", () => {
   it("valueHold guard: formula (valueLp - valueHold) / valueHold is not evaluated when valueHold = 0", () => {
     // Direct code path: when valueHold = 0 the guard returns 0, not a division
     const result = calculateDivergenceLoss(
-      0n, TICK_LOWER, TICK_UPPER, SQRT_PRICE_1_0, SQRT_PRICE_1_0, 18, 18
+      0n,
+      TICK_LOWER,
+      TICK_UPPER,
+      SQRT_PRICE_1_0,
+      SQRT_PRICE_1_0,
+      18,
+      18,
     );
     expect(result.divergenceLoss).not.toBeNaN();
     expect(result.divergenceLoss).not.toBe(Infinity);
@@ -189,9 +202,7 @@ describe("tickToSqrtPrice / tickToPrice — extreme tick values", () => {
   });
 
   it("getTokenAmounts does not throw at extreme tick values", () => {
-    expect(() =>
-      getTokenAmounts(LIQUIDITY, SQRT_PRICE_1_0, MIN_TICK, MAX_TICK)
-    ).not.toThrow();
+    expect(() => getTokenAmounts(LIQUIDITY, SQRT_PRICE_1_0, MIN_TICK, MAX_TICK)).not.toThrow();
   });
 });
 
@@ -312,7 +323,7 @@ describe("calculateFullPnL — all-zero raw amounts", () => {
         liquidity: 1n,
         decimals0: 18,
         decimals1: 18,
-      })
+      }),
     ).not.toThrow();
   });
 
@@ -372,11 +383,25 @@ describe("calculateFullPnL — all-zero raw amounts", () => {
     });
 
     const numericFields: (keyof typeof result)[] = [
-      "entryAmount0", "entryAmount1", "exitAmount0", "exitAmount1",
-      "entryPrice", "exitPrice", "entryValue", "exitValue", "holdValue",
-      "feesCollected0", "feesCollected1", "feesValue",
-      "absolutePnl", "absolutePnlPercent", "divergenceLoss",
-      "opportunityCost", "netVsHodl", "priceLower", "priceUpper",
+      "entryAmount0",
+      "entryAmount1",
+      "exitAmount0",
+      "exitAmount1",
+      "entryPrice",
+      "exitPrice",
+      "entryValue",
+      "exitValue",
+      "holdValue",
+      "feesCollected0",
+      "feesCollected1",
+      "feesValue",
+      "absolutePnl",
+      "absolutePnlPercent",
+      "divergenceLoss",
+      "opportunityCost",
+      "netVsHodl",
+      "priceLower",
+      "priceUpper",
     ];
 
     for (const field of numericFields) {
@@ -394,15 +419,15 @@ describe("calculateFullPnL — all-zero raw amounts", () => {
 describe("calculateUnclaimedFees — 0 liquidity", () => {
   it("returns {fees0: 0, fees1: 0} when liquidity = 0n and no tokens owed", () => {
     const result = calculateUnclaimedFees(
-      0n,   // liquidity
-      0n,   // feeGrowthInside0LastX128
-      0n,   // feeGrowthInside1LastX128
-      0n,   // feeGrowthInside0CurrentX128
-      0n,   // feeGrowthInside1CurrentX128
-      0n,   // tokensOwed0
-      0n,   // tokensOwed1
-      18,   // decimals0
-      18    // decimals1
+      0n, // liquidity
+      0n, // feeGrowthInside0LastX128
+      0n, // feeGrowthInside1LastX128
+      0n, // feeGrowthInside0CurrentX128
+      0n, // feeGrowthInside1CurrentX128
+      0n, // tokensOwed0
+      0n, // tokensOwed1
+      18, // decimals0
+      18, // decimals1
     );
 
     expect(result.fees0).toBe(0);
@@ -412,14 +437,7 @@ describe("calculateUnclaimedFees — 0 liquidity", () => {
   it("returns only tokensOwed when liquidity = 0 but tokensOwed > 0", () => {
     // tokensOwed = 1e18 raw units = 1.0 token
     const tokensOwed = BigInt(1e18);
-    const result = calculateUnclaimedFees(
-      0n,
-      0n, 0n, 0n, 0n,
-      tokensOwed,
-      0n,
-      18,
-      18
-    );
+    const result = calculateUnclaimedFees(0n, 0n, 0n, 0n, 0n, tokensOwed, 0n, 18, 18);
 
     expect(result.fees0).toBeCloseTo(1.0, 5);
     expect(result.fees1).toBe(0);
@@ -431,26 +449,12 @@ describe("calculateUnclaimedFees — 0 liquidity", () => {
     const current = 100n; // << last → triggers underflow branch
 
     expect(() =>
-      calculateUnclaimedFees(
-        LIQUIDITY,
-        last,
-        last,
-        current,
-        current,
-        0n, 0n,
-        18, 18
-      )
+      calculateUnclaimedFees(LIQUIDITY, last, last, current, current, 0n, 0n, 18, 18),
     ).not.toThrow();
   });
 
   it("fees are non-negative for all inputs", () => {
-    const result = calculateUnclaimedFees(
-      LIQUIDITY,
-      0n, 0n,
-      1000n, 2000n,
-      10n, 20n,
-      18, 6
-    );
+    const result = calculateUnclaimedFees(LIQUIDITY, 0n, 0n, 1000n, 2000n, 10n, 20n, 18, 6);
 
     expect(result.fees0).toBeGreaterThanOrEqual(0);
     expect(result.fees1).toBeGreaterThanOrEqual(0);

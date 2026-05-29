@@ -5,6 +5,7 @@ import {
   type Log,
   type TransactionReceipt,
 } from "viem";
+
 import type { Client } from "./client";
 import { withRetry, sleep } from "./rpc";
 
@@ -13,10 +14,8 @@ const INCREASE_LIQUIDITY_TOPIC =
   "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f";
 const DECREASE_LIQUIDITY_TOPIC =
   "0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4";
-const COLLECT_TOPIC =
-  "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3ede2a155787a821a24ff376d55";
-const TRANSFER_TOPIC =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const COLLECT_TOPIC = "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3ede2a155787a821a24ff376d55";
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 // The public Hyperliquid RPC enforces a 1000-block getLogs limit.
 // When using Envio HyperRPC (https://hyperliquid.rpc.hypersync.xyz) this can
@@ -25,17 +24,15 @@ const LOGS_CHUNK_SIZE = 999n;
 
 const eventAbi = [
   parseAbiItem(
-    "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)"
+    "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
   ),
   parseAbiItem(
-    "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)"
+    "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
   ),
   parseAbiItem(
-    "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)"
+    "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
   ),
-  parseAbiItem(
-    "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
-  ),
+  parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"),
 ];
 
 export interface PositionOpenEvent {
@@ -71,14 +68,14 @@ export async function findOpenEvent(
   tokenId: bigint,
   wallet: Address,
   knownOpenTx?: string,
-  fromBlock?: bigint
+  fromBlock?: bigint,
 ): Promise<PositionOpenEvent | null> {
   try {
     // Fast path: use known transaction hash
     if (knownOpenTx) {
       console.log(`    Using known open tx: ${knownOpenTx.slice(0, 10)}...`);
       const receipt = await withRetry(() =>
-        client.getTransactionReceipt({ hash: knownOpenTx as `0x${string}` })
+        client.getTransactionReceipt({ hash: knownOpenTx as `0x${string}` }),
       );
       const event = extractIncreaseLiquidity(receipt, tokenId);
       if (event) return event;
@@ -99,12 +96,12 @@ export async function findOpenEvent(
         client.getLogs({
           address: positionManager,
           event: parseAbiItem(
-            "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)"
+            "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
           ),
           args: { tokenId },
           fromBlock: lo,
           toBlock: hi,
-        })
+        }),
       );
 
       if (logs.length > 0) {
@@ -124,10 +121,7 @@ export async function findOpenEvent(
     console.warn(`    Could not find open event for token #${tokenId}`);
     return null;
   } catch (error) {
-    console.error(
-      `    Error finding open event for token ${tokenId}:`,
-      (error as Error).message
-    );
+    console.error(`    Error finding open event for token ${tokenId}:`, (error as Error).message);
     return null;
   }
 }
@@ -145,14 +139,14 @@ export async function findCloseEvent(
   tokenId: bigint,
   wallet: Address,
   knownCloseTx?: string,
-  fromBlock?: bigint
+  fromBlock?: bigint,
 ): Promise<PositionCloseEvent | null> {
   try {
     // Fast path: use known transaction hash
     if (knownCloseTx) {
       console.log(`    Using known close tx: ${knownCloseTx.slice(0, 10)}...`);
       const receipt = await withRetry(() =>
-        client.getTransactionReceipt({ hash: knownCloseTx as `0x${string}` })
+        client.getTransactionReceipt({ hash: knownCloseTx as `0x${string}` }),
       );
       const event = extractDecreaseLiquidity(receipt, tokenId);
       if (event) return event;
@@ -173,23 +167,23 @@ export async function findCloseEvent(
           client.getLogs({
             address: positionManager,
             event: parseAbiItem(
-              "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)"
+              "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
             ),
             args: { tokenId },
             fromBlock: lo,
             toBlock: hi,
-          })
+          }),
         ),
         withRetry(() =>
           client.getLogs({
             address: positionManager,
             event: parseAbiItem(
-              "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)"
+              "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
             ),
             args: { tokenId },
             fromBlock: lo,
             toBlock: hi,
-          })
+          }),
         ),
       ]);
 
@@ -200,9 +194,7 @@ export async function findCloseEvent(
         const decreaseAmount1 = BigInt(dArgs.amount1);
 
         // Find the Collect log in the same transaction
-        const cLog = collectLogs.find(
-          (l) => l.transactionHash === dLog.transactionHash
-        );
+        const cLog = collectLogs.find((l) => l.transactionHash === dLog.transactionHash);
 
         let collectedFees0 = 0n;
         let collectedFees1 = 0n;
@@ -232,10 +224,7 @@ export async function findCloseEvent(
     console.warn(`    Could not find close event for token #${tokenId}`);
     return null;
   } catch (error) {
-    console.error(
-      `    Error finding close event for token ${tokenId}:`,
-      (error as Error).message
-    );
+    console.error(`    Error finding close event for token ${tokenId}:`, (error as Error).message);
     return null;
   }
 }
@@ -246,10 +235,10 @@ export async function findCloseEvent(
 export async function findOpenEventFromTx(
   client: Client,
   txHash: string,
-  tokenId: bigint
+  tokenId: bigint,
 ): Promise<PositionOpenEvent | null> {
   const receipt = await withRetry(() =>
-    client.getTransactionReceipt({ hash: txHash as `0x${string}` })
+    client.getTransactionReceipt({ hash: txHash as `0x${string}` }),
   );
   return extractIncreaseLiquidity(receipt, tokenId);
 }
@@ -260,10 +249,10 @@ export async function findOpenEventFromTx(
 export async function findCloseEventFromTx(
   client: Client,
   txHash: string,
-  tokenId: bigint
+  tokenId: bigint,
 ): Promise<PositionCloseEvent | null> {
   const receipt = await withRetry(() =>
-    client.getTransactionReceipt({ hash: txHash as `0x${string}` })
+    client.getTransactionReceipt({ hash: txHash as `0x${string}` }),
   );
   return extractDecreaseLiquidity(receipt, tokenId);
 }
@@ -272,7 +261,7 @@ export async function findCloseEventFromTx(
 
 function extractIncreaseLiquidity(
   receipt: TransactionReceipt,
-  tokenId: bigint
+  tokenId: bigint,
 ): PositionOpenEvent | null {
   for (const log of receipt.logs) {
     if (log.topics[0] !== INCREASE_LIQUIDITY_TOPIC) continue;
@@ -284,10 +273,7 @@ function extractIncreaseLiquidity(
         topics: log.topics,
       });
 
-      if (
-        decoded.eventName === "IncreaseLiquidity" &&
-        (decoded.args as any).tokenId === tokenId
-      ) {
+      if (decoded.eventName === "IncreaseLiquidity" && (decoded.args as any).tokenId === tokenId) {
         const args = decoded.args as any;
         return {
           tokenId,
@@ -307,10 +293,9 @@ function extractIncreaseLiquidity(
 
 function extractDecreaseLiquidity(
   receipt: TransactionReceipt,
-  tokenId: bigint
+  tokenId: bigint,
 ): PositionCloseEvent | null {
-  let decreaseEvent: { amount0: bigint; amount1: bigint; liquidity: bigint } | null =
-    null;
+  let decreaseEvent: { amount0: bigint; amount1: bigint; liquidity: bigint } | null = null;
   let collectEvent: { amount0: bigint; amount1: bigint } | null = null;
 
   for (const log of receipt.logs) {
@@ -338,10 +323,7 @@ function extractDecreaseLiquidity(
           data: log.data,
           topics: log.topics,
         });
-        if (
-          decoded.eventName === "Collect" &&
-          (decoded.args as any).tokenId === tokenId
-        ) {
+        if (decoded.eventName === "Collect" && (decoded.args as any).tokenId === tokenId) {
           const args = decoded.args as any;
           collectEvent = {
             amount0: BigInt(args.amount0Collect),
@@ -385,7 +367,7 @@ function extractDecreaseLiquidity(
 export async function getPoolPriceAtBlock(
   client: Client,
   poolAddress: Address,
-  blockNumber: bigint
+  blockNumber: bigint,
 ): Promise<{ sqrtPriceX96: bigint; tick: number } | null> {
   try {
     const result = await withRetry(() =>
@@ -410,7 +392,7 @@ export async function getPoolPriceAtBlock(
         ] as const,
         functionName: "slot0",
         blockNumber,
-      })
+      }),
     );
 
     return {
@@ -418,9 +400,7 @@ export async function getPoolPriceAtBlock(
       tick: Number(result[1]),
     };
   } catch (error) {
-    console.warn(
-      `    Could not fetch historical price at block ${blockNumber}.`
-    );
+    console.warn(`    Could not fetch historical price at block ${blockNumber}.`);
     return null;
   }
 }

@@ -21,7 +21,7 @@ const Q128 = 2n ** 128n;
 export function sqrtPriceX96ToPrice(
   sqrtPriceX96: bigint,
   decimals0: number,
-  decimals1: number
+  decimals1: number,
 ): number {
   const sqrtPrice = Number(sqrtPriceX96) / Number(Q96);
   const price = sqrtPrice * sqrtPrice;
@@ -56,14 +56,10 @@ export function getTokenAmounts(
   liquidity: bigint,
   sqrtPriceX96: bigint,
   tickLower: number,
-  tickUpper: number
+  tickUpper: number,
 ): { amount0: bigint; amount1: bigint } {
-  const sqrtPriceLower = BigInt(
-    Math.floor(Math.sqrt(1.0001 ** tickLower) * Number(Q96))
-  );
-  const sqrtPriceUpper = BigInt(
-    Math.floor(Math.sqrt(1.0001 ** tickUpper) * Number(Q96))
-  );
+  const sqrtPriceLower = BigInt(Math.floor(Math.sqrt(1.0001 ** tickLower) * Number(Q96)));
+  const sqrtPriceUpper = BigInt(Math.floor(Math.sqrt(1.0001 ** tickUpper) * Number(Q96)));
 
   let amount0: bigint;
   let amount1: bigint;
@@ -71,8 +67,7 @@ export function getTokenAmounts(
   if (sqrtPriceX96 <= sqrtPriceLower) {
     // Current price is below range - all token0
     amount0 =
-      (liquidity * Q96 * (sqrtPriceUpper - sqrtPriceLower)) /
-      (sqrtPriceLower * sqrtPriceUpper);
+      (liquidity * Q96 * (sqrtPriceUpper - sqrtPriceLower)) / (sqrtPriceLower * sqrtPriceUpper);
     amount1 = 0n;
   } else if (sqrtPriceX96 >= sqrtPriceUpper) {
     // Current price is above range - all token1
@@ -80,9 +75,7 @@ export function getTokenAmounts(
     amount1 = (liquidity * (sqrtPriceUpper - sqrtPriceLower)) / Q96;
   } else {
     // Current price is within range
-    amount0 =
-      (liquidity * Q96 * (sqrtPriceUpper - sqrtPriceX96)) /
-      (sqrtPriceX96 * sqrtPriceUpper);
+    amount0 = (liquidity * Q96 * (sqrtPriceUpper - sqrtPriceX96)) / (sqrtPriceX96 * sqrtPriceUpper);
     amount1 = (liquidity * (sqrtPriceX96 - sqrtPriceLower)) / Q96;
   }
 
@@ -130,45 +123,23 @@ export function calculateDivergenceLoss(
   entrySqrtPriceX96: bigint,
   currentSqrtPriceX96: bigint,
   decimals0: number,
-  decimals1: number
+  decimals1: number,
 ): DivergenceLossResult {
   // Get token amounts at entry
-  const entryAmounts = getTokenAmounts(
-    liquidity,
-    entrySqrtPriceX96,
-    tickLower,
-    tickUpper
-  );
+  const entryAmounts = getTokenAmounts(liquidity, entrySqrtPriceX96, tickLower, tickUpper);
 
   // Get token amounts now
-  const currentAmounts = getTokenAmounts(
-    liquidity,
-    currentSqrtPriceX96,
-    tickLower,
-    tickUpper
-  );
+  const currentAmounts = getTokenAmounts(liquidity, currentSqrtPriceX96, tickLower, tickUpper);
 
   // Convert to human-readable amounts
-  const entryAmount0 =
-    Number(entryAmounts.amount0) / 10 ** decimals0;
-  const entryAmount1 =
-    Number(entryAmounts.amount1) / 10 ** decimals1;
-  const currentAmount0 =
-    Number(currentAmounts.amount0) / 10 ** decimals0;
-  const currentAmount1 =
-    Number(currentAmounts.amount1) / 10 ** decimals1;
+  const entryAmount0 = Number(entryAmounts.amount0) / 10 ** decimals0;
+  const entryAmount1 = Number(entryAmounts.amount1) / 10 ** decimals1;
+  const currentAmount0 = Number(currentAmounts.amount0) / 10 ** decimals0;
+  const currentAmount1 = Number(currentAmounts.amount1) / 10 ** decimals1;
 
   // Get prices
-  const entryPrice = sqrtPriceX96ToPrice(
-    entrySqrtPriceX96,
-    decimals0,
-    decimals1
-  );
-  const currentPrice = sqrtPriceX96ToPrice(
-    currentSqrtPriceX96,
-    decimals0,
-    decimals1
-  );
+  const entryPrice = sqrtPriceX96ToPrice(entrySqrtPriceX96, decimals0, decimals1);
+  const currentPrice = sqrtPriceX96ToPrice(currentSqrtPriceX96, decimals0, decimals1);
 
   // Value of LP position now (denominated in token1)
   const valueLp = currentAmount0 * currentPrice + currentAmount1;
@@ -177,8 +148,7 @@ export function calculateDivergenceLoss(
   const valueHold = entryAmount0 * currentPrice + entryAmount1;
 
   // Divergence loss
-  const divergenceLoss =
-    valueHold > 0 ? (valueLp - valueHold) / valueHold : 0;
+  const divergenceLoss = valueHold > 0 ? (valueLp - valueHold) / valueHold : 0;
 
   // Price range
   const decimalAdjustment = 10 ** (decimals0 - decimals1);
@@ -213,7 +183,7 @@ export function deriveEntryPriceFromAmounts(
   amount1: bigint,
   liquidity: bigint,
   tickLower: number,
-  tickUpper: number
+  tickUpper: number,
 ): bigint {
   // If amount0 is 0, price was above upper tick
   if (amount0 === 0n) {
@@ -258,7 +228,7 @@ export function calculateUnclaimedFees(
   tokensOwed0: bigint,
   tokensOwed1: bigint,
   decimals0: number,
-  decimals1: number
+  decimals1: number,
 ): { fees0: number; fees1: number } {
   // Calculate fee growth delta
   let feeGrowth0Delta: bigint;
@@ -266,23 +236,15 @@ export function calculateUnclaimedFees(
 
   // Handle underflow (fee growth values can wrap around)
   if (feeGrowthInside0CurrentX128 >= feeGrowthInside0LastX128) {
-    feeGrowth0Delta =
-      feeGrowthInside0CurrentX128 - feeGrowthInside0LastX128;
+    feeGrowth0Delta = feeGrowthInside0CurrentX128 - feeGrowthInside0LastX128;
   } else {
-    feeGrowth0Delta =
-      2n ** 256n -
-      feeGrowthInside0LastX128 +
-      feeGrowthInside0CurrentX128;
+    feeGrowth0Delta = 2n ** 256n - feeGrowthInside0LastX128 + feeGrowthInside0CurrentX128;
   }
 
   if (feeGrowthInside1CurrentX128 >= feeGrowthInside1LastX128) {
-    feeGrowth1Delta =
-      feeGrowthInside1CurrentX128 - feeGrowthInside1LastX128;
+    feeGrowth1Delta = feeGrowthInside1CurrentX128 - feeGrowthInside1LastX128;
   } else {
-    feeGrowth1Delta =
-      2n ** 256n -
-      feeGrowthInside1LastX128 +
-      feeGrowthInside1CurrentX128;
+    feeGrowth1Delta = 2n ** 256n - feeGrowthInside1LastX128 + feeGrowthInside1CurrentX128;
   }
 
   // Unclaimed fees = (feeGrowthDelta * liquidity) / 2^128 + tokensOwed
@@ -308,7 +270,7 @@ export function calculateFeeGrowthInside(
   feeGrowthOutsideLower0X128: bigint,
   feeGrowthOutsideLower1X128: bigint,
   feeGrowthOutsideUpper0X128: bigint,
-  feeGrowthOutsideUpper1X128: bigint
+  feeGrowthOutsideUpper1X128: bigint,
 ): { feeGrowthInside0X128: bigint; feeGrowthInside1X128: bigint } {
   // Calculate fee growth below the lower tick
   let feeGrowthBelow0: bigint;
@@ -333,10 +295,8 @@ export function calculateFeeGrowthInside(
   }
 
   // Fee growth inside = global - below - above
-  const feeGrowthInside0X128 =
-    feeGrowthGlobal0X128 - feeGrowthBelow0 - feeGrowthAbove0;
-  const feeGrowthInside1X128 =
-    feeGrowthGlobal1X128 - feeGrowthBelow1 - feeGrowthAbove1;
+  const feeGrowthInside0X128 = feeGrowthGlobal0X128 - feeGrowthBelow0 - feeGrowthAbove0;
+  const feeGrowthInside1X128 = feeGrowthGlobal1X128 - feeGrowthBelow1 - feeGrowthAbove1;
 
   return { feeGrowthInside0X128, feeGrowthInside1X128 };
 }
@@ -429,7 +389,7 @@ export function calculateFullPnL(params: {
     entryAmount1Raw,
     liquidity,
     tickLower,
-    tickUpper
+    tickUpper,
   );
   const entryPrice = sqrtPriceX96ToPrice(entrySqrtPriceX96, decimals0, decimals1);
   const exitPrice = sqrtPriceX96ToPrice(exitSqrtPriceX96, decimals0, decimals1);

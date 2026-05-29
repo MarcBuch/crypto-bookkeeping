@@ -62,7 +62,7 @@ export function upsertPosition(position: Omit<StoredPosition, "created_at">): vo
       position.entry_amount0,
       position.entry_amount1,
       position.entry_liquidity,
-    ]
+    ],
   );
 }
 
@@ -103,25 +103,21 @@ export function insertSnapshot(snapshot: Omit<StoredSnapshot, "id">): void {
       snapshot.fees1,
       snapshot.fees_value,
       snapshot.net_pnl,
-    ]
+    ],
   );
 }
 
 export function getSnapshots(tokenId: string, limit = 50): StoredSnapshot[] {
   const db = getDb();
   return db
-    .query(
-      "SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT ?"
-    )
+    .query("SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT ?")
     .all(tokenId, limit) as StoredSnapshot[];
 }
 
 export function getLatestSnapshot(tokenId: string): StoredSnapshot | null {
   const db = getDb();
   return db
-    .query(
-      "SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT 1"
-    )
+    .query("SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT 1")
     .get(tokenId) as StoredSnapshot | null;
 }
 
@@ -134,7 +130,7 @@ export function getAllLatestSnapshots(): StoredSnapshot[] {
          SELECT token_id, MAX(timestamp) as max_ts
          FROM snapshots GROUP BY token_id
        ) latest ON s.token_id = latest.token_id AND s.timestamp = latest.max_ts
-       ORDER BY s.token_id`
+       ORDER BY s.token_id`,
     )
     .all() as StoredSnapshot[];
 }

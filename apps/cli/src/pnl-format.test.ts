@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
+
 import type { PnLView } from "@lp-tracker/core";
+
 import { formatPnLDisplayData, formatPnLJsonPayload } from "./pnl-format.js";
 
 const basePnL: PnLView = {

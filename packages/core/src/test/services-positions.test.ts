@@ -8,15 +8,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, existsSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
+
 import { resetDb } from "../db/schema.js";
 import { upsertPosition, insertSnapshot } from "../db/store.js";
-import { getHistoryView } from "../services/history.js";
 import { NotFoundError } from "../services/errors.js";
+import { getHistoryView } from "../services/history.js";
 
-const TMP =
-  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-services-tests";
+const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-services-tests";
 
 // ---------------------------------------------------------------------------
 // Helpers

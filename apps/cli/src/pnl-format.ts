@@ -8,9 +8,10 @@ import {
 
 export function formatPnLDisplayData(pnlData: PnLView[]): PnLDisplayData[] {
   return pnlData.map((pos) => {
-    const usdFees = pos.feesValueUsd === null
-      ? "USD fees unavailable"
-      : `USD fees $${formatNumber(pos.feesValueUsd, 2)}`;
+    const usdFees =
+      pos.feesValueUsd === null
+        ? "USD fees unavailable"
+        : `USD fees $${formatNumber(pos.feesValueUsd, 2)}`;
 
     return {
       tokenId: pos.tokenId,

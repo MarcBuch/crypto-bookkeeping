@@ -1,5 +1,6 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPositionsView } from "@lp-tracker/core";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+
 import { isNumericString } from "../utils/validation.js";
 
 export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -15,9 +16,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
       const { tokenId } = request.params;
 
       if (!isNumericString(tokenId)) {
-        return reply
-          .status(400)
-          .send({ error: "tokenId must be a numeric string" });
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
       const config = fastify.lpConfig;
@@ -29,6 +28,6 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       return { position };
-    }
+    },
   );
 }

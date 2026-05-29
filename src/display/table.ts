@@ -1,4 +1,5 @@
 import Table from "cli-table3";
+
 import type { FullPnLResult } from "../math/divergence-loss";
 
 export interface PositionDisplayData {
@@ -120,9 +121,7 @@ export function displayIL(positions: ILDisplayData[]): void {
 
   console.log("\n=== Divergence Loss (Impermanent Loss) ===\n");
   console.log(table.toString());
-  console.log(
-    "\nDL% = (LP Value - HODL Value) / HODL Value. Negative = loss vs holding."
-  );
+  console.log("\nDL% = (LP Value - HODL Value) / HODL Value. Negative = loss vs holding.");
   console.log("Net P&L = DL + Fees Earned (denominated in token1)\n");
 }
 
@@ -133,7 +132,13 @@ export function displayPnL(positions: PnLDisplayData[]): void {
     });
 
     table.push(
-      [{ colSpan: 2, content: `Position #${pos.tokenId} (${pos.pair}) - ${pos.status}`, hAlign: "center" }],
+      [
+        {
+          colSpan: 2,
+          content: `Position #${pos.tokenId} (${pos.pair}) - ${pos.status}`,
+          hAlign: "center",
+        },
+      ],
       ["Entry Price", pos.entryPrice],
       ["Exit/Current Price", pos.exitPrice],
       ["Price Change", pos.exitPrice],
@@ -152,7 +157,7 @@ export function displayPnL(positions: PnLDisplayData[]): void {
       [{ colSpan: 2, content: "--- Results ---", hAlign: "center" }],
       ["Absolute P&L (LP+Fees vs Entry)", pos.absolutePnl],
       ["Divergence Loss (LP vs HODL)", pos.divergenceLoss],
-      ["Opportunity Cost vs HODL", pos.opportunityCost]
+      ["Opportunity Cost vs HODL", pos.opportunityCost],
     );
 
     console.log("\n" + table.toString());
@@ -167,7 +172,7 @@ export function displayPnL(positions: PnLDisplayData[]): void {
 export function displayHistory(
   tokenId: string,
   pair: string,
-  snapshots: SnapshotDisplayData[]
+  snapshots: SnapshotDisplayData[],
 ): void {
   const table = new Table({
     head: ["Timestamp", "Price", "DL %", "Fees", "Net P&L", "LP Value"],

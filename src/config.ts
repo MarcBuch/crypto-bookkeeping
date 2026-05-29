@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+
 import type { Address } from "viem";
 
 export interface PositionConfig {

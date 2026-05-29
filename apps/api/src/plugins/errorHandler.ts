@@ -1,5 +1,6 @@
-import type { FastifyInstance } from "fastify";
 import { NotFoundError, RpcError } from "@lp-tracker/core";
+import type { FastifyInstance } from "fastify";
+
 import { ValidationError } from "../utils/validation.js";
 
 export async function errorHandlerPlugin(fastify: FastifyInstance): Promise<void> {

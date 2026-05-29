@@ -1,6 +1,7 @@
 import type { Address } from "viem";
-import type { Client } from "./client";
+
 import { factoryAbi, poolAbi, erc20Abi } from "./abis";
+import type { Client } from "./client";
 import { withRetry } from "./rpc";
 
 export interface PoolState {
@@ -33,7 +34,7 @@ export async function getPoolAddress(
   factory: Address,
   token0: Address,
   token1: Address,
-  fee: number
+  fee: number,
 ): Promise<Address> {
   return withRetry(() =>
     client.readContract({
@@ -41,35 +42,32 @@ export async function getPoolAddress(
       abi: factoryAbi,
       functionName: "getPool",
       args: [token0, token1, fee],
-    })
+    }),
   );
 }
 
-export async function getPoolState(
-  client: Client,
-  poolAddress: Address
-): Promise<PoolState> {
+export async function getPoolState(client: Client, poolAddress: Address): Promise<PoolState> {
   const [slot0Result, feeGrowth0, feeGrowth1] = await Promise.all([
     withRetry(() =>
       client.readContract({
         address: poolAddress,
         abi: poolAbi,
         functionName: "slot0",
-      })
+      }),
     ),
     withRetry(() =>
       client.readContract({
         address: poolAddress,
         abi: poolAbi,
         functionName: "feeGrowthGlobal0X128",
-      })
+      }),
     ),
     withRetry(() =>
       client.readContract({
         address: poolAddress,
         abi: poolAbi,
         functionName: "feeGrowthGlobal1X128",
-      })
+      }),
     ),
   ]);
 
@@ -85,7 +83,7 @@ export async function getPoolState(
 export async function getTickData(
   client: Client,
   poolAddress: Address,
-  tick: number
+  tick: number,
 ): Promise<TickData> {
   const result = await withRetry(() =>
     client.readContract({
@@ -93,7 +91,7 @@ export async function getTickData(
       abi: poolAbi,
       functionName: "ticks",
       args: [tick],
-    })
+    }),
   );
 
   return {
@@ -104,10 +102,7 @@ export async function getTickData(
   };
 }
 
-export async function getTokenInfo(
-  client: Client,
-  tokenAddress: Address
-): Promise<TokenInfo> {
+export async function getTokenInfo(client: Client, tokenAddress: Address): Promise<TokenInfo> {
   const cached = tokenCache.get(tokenAddress.toLowerCase());
   if (cached) return cached;
 
@@ -117,21 +112,21 @@ export async function getTokenInfo(
         address: tokenAddress,
         abi: erc20Abi,
         functionName: "symbol",
-      })
+      }),
     ),
     withRetry(() =>
       client.readContract({
         address: tokenAddress,
         abi: erc20Abi,
         functionName: "decimals",
-      })
+      }),
     ),
     withRetry(() =>
       client.readContract({
         address: tokenAddress,
         abi: erc20Abi,
         functionName: "name",
-      })
+      }),
     ),
   ]);
 

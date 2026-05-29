@@ -22,6 +22,7 @@ export async function rateLimit(): Promise<void> {
       await sleep(MIN_DELAY_MS - elapsed);
     }
     lastRequestTime = Date.now();
+    return undefined;
   });
   return rateLimitPromise;
 }
@@ -36,7 +37,7 @@ export function sleep(ms: number): Promise<void> {
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
-  baseDelay = 1000
+  baseDelay = 1000,
 ): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -52,7 +53,7 @@ export async function withRetry<T>(
       if (isRateLimit && attempt < maxRetries) {
         const delay = baseDelay * 2 ** attempt;
         console.warn(
-          `  Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`
+          `  Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`,
         );
         await sleep(delay);
         continue;

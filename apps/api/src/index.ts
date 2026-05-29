@@ -1,14 +1,15 @@
-import Fastify from "fastify";
 import cors from "@fastify/cors";
+import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
+
 import { loadConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { errorHandlerPlugin } from "./plugins/errorHandler.js";
 import { healthRoutes } from "./routes/health.js";
-import { positionsRoutes } from "./routes/positions.js";
-import { pnlRoutes } from "./routes/pnl.js";
-import { ilRoutes } from "./routes/il.js";
 import { historyRoutes } from "./routes/history.js";
+import { ilRoutes } from "./routes/il.js";
+import { pnlRoutes } from "./routes/pnl.js";
+import { positionsRoutes } from "./routes/positions.js";
 
 export async function buildServer(config?: Config): Promise<FastifyInstance> {
   const fastify = Fastify({ logger: true });
@@ -23,9 +24,7 @@ export async function buildServer(config?: Config): Promise<FastifyInstance> {
   await fastify.register(errorHandlerPlugin);
 
   await fastify.register(cors, {
-    origin:
-      process.env.CORS_ORIGIN ??
-      (process.env.NODE_ENV === "production" ? false : true),
+    origin: process.env.CORS_ORIGIN ?? process.env.NODE_ENV !== "production",
   });
 
   // Register route plugins

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+
 import { AppProviders } from "../../src/app-providers";
 import { NotFound, createAppRouter } from "../../src/router";
 

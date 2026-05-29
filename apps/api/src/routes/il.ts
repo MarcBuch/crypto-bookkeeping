@@ -1,5 +1,6 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getILView, NotFoundError, RpcError } from "@lp-tracker/core";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+
 import { isNumericString } from "../utils/validation.js";
 
 export async function ilRoutes(fastify: FastifyInstance): Promise<void> {
@@ -11,16 +12,11 @@ export async function ilRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get<{ Params: { tokenId: string } }>(
     "/positions/:tokenId/il",
-    async (
-      request: FastifyRequest<{ Params: { tokenId: string } }>,
-      reply: FastifyReply
-    ) => {
+    async (request: FastifyRequest<{ Params: { tokenId: string } }>, reply: FastifyReply) => {
       const { tokenId } = request.params;
 
       if (!isNumericString(tokenId)) {
-        return reply
-          .status(400)
-          .send({ error: "tokenId must be a numeric string" });
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
       const config = fastify.lpConfig;
@@ -34,12 +30,10 @@ export async function ilRoutes(fastify: FastifyInstance): Promise<void> {
           return reply.status(404).send({ error: "Position not found", tokenId });
         }
         if (err instanceof RpcError && err.code === -32005) {
-          return reply
-            .status(503)
-            .send({ error: "RPC rate limited, try again later" });
+          return reply.status(503).send({ error: "RPC rate limited, try again later" });
         }
         throw err;
       }
-    }
+    },
   );
 }

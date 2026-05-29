@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { join, resolve } from "path";
 import { mkdirSync, existsSync } from "fs";
+import { join, resolve } from "path";
 
 /**
  * Resolve the database file path.
@@ -34,7 +34,8 @@ export function getDb(): Database {
     } catch (err: any) {
       throw new Error(
         `Cannot create data directory at ${dataDir}: ${err.message}\n` +
-          `Set LP_TRACKER_DATA_DIR to a writable path.`
+          `Set LP_TRACKER_DATA_DIR to a writable path.`,
+        { cause: err },
       );
     }
     db = new Database(dbPath, { create: true });
@@ -49,8 +50,8 @@ export function resetDb(): void {
   db = null;
 }
 
-function initSchema(db: Database): void {
-  db.exec(`
+function initSchema(database: Database): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS positions (
       token_id TEXT PRIMARY KEY,
       token0 TEXT NOT NULL,
@@ -95,10 +96,10 @@ function initSchema(db: Database): void {
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist
-  const cols = db.prepare("PRAGMA table_info(positions)").all() as {
+  const cols = database.prepare("PRAGMA table_info(positions)").all() as {
     name: string;
   }[];
   if (!cols.some((c) => c.name === "entry_liquidity")) {
-    db.exec("ALTER TABLE positions ADD COLUMN entry_liquidity TEXT");
+    database.exec("ALTER TABLE positions ADD COLUMN entry_liquidity TEXT");
   }
 }

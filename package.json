@@ -2,15 +2,11 @@
   "name": "lp-tracker-monorepo",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
-  "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5.6.0"
-  },
+  "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
     "cli": "bun run --filter @lp-tracker/cli start",
@@ -18,6 +14,17 @@
     "api:dev": "bun run --filter @lp-tracker/api dev",
     "web": "bun run --filter @lp-tracker/web dev",
     "web:build": "bun run --filter @lp-tracker/web build",
-    "web:preview": "bun run --filter @lp-tracker/web preview"
+    "web:preview": "bun run --filter @lp-tracker/web preview",
+    "lint": "oxlint apps packages scripts",
+    "lint:fix": "oxlint apps packages scripts --fix",
+    "format": "oxfmt apps packages scripts src README.md package.json",
+    "format:check": "oxfmt --check apps packages scripts src README.md package.json",
+    "check": "bun run lint && bun run format:check && bun run --filter @lp-tracker/core check && bun run --filter @lp-tracker/web check"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0",
+    "typescript": "^5.6.0"
   }
 }

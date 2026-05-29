@@ -17,7 +17,14 @@ export type { PositionData } from "./chain/positions.js";
 export * from "./config.js";
 
 // DB — export everything except getAllPositions (renamed to avoid clash)
-export { upsertPosition, getPosition, insertSnapshot, getSnapshots, getLatestSnapshot, getAllLatestSnapshots } from "./db/store.js";
+export {
+  upsertPosition,
+  getPosition,
+  insertSnapshot,
+  getSnapshots,
+  getLatestSnapshot,
+  getAllLatestSnapshots,
+} from "./db/store.js";
 export { getAllPositions as getAllStoredPositions } from "./db/store.js";
 export type { StoredPosition, StoredSnapshot } from "./db/store.js";
 export * from "./db/schema.js";

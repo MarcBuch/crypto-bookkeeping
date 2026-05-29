@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, mock } from "bun:test";
+
 import type { FastifyInstance } from "fastify";
 
 // --- Minimal fake config ---
@@ -126,19 +127,25 @@ describe("GET /positions/:tokenId/history", () => {
   it("returns 400 for non-numeric limit query param", async () => {
     const res = await server.inject({ method: "GET", url: "/positions/123/history?limit=abc" });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: expect.stringContaining("limit must be a positive integer") });
+    expect(res.json()).toMatchObject({
+      error: expect.stringContaining("limit must be a positive integer"),
+    });
   });
 
   it("returns 400 when limit=0 (must be >= 1)", async () => {
     const res = await server.inject({ method: "GET", url: "/positions/123/history?limit=0" });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: expect.stringContaining("limit must be a positive integer") });
+    expect(res.json()).toMatchObject({
+      error: expect.stringContaining("limit must be a positive integer"),
+    });
   });
 
   it("returns 400 when limit=-5 (negative not allowed)", async () => {
     const res = await server.inject({ method: "GET", url: "/positions/123/history?limit=-5" });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: expect.stringContaining("limit must be a positive integer") });
+    expect(res.json()).toMatchObject({
+      error: expect.stringContaining("limit must be a positive integer"),
+    });
   });
 
   it("clamps limit=999 to 200 and passes 200 to service", async () => {

@@ -11,12 +11,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+
+import { formatNumber, formatPrice, formatPercent } from "../display/table.js";
 import { NotFoundError, RpcError } from "../services/errors.js";
-import {
-  formatNumber,
-  formatPrice,
-  formatPercent,
-} from "../display/table.js";
+
+function isJsonMode(): boolean {
+  return process.argv.includes("--json");
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // 1. isJsonMode() — simulated via process.argv manipulation
@@ -25,10 +26,6 @@ import {
 describe("isJsonMode — process.argv logic", () => {
   // The CLI's isJsonMode() is: process.argv.includes("--json")
   // We replicate that exact logic here to test it in isolation.
-  function isJsonMode(): boolean {
-    return process.argv.includes("--json");
-  }
-
   let originalArgv: string[];
 
   beforeEach(() => {

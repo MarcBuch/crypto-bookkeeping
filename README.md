@@ -40,6 +40,7 @@ Edit `config.json`:
 | `chainId` | HyperEVM chain ID (999) |
 | `contracts` | ProjectX contract addresses — defaults are correct for mainnet |
 | `positions` | *(Optional)* Known open/close tx hashes per token ID for faster event lookups |
+| `pricing.coingeckoIds` | *(Optional)* CoinGecko token IDs for live USD pricing |
 
 The `positions` map speeds up on-chain event lookups by narrowing the block range:
 
@@ -53,6 +54,22 @@ The `positions` map speeds up on-chain event lookups by narrowing the block rang
 ```
 
 `closeTx` can be omitted for active positions.
+
+The optional `pricing.coingeckoIds` map enables live USD prices for fee tokens. Keys can be token symbols, token addresses, or ProjectX/HyperEVM wrapped token identifiers used by the app; values must be CoinGecko IDs from the token's CoinGecko URL, such as `usd-coin`, `bitcoin`, `weth`, or `hyperliquid`:
+
+```json
+"pricing": {
+  "coingeckoIds": {
+    "USDC": "usd-coin",
+    "UBTC": "bitcoin",
+    "WETH": "weth",
+    "WHYPE": "hyperliquid",
+    "0xTOKEN_ADDRESS_OR_PROJECTX_WRAPPED_TOKEN": "coingecko-token-id"
+  }
+}
+```
+
+Pricing depends on CoinGecko's live simple-price API. P&L output includes USD fee income when `pricing.coingeckoIds` mappings exist and live prices are available. Successful prices are cached briefly in memory to reduce repeated requests. Missing config mappings remain unavailable until `config.json` is updated; failed requests, malformed responses, and unavailable API values for mapped IDs return `null` and are retried after a short cooldown. USD fee income is best-effort mark-to-current-price, not historical execution-time accounting.
 
 > **Note:** `config.json` is gitignored and will never be committed.
 
@@ -104,7 +121,7 @@ bun run cli pnl            # all positions
 bun run cli pnl <tokenId>  # specific position
 ```
 
-Output includes: entry/exit prices and amounts, absolute P&L vs initial deposit, divergence loss (LP vs HODL), fees earned, opportunity cost in token1 terms.
+Output includes: entry/exit prices and amounts, absolute P&L vs initial deposit, divergence loss (LP vs HODL), fees earned, opportunity cost in token1 terms, and USD fee income when live pricing is configured and available.
 
 #### Divergence loss (IL)
 
@@ -136,6 +153,8 @@ Append `--json` to any command to get structured JSON on stdout:
 bun run --filter @lp-tracker/cli start -- --json pnl 2>/dev/null
 bun run --filter @lp-tracker/cli start -- --json positions 2>/dev/null
 ```
+
+P&L JSON includes USD pricing fields when available, such as `feesValueUsd`, per-token USD fee values, token USD prices, and `usdPriceSource`. Unavailable USD values are returned as `null`.
 
 ---
 
@@ -170,7 +189,7 @@ PORT=8080 bun run start
 
 ### Response format
 
-Success responses follow the shape of the corresponding CLI `--json` output.
+Success responses follow the shape of the corresponding CLI `--json` output, including best-effort USD fee fields such as `feesValueUsd`, per-token USD fee values, token USD prices, and `usdPriceSource` when pricing is available.
 
 Error responses:
 ```json
@@ -195,7 +214,7 @@ HTTP status codes:
 
 ## Web (`apps/web`)
 
-The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position and P&L data. It reads `/positions` and `/pnl` from the API and merges rows by token ID.
+The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position and P&L data. It reads `/positions` and `/pnl` from the API and merges rows by token ID. P&L cards prioritize Fee Income USD when available and show USD unavailable for missing or `null` pricing values.
 
 ### Start the app
 

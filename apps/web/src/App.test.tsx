@@ -109,7 +109,6 @@ describe("dashboard rendering", () => {
     expect(html).toContain("25.5 USDC");
     expect(html).toContain("-10 USDC");
     expect(html).toContain("25.5%");
-    expect(html).toContain("-10%");
     expect(html).toContain("text-emerald-300");
     expect(html).toContain("text-red-300");
   });

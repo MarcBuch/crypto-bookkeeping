@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { TaxTransaction } from "../../src/api";
 import { taxTransactionQueryKeys } from "../../src/hooks/useTaxTransactions";
 import {
+  groupTaxTransactions,
   SyncStatus,
   TaxEmptyState,
   TaxErrorState,
@@ -112,6 +113,194 @@ describe("tax transactions rendering", () => {
     expect(html).toContain("Transfer");
     expect(html).toContain("LP rebalance");
     expect(html).toContain("Save comment");
+  });
+
+  it("groups duplicate transaction hashes while preserving child rows", () => {
+    const nativePart: TaxTransaction = {
+      ...taxTransaction,
+      id: "hyperevmscan:txlist:0xwrap:external",
+      hash: "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8",
+      value: "25000000000000000000",
+      token_symbol: null,
+      token_decimal: null,
+      transaction_type: "txlist",
+      label: null,
+    };
+    const whypePart: TaxTransaction = {
+      ...taxTransaction,
+      id: "hyperevmscan:tokentx:0xwrap:1",
+      hash: nativePart.hash,
+      value: "25000000000000000000",
+      token_symbol: "WHYPE",
+      token_decimal: 18,
+      transaction_type: "tokentx",
+      label: null,
+    };
+    const standalone: TaxTransaction = {
+      ...taxTransaction,
+      id: "hyperevmscan:txlist:0xsolo:external",
+      hash: "0xsolo",
+    };
+
+    const groups = groupTaxTransactions([nativePart, whypePart, standalone]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({ hash: nativePart.hash, primary: nativePart });
+    expect(groups[0].transactions.map((transaction) => transaction.id)).toEqual([
+      nativePart.id,
+      whypePart.id,
+    ]);
+    expect(groups[1].transactions.map((transaction) => transaction.id)).toEqual([standalone.id]);
+  });
+
+  it("renders duplicate hashes as one collapsed grouped trade", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          {
+            ...taxTransaction,
+            id: "hyperevmscan:txlist:0xwrap:external",
+            hash,
+            value: "25000000000000000000",
+            token_symbol: null,
+            token_decimal: null,
+            transaction_type: "txlist",
+            label: null,
+          },
+          {
+            ...taxTransaction,
+            id: "hyperevmscan:tokentx:0xwrap:1",
+            hash,
+            value: "25000000000000000000",
+            token_symbol: "WHYPE",
+            token_decimal: 18,
+            transaction_type: "tokentx",
+            label: null,
+          },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("1 transaction");
+    expect(html).toContain("grouped trade");
+    expect(html).toContain("2 transaction parts");
+    expect(html).toContain("25 native -&gt; 25 WHYPE");
+    expect(html).toContain("Show parts");
+    expect(html).toContain("Show transaction parts");
+    expect(html).toContain(`aria-label="Show transaction parts for ${hash}"`);
+    expect(html.match(/aria-expanded="false"/g)?.length).toBe(2);
+    expect(html).not.toContain("txlist</span>");
+    expect(html).not.toContain("tokentx</span>");
+  });
+
+  it("can render expanded duplicate-hash groups with all child parts", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          {
+            ...taxTransaction,
+            id: "hyperevmscan:txlist:0xwrap:external",
+            hash,
+            value: "25000000000000000000",
+            token_symbol: null,
+            token_decimal: null,
+            transaction_type: "txlist",
+            label: null,
+          },
+          {
+            ...taxTransaction,
+            id: "hyperevmscan:tokentx:0xwrap:1",
+            hash,
+            value: "25000000000000000000",
+            token_symbol: "WHYPE",
+            token_decimal: 18,
+            transaction_type: "tokentx",
+            label: null,
+          },
+        ]}
+        defaultExpandedGroups={[`hash:${hash}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("Hide parts");
+    expect(html).toContain("Hide transaction parts");
+    expect(html).toContain(`aria-label="Hide transaction parts for ${hash}"`);
+    expect(html.match(/aria-expanded="true"/g)?.length).toBe(2);
+    expect(html).toContain("txlist</span>");
+    expect(html).toContain("tokentx</span>");
+    expect(html.match(/25 native/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(html.match(/25 WHYPE/g)?.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps grouped annotation controls scoped to expanded child transaction ids", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const firstId = "hyperevmscan:txlist:0xwrap:external";
+    const secondId = "hyperevmscan:tokentx:0xwrap:1";
+    const collapsedHtml = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: firstId, hash, token_symbol: null, token_decimal: null },
+          { ...taxTransaction, id: secondId, hash, token_symbol: "WHYPE", token_decimal: 18 },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+    const expandedHtml = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: firstId, hash, token_symbol: null, token_decimal: null },
+          { ...taxTransaction, id: secondId, hash, token_symbol: "WHYPE", token_decimal: 18 },
+        ]}
+        defaultExpandedGroups={[`hash:${hash}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(collapsedHtml).not.toContain(`data-transaction-id="${firstId}"`);
+    expect(collapsedHtml).not.toContain(`data-transaction-id="${secondId}"`);
+    expect(expandedHtml.match(new RegExp(`data-transaction-id="${firstId}"`, "g"))?.length).toBe(6);
+    expect(expandedHtml.match(new RegExp(`data-transaction-id="${secondId}"`, "g"))?.length).toBe(6);
+    expect(expandedHtml).not.toContain(`data-transaction-id="hash:${hash}"`);
+  });
+
+  it("groups sparse same-hash rows without throwing", () => {
+    const sparseTransaction: TaxTransaction = {
+      ...taxTransaction,
+      id: "hyperevmscan:txlist:0xsparse:external",
+      hash: "0xsparse",
+      block_number: null,
+      time_stamp: null,
+      from_address: null,
+      to_address: null,
+      value: null,
+      method_id: null,
+      function_name: null,
+      token_symbol: null,
+      token_decimal: null,
+      transaction_type: null,
+      label: null,
+      comment: null,
+    };
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[sparseTransaction, { ...sparseTransaction, id: "part-2" }]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("0xsparse");
+    expect(html).toContain("Time n/a");
+    expect(html).toContain("Block n/a");
+    expect(html).toContain("0 native -&gt; 0 native");
   });
 
   it("limits label select choices to supported tax labels", () => {

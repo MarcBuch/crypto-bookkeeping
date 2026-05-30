@@ -24,6 +24,34 @@ export function taxCommentDraftState(transactionComment: string | null, draft: s
   };
 }
 
+export interface TaxTransactionGroup {
+  id: string;
+  hash: string;
+  primary: TaxTransaction;
+  transactions: TaxTransaction[];
+}
+
+export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransactionGroup[] {
+  const groups = new Map<string, TaxTransactionGroup>();
+
+  for (const transaction of transactions) {
+    const existing = groups.get(transaction.hash);
+    if (existing) {
+      existing.transactions.push(transaction);
+      continue;
+    }
+
+    groups.set(transaction.hash, {
+      id: `hash:${transaction.hash}`,
+      hash: transaction.hash,
+      primary: transaction,
+      transactions: [transaction],
+    });
+  }
+
+  return [...groups.values()];
+}
+
 export function TaxTransactions() {
   const { data: transactions, error, isLoading, isFetching } = useTaxTransactions({ limit: 200 });
   const syncMutation = useSyncTaxTransactions();
@@ -91,6 +119,7 @@ export function TaxTransactionLedger({
   updateTransaction,
   updateError,
   isUpdating,
+  defaultExpandedGroups = [],
 }: {
   transactions: TaxTransaction[];
   updateTransaction: (
@@ -99,9 +128,25 @@ export function TaxTransactionLedger({
   ) => void;
   updateError?: unknown;
   isUpdating?: boolean;
+  defaultExpandedGroups?: string[];
 }) {
+  const groups = groupTaxTransactions(transactions);
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set(defaultExpandedGroups));
+
   if (transactions.length === 0) {
     return <TaxEmptyState />;
+  }
+
+  function toggleGroup(groupId: string) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
   }
 
   return (
@@ -114,7 +159,7 @@ export function TaxTransactionLedger({
           <h2 className="mt-1 text-lg font-bold text-neutral-950">Synced Transactions</h2>
         </div>
         <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-semibold text-neutral-600">
-          {transactions.length} transactions
+          {groups.length} {groups.length === 1 ? "transaction" : "transactions"}
         </span>
       </div>
       {updateError ? (
@@ -135,28 +180,190 @@ export function TaxTransactionLedger({
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200">
-            {transactions.map((transaction) => (
-              <TaxTransactionRow
-                key={transaction.id}
-                transaction={transaction}
-                updateTransaction={updateTransaction}
-                isUpdating={isUpdating}
-              />
-            ))}
+            {groups.map((group) => {
+              if (group.transactions.length === 1) {
+                return (
+                  <TaxTransactionRow
+                    key={group.primary.id}
+                    transaction={group.primary}
+                    updateTransaction={updateTransaction}
+                    isUpdating={isUpdating}
+                  />
+                );
+              }
+
+              const isExpanded = expandedGroups.has(group.id);
+              return (
+                <TaxTransactionGroupRows
+                  key={group.id}
+                  group={group}
+                  isExpanded={isExpanded}
+                  isUpdating={isUpdating}
+                  updateTransaction={updateTransaction}
+                  toggleGroup={() => toggleGroup(group.id)}
+                />
+              );
+            })}
           </tbody>
         </table>
       </div>
       <div className="divide-y divide-neutral-200 lg:hidden">
-        {transactions.map((transaction) => (
-          <TaxTransactionCard
-            key={transaction.id}
-            transaction={transaction}
-            updateTransaction={updateTransaction}
-            isUpdating={isUpdating}
-          />
-        ))}
+        {groups.map((group) => {
+          if (group.transactions.length === 1) {
+            return (
+              <TaxTransactionCard
+                key={group.primary.id}
+                transaction={group.primary}
+                updateTransaction={updateTransaction}
+                isUpdating={isUpdating}
+              />
+            );
+          }
+
+          const isExpanded = expandedGroups.has(group.id);
+          return (
+            <TaxTransactionGroupCard
+              key={group.id}
+              group={group}
+              isExpanded={isExpanded}
+              isUpdating={isUpdating}
+              updateTransaction={updateTransaction}
+              toggleGroup={() => toggleGroup(group.id)}
+            />
+          );
+        })}
       </div>
     </section>
+  );
+}
+
+function TaxTransactionGroupRows({
+  group,
+  updateTransaction,
+  isUpdating,
+  isExpanded,
+  toggleGroup,
+}: {
+  group: TaxTransactionGroup;
+  updateTransaction: (
+    id: string,
+    update: { label?: TaxTransactionLabel; comment?: string | null },
+  ) => void;
+  isUpdating?: boolean;
+  isExpanded: boolean;
+  toggleGroup: () => void;
+}) {
+  return (
+    <>
+      <tr className="align-top text-neutral-700 transition hover:bg-neutral-50">
+        <td className="max-w-[180px] px-5 py-4 font-mono text-xs font-bold text-neutral-950">
+          <TransactionHashLink hash={group.hash} />
+          <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
+            grouped trade
+          </span>
+        </td>
+        <td className="px-5 py-4 font-mono text-xs whitespace-nowrap text-neutral-600">
+          <p className="font-bold text-neutral-950">{formatTimestamp(group.primary.time_stamp)}</p>
+          <p className="mt-1">Block {group.primary.block_number ?? "n/a"}</p>
+        </td>
+        <td className="max-w-[220px] px-5 py-4 text-xs text-neutral-600">
+          <p className="font-semibold text-neutral-950">{group.transactions.length} transaction parts</p>
+          <p className="mt-1 text-neutral-500">{groupLabel(group)}</p>
+        </td>
+        <td className="max-w-[240px] px-5 py-4 text-neutral-700">
+          <p className="font-mono text-sm font-bold text-neutral-950">{formatGroupValueSummary(group)}</p>
+          <p className="mt-1 text-xs font-semibold text-neutral-500">Same transaction hash</p>
+        </td>
+        <td className="px-5 py-4" colSpan={2}>
+          <button
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? "Hide" : "Show"} transaction parts for ${group.hash}`}
+            className="rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+            type="button"
+            onClick={toggleGroup}
+          >
+            {isExpanded ? "Hide parts" : "Show parts"}
+          </button>
+        </td>
+      </tr>
+      {isExpanded
+        ? group.transactions.map((transaction, index) => (
+            <TaxTransactionRow
+              key={transaction.id}
+              transaction={transaction}
+              updateTransaction={updateTransaction}
+              isUpdating={isUpdating}
+              isGroupedChild
+              isLastGroupedChild={index === group.transactions.length - 1}
+            />
+          ))
+        : null}
+    </>
+  );
+}
+
+function TaxTransactionGroupCard({
+  group,
+  updateTransaction,
+  isUpdating,
+  isExpanded,
+  toggleGroup,
+}: {
+  group: TaxTransactionGroup;
+  updateTransaction: (
+    id: string,
+    update: { label?: TaxTransactionLabel; comment?: string | null },
+  ) => void;
+  isUpdating?: boolean;
+  isExpanded: boolean;
+  toggleGroup: () => void;
+}) {
+  return (
+    <article className="p-5 text-sm text-neutral-700">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <TransactionHashLink hash={group.hash} />
+          <p className="mt-1 text-xs font-semibold text-neutral-500">
+            {formatTimestamp(group.primary.time_stamp)} / Block {group.primary.block_number ?? "n/a"}
+          </p>
+        </div>
+        <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-bold text-neutral-600">
+          {group.transactions.length} parts
+        </span>
+      </div>
+      <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+        <p className="text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+          Grouped Trade
+        </p>
+        <p className="mt-1 font-mono font-bold text-neutral-950">{formatGroupValueSummary(group)}</p>
+        <p className="mt-1 text-xs font-semibold text-neutral-500">{groupLabel(group)}</p>
+      </div>
+      <button
+        aria-expanded={isExpanded}
+        aria-label={`${isExpanded ? "Hide" : "Show"} transaction parts for ${group.hash}`}
+        className="mt-4 rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+        type="button"
+        onClick={toggleGroup}
+      >
+        {isExpanded ? "Hide transaction parts" : "Show transaction parts"}
+      </button>
+      {isExpanded ? (
+        <div className="mt-4 divide-y divide-neutral-200 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+          {group.transactions.map((transaction, index) => (
+            <div
+              key={transaction.id}
+              className={`relative pl-5 before:absolute before:top-0 before:left-2 before:w-px before:bg-neutral-300 after:absolute after:top-8 after:left-2 after:h-px after:w-3 after:bg-neutral-300 ${index === group.transactions.length - 1 ? "before:h-8" : "before:bottom-0"}`}
+            >
+              <TaxTransactionCard
+                transaction={transaction}
+                updateTransaction={updateTransaction}
+                isUpdating={isUpdating}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -164,6 +371,8 @@ function TaxTransactionRow({
   transaction,
   updateTransaction,
   isUpdating,
+  isGroupedChild = false,
+  isLastGroupedChild = false,
 }: {
   transaction: TaxTransaction;
   updateTransaction: (
@@ -171,10 +380,20 @@ function TaxTransactionRow({
     update: { label?: TaxTransactionLabel; comment?: string | null },
   ) => void;
   isUpdating?: boolean;
+  isGroupedChild?: boolean;
+  isLastGroupedChild?: boolean;
 }) {
+  const groupedChildConnectorClass = isLastGroupedChild
+    ? "pl-12 before:absolute before:top-0 before:left-6 before:h-7 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-6 after:h-px after:w-4 after:bg-neutral-300"
+    : "pl-12 before:absolute before:top-0 before:bottom-0 before:left-6 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-6 after:h-px after:w-4 after:bg-neutral-300";
+
   return (
-    <tr className="align-top text-neutral-700 transition hover:bg-neutral-50">
-      <td className="max-w-[180px] px-5 py-4 font-mono text-xs font-bold text-neutral-950">
+    <tr
+      className={`align-top text-neutral-700 transition hover:bg-neutral-50 ${isGroupedChild ? "bg-neutral-50/60" : ""}`}
+    >
+      <td
+        className={`relative max-w-[180px] py-4 pr-5 font-mono text-xs font-bold text-neutral-950 ${isGroupedChild ? groupedChildConnectorClass : "pl-5"}`}
+      >
         <TransactionHashLink hash={transaction.hash} />
         <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
           {transaction.transaction_type ?? transaction.source}
@@ -285,6 +504,7 @@ function LabelSelect({
   return (
     <select
       className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-950 transition outline-none focus:border-neutral-950 disabled:bg-neutral-100 disabled:text-neutral-500"
+      data-transaction-id={transaction.id}
       disabled={disabled}
       value={transaction.label ?? ""}
       onChange={(event) => {
@@ -323,6 +543,7 @@ function CommentEditor({
       <textarea
         aria-label={`Comment for ${transaction.hash}`}
         className="min-h-20 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 transition outline-none placeholder:text-neutral-400 focus:border-neutral-950 disabled:bg-neutral-100 disabled:text-neutral-500"
+        data-transaction-id={transaction.id}
         disabled={disabled}
         placeholder="Add tax note"
         value={comment}
@@ -330,6 +551,7 @@ function CommentEditor({
       />
       <button
         className="justify-self-start rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400"
+        data-transaction-id={transaction.id}
         disabled={disabled || !commentDraft.isDirty}
         type="button"
         onClick={() => updateTransaction(transaction.id, { comment: commentDraft.update })}
@@ -486,6 +708,15 @@ function formatTransactionValue(transaction: TaxTransaction): string {
   } catch {
     return `${transaction.value} ${symbol}`;
   }
+}
+
+function formatGroupValueSummary(group: TaxTransactionGroup): string {
+  return group.transactions.map(formatTransactionValue).join(" -> ");
+}
+
+function groupLabel(group: TaxTransactionGroup): string {
+  const labels = new Set(group.transactions.map((transaction) => transaction.label ?? "Unlabeled"));
+  return labels.size === 1 ? [...labels][0] : "Mixed labels";
 }
 
 function functionLabel(transaction: TaxTransaction): string {

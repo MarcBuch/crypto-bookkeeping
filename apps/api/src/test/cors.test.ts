@@ -23,6 +23,9 @@ mock.module("@lp-tracker/core", () => ({
   getPnLView: async () => [],
   getILView: async () => [],
   getHistoryView: async () => [],
+  listTaxTransactions: () => [],
+  syncTaxTransactions: async () => ({}),
+  updateTaxTransaction: () => null,
   NotFoundError: class NotFoundError extends Error {},
   RpcError: class RpcError extends Error {
     code?: number;
@@ -86,6 +89,28 @@ describe("CORS", () => {
       expect(res.statusCode).toBe(204);
       expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
       expect(res.headers["access-control-allow-methods"]).toContain("GET");
+      expect(res.headers["access-control-allow-methods"]).toContain("PATCH");
+      expect(res.headers["access-control-allow-headers"]).toBe("content-type");
+    });
+  });
+
+  it("allows tax transaction PATCH preflight requests", async () => {
+    process.env.CORS_ORIGIN = "http://localhost:5173";
+
+    await withServer(async (server) => {
+      const res = await server.inject({
+        method: "OPTIONS",
+        url: "/tax/transactions/hyperscan%3Atxlist%3A0xhash%3Aexternal",
+        headers: {
+          origin: "http://localhost:5173",
+          "access-control-request-method": "PATCH",
+          "access-control-request-headers": "content-type",
+        },
+      });
+
+      expect(res.statusCode).toBe(204);
+      expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+      expect(res.headers["access-control-allow-methods"]).toContain("PATCH");
       expect(res.headers["access-control-allow-headers"]).toBe("content-type");
     });
   });

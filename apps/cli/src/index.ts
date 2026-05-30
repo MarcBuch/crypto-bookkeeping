@@ -6,6 +6,10 @@ import {
   getILView,
   takeSnapshot,
   getHistoryView,
+  syncTaxTransactions,
+  listTaxTransactions,
+  getTaxTransaction,
+  updateTaxTransaction,
   NotFoundError,
   // Display
   displayPositions,
@@ -17,6 +21,10 @@ import {
   type PositionDisplayData,
   type ILDisplayData,
   type SnapshotDisplayData,
+  type StoredTaxTransaction,
+  type TaxTransactionLabel,
+  type TaxTransactionLabelFilter,
+  type TaxTransactionUpdate,
 } from "@lp-tracker/core";
 import { Command } from "commander";
 
@@ -43,6 +51,53 @@ function output(data: any, displayFn: () => void): void {
     process.stdout.write(JSON.stringify(data, null, 2) + "\n");
   } else {
     displayFn();
+  }
+}
+
+function parseNonNegativeInteger(raw: string, name: string): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function parsePositiveInteger(raw: string, name: string): number {
+  const value = parseNonNegativeInteger(raw, name);
+  if (value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function parseListTaxLabel(raw: string | undefined): TaxTransactionLabelFilter | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === "Trade" || raw === "Transfer" || raw === "unlabeled") return raw;
+  throw new Error("label must be Trade, Transfer, or unlabeled");
+}
+
+function parseUpdateTaxLabel(raw: string): TaxTransactionLabel {
+  if (raw === "Trade" || raw === "Transfer") return raw;
+  if (raw === "null" || raw === "clear" || raw === "none" || raw === "unlabeled") return null;
+  throw new Error("label must be Trade, Transfer, null, clear, none, or unlabeled");
+}
+
+function formatTaxTransaction(transaction: StoredTaxTransaction): string {
+  const label = transaction.label ?? "unlabeled";
+  const timestamp = transaction.time_stamp ?? "unknown time";
+  const direction = `${transaction.from_address ?? "?"} -> ${transaction.to_address ?? "?"}`;
+  const value = transaction.value ?? "0";
+  const token = transaction.token_symbol ?? transaction.token_name ?? "native";
+  const comment = transaction.comment ? ` | ${transaction.comment}` : "";
+  return `${transaction.id} | ${label} | ${timestamp} | ${transaction.transaction_type ?? "tx"} | ${value} ${token} | ${direction}${comment}`;
+}
+
+function printCommandError(message: string): void {
+  process.exitCode = 1;
+  if (isJsonMode()) {
+    process.stdout.write(JSON.stringify({ error: message }, null, 2) + "\n");
+  } else {
+    console.error(message);
   }
 }
 
@@ -219,6 +274,116 @@ program
     }));
 
     displayHistory(tokenId, pair, displayData);
+  });
+
+// ===== TAX COMMANDS =====
+const tax = program.command("tax").description("Sync, inspect, and label tax transactions");
+
+tax
+  .command("sync")
+  .description("Sync tax transactions for the configured wallet")
+  .action(async () => {
+    const config = loadConfig();
+
+    if (!isJsonMode()) console.log(`Syncing tax transactions for ${config.wallet}...`);
+
+    const sync = await syncTaxTransactions(config);
+
+    output({ sync }, () => {
+      console.log(
+        `Synced ${sync.synced} tax transaction(s) from ${sync.source} for ${sync.wallet}.`,
+      );
+      if (sync.latestBlockNumber !== null) {
+        console.log(`Latest block: ${sync.latestBlockNumber}`);
+      }
+    });
+  });
+
+tax
+  .command("list")
+  .description("List stored tax transactions")
+  .option("--limit <number>", "Number of transactions to show", "50")
+  .option("--offset <number>", "Number of transactions to skip", "0")
+  .option("--label <label>", "Filter by Trade, Transfer, or unlabeled")
+  .action((options: { limit: string; offset: string; label?: string }) => {
+    let limit: number;
+    let offset: number;
+    let label: TaxTransactionLabelFilter | undefined;
+    try {
+      limit = parsePositiveInteger(options.limit, "limit");
+      offset = parseNonNegativeInteger(options.offset, "offset");
+      label = parseListTaxLabel(options.label);
+    } catch (err) {
+      printCommandError(err instanceof Error ? err.message : "Invalid tax list options");
+      return;
+    }
+
+    const transactions: StoredTaxTransaction[] = listTaxTransactions(limit, offset, label);
+
+    output({ transactions }, () => {
+      if (transactions.length === 0) {
+        console.log("No tax transactions found.");
+        return;
+      }
+      for (const transaction of transactions) {
+        console.log(formatTaxTransaction(transaction));
+      }
+    });
+  });
+
+tax
+  .command("get")
+  .description("Get one stored tax transaction by ID")
+  .argument("<id>", "Tax transaction ID")
+  .action((id: string) => {
+    const transaction = getTaxTransaction(id);
+    if (transaction === null) {
+      process.exitCode = 1;
+      output({ error: "Tax transaction not found", id }, () => {
+        console.error(`Tax transaction not found: ${id}`);
+      });
+      return;
+    }
+
+    output({ transaction }, () => console.log(formatTaxTransaction(transaction)));
+  });
+
+tax
+  .command("label")
+  .description("Update a tax transaction label and/or comment")
+  .argument("<id>", "Tax transaction ID")
+  .option("--label <label>", "Trade, Transfer, null, clear, none, or unlabeled")
+  .option("--comment <comment>", "Comment to store with the transaction")
+  .action((id: string, options: { label?: string; comment?: string }) => {
+    const update: TaxTransactionUpdate = {};
+    try {
+      if (options.label !== undefined) {
+        update.label = parseUpdateTaxLabel(options.label);
+      }
+      if (options.comment !== undefined) {
+        update.comment = options.comment;
+      }
+      if (!Object.hasOwn(update, "label") && !Object.hasOwn(update, "comment")) {
+        throw new Error("tax label requires --label and/or --comment");
+      }
+    } catch (err) {
+      printCommandError(err instanceof Error ? err.message : "Invalid tax label options");
+      return;
+    }
+
+    const transaction = updateTaxTransaction(id, update);
+    if (transaction === null) {
+      process.exitCode = 1;
+      output({ error: "Tax transaction not found", id }, () => {
+        console.error(`Tax transaction not found: ${id}`);
+      });
+      return;
+    }
+
+    output({ transaction }, () => {
+      console.log(`Updated tax transaction ${transaction.id}.`);
+      console.log(formatTaxTransaction(transaction));
+    });
   });
 
 program.parse();

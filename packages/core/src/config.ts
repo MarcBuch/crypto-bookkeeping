@@ -13,6 +13,12 @@ export interface PricingConfig {
   coingeckoIds?: Record<string, string>;
 }
 
+export interface TaxConfig {
+  explorerApiUrl?: string;
+  explorerApiKey?: string;
+  explorerChainId?: number;
+}
+
 export interface Config {
   rpc: string;
   chainId: number;
@@ -27,6 +33,8 @@ export interface Config {
   positions?: Record<string, PositionConfig>;
   /** Optional live USD pricing configuration */
   pricing?: PricingConfig;
+  /** Optional tax transaction sync configuration */
+  tax?: TaxConfig;
 }
 
 /**

@@ -25,5 +25,9 @@
       "WHYPE": "hyperliquid",
       "0xTOKEN_ADDRESS_OR_PROJECTX_WRAPPED_TOKEN": "coingecko-token-id"
     }
+  },
+  "tax": {
+    "explorerApiUrl": "https://www.hyperscan.com/api",
+    "explorerChainId": 999
   }
 }

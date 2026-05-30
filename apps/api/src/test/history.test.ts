@@ -70,6 +70,9 @@ mock.module("@lp-tracker/core", () => ({
     lastHistoryCallArgs = args;
     return mockGetHistoryView(...args);
   },
+  listTaxTransactions: () => [],
+  syncTaxTransactions: async () => ({}),
+  updateTaxTransaction: () => null,
   NotFoundError: MockNotFoundError,
   RpcError: MockRpcError,
   ValidationError: MockValidationError,

@@ -93,6 +93,47 @@ function initSchema(database: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_snapshots_token_id ON snapshots(token_id);
     CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp);
+
+    CREATE TABLE IF NOT EXISTS tax_transactions (
+      id TEXT PRIMARY KEY,
+      hash TEXT NOT NULL,
+      block_number INTEGER,
+      time_stamp TEXT,
+      from_address TEXT,
+      to_address TEXT,
+      value TEXT,
+      gas_used TEXT,
+      gas_price TEXT,
+      fee TEXT,
+      method_id TEXT,
+      function_name TEXT,
+      input TEXT,
+      contract_address TEXT,
+      token_symbol TEXT,
+      token_decimal INTEGER,
+      token_name TEXT,
+      transaction_type TEXT,
+      source TEXT NOT NULL,
+      is_error INTEGER,
+      label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+      comment TEXT,
+      synced_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_hash ON tax_transactions(hash);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_time_stamp ON tax_transactions(time_stamp);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_block_number ON tax_transactions(block_number);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_from_address ON tax_transactions(from_address);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_to_address ON tax_transactions(to_address);
+
+    CREATE TABLE IF NOT EXISTS tax_sync_state (
+      wallet TEXT PRIMARY KEY,
+      last_synced_at TEXT NOT NULL,
+      last_block_number INTEGER,
+      source TEXT NOT NULL
+    );
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist
@@ -102,4 +143,67 @@ function initSchema(database: Database): void {
   if (!cols.some((c) => c.name === "entry_liquidity")) {
     database.exec("ALTER TABLE positions ADD COLUMN entry_liquidity TEXT");
   }
+
+  const taxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
+    name: string;
+    pk: number;
+  }[];
+  const hashCol = taxTransactionCols.find((c) => c.name === "hash");
+  if (!taxTransactionCols.some((c) => c.name === "id") || hashCol?.pk) {
+    const idExpression = taxTransactionCols.some((c) => c.name === "id")
+      ? "COALESCE(id, hash)"
+      : "hash";
+    database.exec(`
+      CREATE TABLE tax_transactions_new (
+        id TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        block_number INTEGER,
+        time_stamp TEXT,
+        from_address TEXT,
+        to_address TEXT,
+        value TEXT,
+        gas_used TEXT,
+        gas_price TEXT,
+        fee TEXT,
+        method_id TEXT,
+        function_name TEXT,
+        input TEXT,
+        contract_address TEXT,
+        token_symbol TEXT,
+        token_decimal INTEGER,
+        token_name TEXT,
+        transaction_type TEXT,
+        source TEXT NOT NULL,
+        is_error INTEGER,
+        label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+        comment TEXT,
+        synced_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO tax_transactions_new
+        (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used,
+         gas_price, fee, method_id, function_name, input, contract_address, token_symbol,
+         token_decimal, token_name, transaction_type, source, is_error, label, comment,
+         synced_at, created_at, updated_at)
+      SELECT
+        ${idExpression}, hash, block_number, time_stamp, from_address, to_address, value, gas_used,
+        gas_price, fee, method_id, function_name, input, contract_address, token_symbol,
+        token_decimal, token_name, transaction_type, source, is_error, label, comment,
+        synced_at, created_at, updated_at
+      FROM tax_transactions;
+
+      DROP TABLE tax_transactions;
+      ALTER TABLE tax_transactions_new RENAME TO tax_transactions;
+    `);
+  }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_hash ON tax_transactions(hash);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_time_stamp ON tax_transactions(time_stamp);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_block_number ON tax_transactions(block_number);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_from_address ON tax_transactions(from_address);
+    CREATE INDEX IF NOT EXISTS idx_tax_transactions_to_address ON tax_transactions(to_address);
+  `);
 }

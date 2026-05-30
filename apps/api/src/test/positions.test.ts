@@ -50,6 +50,9 @@ mock.module("@lp-tracker/core", () => ({
   getPnLView: async () => [],
   getILView: async () => [],
   getHistoryView: async () => [],
+  listTaxTransactions: () => [],
+  syncTaxTransactions: async () => ({}),
+  updateTaxTransaction: () => null,
   NotFoundError: class NotFoundError extends Error {
     constructor(msg: string) {
       super(msg);

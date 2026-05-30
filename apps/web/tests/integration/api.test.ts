@@ -5,8 +5,12 @@ import {
   getDashboardPositions,
   getPnL,
   getPositions,
+  getTaxTransactions,
+  syncTaxTransactions,
+  updateTaxTransaction,
   type PnLView,
   type PositionView,
+  type TaxTransaction,
 } from "../../src/api";
 
 const originalFetch = globalThis.fetch;
@@ -15,10 +19,12 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-function mockFetch(handler: (url: string) => Response | Promise<Response>): void {
-  globalThis.fetch = mock((input: RequestInfo | URL) => {
+function mockFetch(
+  handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+): void {
+  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
     const url = input.toString();
-    return Promise.resolve(handler(url));
+    return Promise.resolve(handler(url, init));
   }) as unknown as typeof fetch;
 }
 
@@ -79,6 +85,34 @@ const pnl: PnLView = {
   netVsHodlPercent: -0.01,
   priceLower: 1,
   priceUpper: 2,
+};
+
+const taxTransaction: TaxTransaction = {
+  id: "hyperevmscan:txlist:0xhash:external",
+  hash: "0xhash",
+  block_number: 123,
+  time_stamp: "1760000000",
+  from_address: "0xfrom",
+  to_address: "0xto",
+  value: "1000000000000000000",
+  gas_used: "21000",
+  gas_price: "1000000000",
+  fee: "21000000000000",
+  method_id: "0x12345678",
+  function_name: "transfer(address,uint256)",
+  input: "0x12345678",
+  contract_address: null,
+  token_symbol: null,
+  token_decimal: null,
+  token_name: null,
+  transaction_type: "external",
+  source: "hyperevmscan",
+  is_error: 0,
+  label: "Trade",
+  comment: null,
+  synced_at: "2026-05-30T12:00:00.000Z",
+  created_at: "2026-05-30T12:00:00.000Z",
+  updated_at: "2026-05-30T12:00:00.000Z",
 };
 
 describe("API client", () => {
@@ -231,5 +265,200 @@ describe("API client", () => {
     });
 
     await expect(getDashboardPositions()).resolves.toEqual([{ ...position, pnl: undefined }]);
+  });
+
+  it("fetches tax transactions with pagination and label filters", async () => {
+    mockFetch((url, init) => {
+      expect(init?.method).toBeUndefined();
+      expect(url).toBe("http://localhost:3000/tax/transactions?limit=10&offset=5&label=Trade");
+      return jsonResponse({ transactions: [taxTransaction] });
+    });
+
+    await expect(getTaxTransactions({ limit: 10, offset: 5, label: "Trade" })).resolves.toEqual([
+      taxTransaction,
+    ]);
+  });
+
+  it("omits null tax labels while preserving zero offset and provided limit", async () => {
+    mockFetch((url) => {
+      expect(url).toBe("http://localhost:3000/tax/transactions?limit=25&offset=0");
+      return jsonResponse({ transactions: [] });
+    });
+
+    await expect(getTaxTransactions({ limit: 25, offset: 0, label: null })).resolves.toEqual([]);
+  });
+
+  it("throws when tax transactions response lacks a transactions array", async () => {
+    mockFetch(() => jsonResponse({}));
+
+    await expect(getTaxTransactions()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API response did not include tax transactions.",
+    });
+  });
+
+  it("throws when tax transactions response has null transactions", async () => {
+    mockFetch(() => jsonResponse({ transactions: null }));
+
+    await expect(getTaxTransactions()).rejects.toThrow(
+      "API response did not include tax transactions.",
+    );
+  });
+
+  it("throws when tax transactions contain missing id or hash", async () => {
+    mockFetch(() => jsonResponse({ transactions: [{ ...taxTransaction, hash: undefined }] }));
+
+    await expect(getTaxTransactions()).rejects.toThrow(
+      "API response included malformed tax transactions.",
+    );
+  });
+
+  it("propagates tax transactions non-JSON failures with generic status message", async () => {
+    mockFetch(() => new Response("upstream unavailable", { status: 503 }));
+
+    await expect(getTaxTransactions()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API request failed with status 503",
+      status: 503,
+    });
+  });
+
+  it("syncs tax transactions with POST", async () => {
+    const summary = { synced: 2, insertedOrUpdated: 2, source: "hyperevmscan" };
+    mockFetch((url, init) => {
+      expect(url).toBe("http://localhost:3000/tax/transactions/sync");
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBeUndefined();
+      return jsonResponse({ sync: summary });
+    });
+
+    await expect(syncTaxTransactions()).resolves.toEqual(summary);
+  });
+
+  it("throws when tax sync response lacks a sync object", async () => {
+    mockFetch(() => jsonResponse({}));
+
+    await expect(syncTaxTransactions()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API response did not include tax sync summary.",
+    });
+  });
+
+  it("throws when tax sync response has null or array sync", async () => {
+    mockFetch(() => jsonResponse({ sync: null }));
+    await expect(syncTaxTransactions()).rejects.toThrow(
+      "API response did not include tax sync summary.",
+    );
+
+    mockFetch(() => jsonResponse({ sync: [] }));
+    await expect(syncTaxTransactions()).rejects.toThrow(
+      "API response did not include tax sync summary.",
+    );
+  });
+
+  it("propagates tax sync non-2xx JSON server errors", async () => {
+    mockFetch(() => jsonResponse({ error: "sync failed" }, 409));
+
+    await expect(syncTaxTransactions()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "sync failed",
+      status: 409,
+    });
+  });
+
+  it("propagates tax sync non-JSON failures with generic status message", async () => {
+    mockFetch(() => new Response("gateway timeout", { status: 504 }));
+
+    await expect(syncTaxTransactions()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API request failed with status 504",
+      status: 504,
+    });
+  });
+
+  it("updates tax transaction metadata with PATCH", async () => {
+    const updated = { ...taxTransaction, label: "Transfer" as const, comment: "Manual" };
+    mockFetch((url, init) => {
+      expect(url).toBe(
+        "http://localhost:3000/tax/transactions/hyperevmscan%3Atxlist%3A0xhash%3Aexternal",
+      );
+      expect(init?.method).toBe("PATCH");
+      expect(init?.headers).toEqual({ "content-type": "application/json" });
+      expect(init?.body).toBe(JSON.stringify({ label: "Transfer", comment: "Manual" }));
+      return jsonResponse({ transaction: updated });
+    });
+
+    await expect(
+      updateTaxTransaction(taxTransaction.id, { label: "Transfer", comment: "Manual" }),
+    ).resolves.toEqual(updated);
+  });
+
+  it("URL-encodes tax transaction ids with reserved URL characters", async () => {
+    const id = "scan:tx#hash/path?kind=external";
+    mockFetch((url) => {
+      expect(url).toBe(
+        "http://localhost:3000/tax/transactions/scan%3Atx%23hash%2Fpath%3Fkind%3Dexternal",
+      );
+      return jsonResponse({ transaction: { ...taxTransaction, id } });
+    });
+
+    await expect(updateTaxTransaction(id, { comment: "reserved chars" })).resolves.toMatchObject({
+      id,
+    });
+  });
+
+  it("throws when tax update response lacks a transaction object", async () => {
+    mockFetch(() => jsonResponse({}));
+
+    await expect(
+      updateTaxTransaction(taxTransaction.id, { comment: "Manual" }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API response did not include tax transaction.",
+    });
+  });
+
+  it("throws when tax update response has null or array transaction", async () => {
+    mockFetch(() => jsonResponse({ transaction: null }));
+    await expect(updateTaxTransaction(taxTransaction.id, { comment: "Manual" })).rejects.toThrow(
+      "API response did not include tax transaction.",
+    );
+
+    mockFetch(() => jsonResponse({ transaction: [] }));
+    await expect(updateTaxTransaction(taxTransaction.id, { comment: "Manual" })).rejects.toThrow(
+      "API response did not include tax transaction.",
+    );
+  });
+
+  it("throws when tax update response transaction misses id or hash", async () => {
+    mockFetch(() => jsonResponse({ transaction: { ...taxTransaction, id: undefined } }));
+
+    await expect(updateTaxTransaction(taxTransaction.id, { comment: "Manual" })).rejects.toThrow(
+      "API response included malformed tax transaction.",
+    );
+  });
+
+  it("propagates tax update non-2xx JSON server errors", async () => {
+    mockFetch(() => jsonResponse({ error: "annotation rejected" }, 422));
+
+    await expect(updateTaxTransaction(taxTransaction.id, { label: "Trade" })).rejects.toMatchObject(
+      {
+        name: "ApiError",
+        message: "annotation rejected",
+        status: 422,
+      },
+    );
+  });
+
+  it("propagates tax update non-JSON failures with generic status message", async () => {
+    mockFetch(() => new Response("service unavailable", { status: 503 }));
+
+    await expect(
+      updateTaxTransaction(taxTransaction.id, { label: "Transfer" }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API request failed with status 503",
+      status: 503,
+    });
   });
 });

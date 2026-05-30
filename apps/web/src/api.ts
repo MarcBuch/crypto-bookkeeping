@@ -54,6 +54,56 @@ export interface DashboardPosition extends PositionView {
   pnl?: PnLView;
 }
 
+export type TaxTransactionLabel = "Trade" | "Transfer" | null;
+
+export interface TaxTransaction {
+  id: string;
+  hash: string;
+  block_number: number | null;
+  time_stamp: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  value: string | null;
+  gas_used: string | null;
+  gas_price: string | null;
+  fee: string | null;
+  method_id: string | null;
+  function_name: string | null;
+  input: string | null;
+  contract_address: string | null;
+  token_symbol: string | null;
+  token_decimal: number | null;
+  token_name: string | null;
+  transaction_type: string | null;
+  source: string;
+  is_error: number | null;
+  label: TaxTransactionLabel;
+  comment: string | null;
+  synced_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaxSyncSummary {
+  synced?: number;
+  insertedOrUpdated?: number;
+  source?: string;
+  wallet?: string;
+  latestBlockNumber?: number | null;
+  [key: string]: unknown;
+}
+
+export interface TaxTransactionsOptions {
+  limit?: number;
+  offset?: number;
+  label?: TaxTransactionLabel;
+}
+
+export interface TaxTransactionUpdate {
+  label?: TaxTransactionLabel;
+  comment?: string | null;
+}
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
 
 export class ApiError extends Error {
@@ -66,8 +116,24 @@ export class ApiError extends Error {
   }
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`);
+interface FetchJsonOptions {
+  method?: string;
+  body?: unknown;
+}
+
+async function fetchJson<T>(path: string, options: FetchJsonOptions = {}): Promise<T> {
+  const init: RequestInit = {};
+
+  if (options.method) {
+    init.method = options.method;
+  }
+
+  if (options.body !== undefined) {
+    init.body = JSON.stringify(options.body);
+    init.headers = { "content-type": "application/json" };
+  }
+
+  const response = await fetch(`${apiBaseUrl}${path}`, init);
 
   if (!response.ok) {
     const errorMessage = await readErrorMessage(response);
@@ -75,6 +141,14 @@ async function fetchJson<T>(path: string): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isTaxTransaction(value: unknown): value is TaxTransaction {
+  return isObject(value) && typeof value.id === "string" && typeof value.hash === "string";
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -118,4 +192,64 @@ export async function getDashboardPositions(): Promise<DashboardPosition[]> {
     ...position,
     pnl: pnlByTokenId.get(position.tokenId),
   }));
+}
+
+export async function getTaxTransactions(
+  options: TaxTransactionsOptions = {},
+): Promise<TaxTransaction[]> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) {
+    params.set("limit", options.limit.toString());
+  }
+  if (options.offset !== undefined) {
+    params.set("offset", options.offset.toString());
+  }
+  if (options.label !== undefined && options.label !== null) {
+    params.set("label", options.label);
+  }
+
+  const query = params.toString();
+  const data = await fetchJson<{ transactions?: unknown }>(
+    `/tax/transactions${query ? `?${query}` : ""}`,
+  );
+
+  if (!Array.isArray(data.transactions)) {
+    throw new ApiError("API response did not include tax transactions.");
+  }
+
+  if (!data.transactions.every(isTaxTransaction)) {
+    throw new ApiError("API response included malformed tax transactions.");
+  }
+
+  return data.transactions as TaxTransaction[];
+}
+
+export async function syncTaxTransactions(): Promise<TaxSyncSummary> {
+  const data = await fetchJson<{ sync?: unknown }>("/tax/transactions/sync", { method: "POST" });
+
+  if (!isObject(data.sync)) {
+    throw new ApiError("API response did not include tax sync summary.");
+  }
+
+  return data.sync as TaxSyncSummary;
+}
+
+export async function updateTaxTransaction(
+  id: string,
+  update: TaxTransactionUpdate,
+): Promise<TaxTransaction> {
+  const data = await fetchJson<{ transaction?: unknown }>(
+    `/tax/transactions/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: update },
+  );
+
+  if (!isObject(data.transaction)) {
+    throw new ApiError("API response did not include tax transaction.");
+  }
+
+  if (!isTaxTransaction(data.transaction)) {
+    throw new ApiError("API response included malformed tax transaction.");
+  }
+
+  return data.transaction as unknown as TaxTransaction;
 }

@@ -1,0 +1,349 @@
+import type { Config } from "../config.js";
+import {
+  getTaxSyncState,
+  upsertSyncedTaxTransaction,
+  upsertTaxSyncState,
+  type SyncedTaxTransaction,
+} from "../db/store.js";
+
+const DEFAULT_EXPLORER_API_URL = "https://www.hyperscan.com/api";
+const DEFAULT_EXPLORER_CHAIN_ID = 999;
+const DEFAULT_PAGE_SIZE = 1000;
+const DEFAULT_MAX_PAGES = 100;
+const DEFAULT_SOURCE = "hyperscan";
+
+const TAX_EXPLORER_ACTIONS = ["txlist", "tokentx", "tokennfttx", "txlistinternal"] as const;
+
+type TaxExplorerAction = (typeof TAX_EXPLORER_ACTIONS)[number];
+
+type TaxTransactionFetcher = (url: string) => Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+}>;
+
+export interface SyncTaxTransactionsOptions {
+  fetcher?: TaxTransactionFetcher;
+  baseUrl?: string;
+  pageSize?: number;
+  maxPages?: number;
+  source?: string;
+  startBlock?: number;
+  endBlock?: number;
+}
+
+export interface SyncTaxTransactionsSummary {
+  synced: number;
+  insertedOrUpdated: number;
+  source: string;
+  wallet: string;
+  latestBlockNumber: number | null;
+}
+
+interface ExplorerEnvelope {
+  status?: string;
+  message?: string;
+  result?: unknown;
+}
+
+type ExplorerTransaction = Record<string, unknown>;
+
+export async function syncTaxTransactions(
+  config: Pick<Config, "wallet" | "tax">,
+  options: SyncTaxTransactionsOptions = {},
+): Promise<SyncTaxTransactionsSummary> {
+  const wallet = config.wallet;
+  const source = options.source ?? DEFAULT_SOURCE;
+  const baseUrl = options.baseUrl ?? config.tax?.explorerApiUrl ?? DEFAULT_EXPLORER_API_URL;
+  const chainId = config.tax?.explorerChainId ?? DEFAULT_EXPLORER_CHAIN_ID;
+  const apiKey = normalizedExplorerApiKey(config.tax?.explorerApiKey);
+  const pageSize = positiveInteger(options.pageSize) ?? DEFAULT_PAGE_SIZE;
+  const maxPages = positiveInteger(options.maxPages) ?? DEFAULT_MAX_PAGES;
+  const fetcher = options.fetcher ?? fetch;
+  const syncedAt = new Date().toISOString();
+  const previousSyncState = getTaxSyncState(wallet);
+
+  if (requiresExplorerApiKey(baseUrl) && !apiKey) {
+    throw new Error(
+      "Tax transaction sync requires tax.explorerApiKey when using the Etherscan v2 explorer API",
+    );
+  }
+
+  let synced = 0;
+  let latestBlockNumber: number | null = null;
+
+  for (const action of TAX_EXPLORER_ACTIONS) {
+    for (let page = 1; page <= maxPages; page += 1) {
+      const response = await fetchExplorerPage({
+        action,
+        address: wallet,
+        apiKey,
+        baseUrl,
+        chainId,
+        fetcher,
+        page,
+        pageSize,
+        startBlock: options.startBlock,
+        endBlock: options.endBlock,
+      });
+
+      if (response.length === 0) break;
+
+      for (const item of response) {
+        const row = toSyncedTaxTransaction({
+          action,
+          item,
+          source,
+          syncedAt,
+        });
+        if (!row) {
+          continue;
+        }
+
+        upsertSyncedTaxTransaction(row);
+        synced += 1;
+        if (row.block_number !== null) {
+          latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
+        }
+      }
+
+      if (response.length < pageSize) break;
+    }
+  }
+
+  upsertTaxSyncState({
+    wallet,
+    last_synced_at: syncedAt,
+    last_block_number: latestKnownBlockNumber(
+      previousSyncState?.last_block_number ?? null,
+      latestBlockNumber,
+    ),
+    source,
+  });
+
+  return {
+    synced,
+    insertedOrUpdated: synced,
+    source,
+    wallet,
+    latestBlockNumber,
+  };
+}
+
+async function fetchExplorerPage(args: {
+  action: TaxExplorerAction;
+  address: string;
+  apiKey?: string;
+  baseUrl: string;
+  chainId: number;
+  fetcher: TaxTransactionFetcher;
+  page: number;
+  pageSize: number;
+  startBlock?: number;
+  endBlock?: number;
+}): Promise<ExplorerTransaction[]> {
+  const params = new URLSearchParams({
+    chainid: String(args.chainId),
+    module: "account",
+    action: args.action,
+    address: args.address,
+    page: String(args.page),
+    offset: String(args.pageSize),
+    sort: "asc",
+  });
+  if (args.apiKey) params.set("apikey", args.apiKey);
+  if (args.startBlock !== undefined) params.set("startblock", String(args.startBlock));
+  if (args.endBlock !== undefined) params.set("endblock", String(args.endBlock));
+
+  const separator = args.baseUrl.includes("?") ? "&" : "?";
+  const url = `${args.baseUrl}${separator}${params.toString()}`;
+  const response = await args.fetcher(url);
+  if (!response.ok) {
+    throw new Error(`Tax transaction sync failed for ${args.action}: HTTP ${response.status}`);
+  }
+
+  const body = (await response.json()) as ExplorerEnvelope;
+  const result = body?.result;
+  if (Array.isArray(result)) {
+    return result.filter(isExplorerTransaction);
+  }
+
+  if (isExplorerEmptyOrUnsupported(body, args.action)) {
+    return [];
+  }
+
+  throw new Error(`Tax transaction sync failed for ${args.action}: ${formatExplorerError(body)}`);
+}
+
+function toSyncedTaxTransaction(args: {
+  action: TaxExplorerAction;
+  item: ExplorerTransaction;
+  source: string;
+  syncedAt: string;
+}): SyncedTaxTransaction | null {
+  const hash = stringValue(args.item.hash ?? args.item.transactionHash);
+  if (!hash) return null;
+
+  const gasUsed = stringValue(args.item.gasUsed ?? args.item.gas);
+  const gasPrice = stringValue(args.item.gasPrice);
+  const blockNumber = integerValue(args.item.blockNumber);
+
+  return {
+    id: makeTaxTransactionId(args.source, args.action, hash, args.item),
+    hash,
+    block_number: blockNumber,
+    time_stamp: timestampValue(args.item.timeStamp),
+    from_address: stringValue(args.item.from),
+    to_address: stringValue(args.item.to),
+    value: stringValue(args.item.value),
+    gas_used: gasUsed,
+    gas_price: gasPrice,
+    fee: calculateFee(gasUsed, gasPrice),
+    method_id: stringValue(args.item.methodId),
+    function_name: stringValue(args.item.functionName),
+    input: stringValue(args.item.input),
+    contract_address: stringValue(args.item.contractAddress),
+    token_symbol: stringValue(args.item.tokenSymbol),
+    token_decimal: integerValue(args.item.tokenDecimal),
+    token_name: stringValue(args.item.tokenName),
+    transaction_type: args.action,
+    source: args.source,
+    is_error: integerValue(args.item.isError),
+    synced_at: args.syncedAt,
+  };
+}
+
+function makeTaxTransactionId(
+  source: string,
+  action: TaxExplorerAction,
+  hash: string,
+  item: ExplorerTransaction,
+): string {
+  const discriminator = taxTransactionDiscriminator(action, item);
+  return `${source}:${action}:${hash}:${discriminator}`;
+}
+
+function taxTransactionDiscriminator(action: TaxExplorerAction, item: ExplorerTransaction): string {
+  if (action === "txlist") return "external";
+
+  if (action === "tokentx" || action === "tokennfttx") {
+    return (
+      stringValue(item.logIndex) ??
+      [
+        "token",
+        stringValue(item.contractAddress),
+        stringValue(item.tokenID),
+        stringValue(item.tokenName),
+        stringValue(item.tokenSymbol),
+        stringValue(item.value),
+        stringValue(item.from),
+        stringValue(item.to),
+      ].join(":")
+    );
+  }
+
+  return (
+    stringValue(item.traceId) ??
+    [
+      "internal",
+      stringValue(item.from),
+      stringValue(item.to),
+      stringValue(item.value),
+      stringValue(item.contractAddress),
+      stringValue(item.type),
+    ].join(":")
+  );
+}
+
+function latestKnownBlockNumber(
+  previousBlockNumber: number | null,
+  latestBlockNumber: number | null,
+): number | null {
+  if (previousBlockNumber === null) return latestBlockNumber;
+  if (latestBlockNumber === null) return previousBlockNumber;
+  return Math.max(previousBlockNumber, latestBlockNumber);
+}
+
+function calculateFee(gasUsed: string | null, gasPrice: string | null): string | null {
+  if (!gasUsed || !gasPrice) return null;
+
+  try {
+    const gasUsedValue = BigInt(gasUsed);
+    const gasPriceValue = BigInt(gasPrice);
+    if (gasUsedValue < 0n || gasPriceValue < 0n) return null;
+    return (gasUsedValue * gasPriceValue).toString();
+  } catch {
+    return null;
+  }
+}
+
+function timestampValue(value: unknown): string | null {
+  const text = stringValue(value);
+  if (!text) return null;
+
+  if (/^\d+$/.test(text)) {
+    const seconds = Number(text);
+    if (Number.isSafeInteger(seconds)) return new Date(seconds * 1000).toISOString();
+  }
+
+  const millis = Date.parse(text);
+  return Number.isNaN(millis) ? null : new Date(millis).toISOString();
+}
+
+function stringValue(value: unknown): string | null {
+  if (typeof value === "string") return value || null;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return value.toString();
+  return null;
+}
+
+function integerValue(value: unknown): number | null {
+  const text = stringValue(value);
+  if (!text || !/^-?\d+$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function positiveInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return null;
+  return value;
+}
+
+function normalizedExplorerApiKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "YOUR_ETHERSCAN_API_KEY") return undefined;
+  if (trimmed === "YOUR_ETHERSCAN_API_KEY_OPTIONAL") return undefined;
+  return trimmed;
+}
+
+function requiresExplorerApiKey(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname === "api.etherscan.io" && url.pathname === "/v2/api";
+  } catch {
+    return false;
+  }
+}
+
+function isExplorerTransaction(value: unknown): value is ExplorerTransaction {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isExplorerEmptyOrUnsupported(body: ExplorerEnvelope, action: TaxExplorerAction): boolean {
+  const message =
+    `${body.message ?? ""} ${typeof body.result === "string" ? body.result : ""}`.toLowerCase();
+  if (message.includes("no transactions found")) return true;
+  if (action !== "txlistinternal") return false;
+  return (
+    message.includes("not supported") ||
+    message.includes("unsupported") ||
+    message.includes("invalid action")
+  );
+}
+
+function formatExplorerError(body: ExplorerEnvelope): string {
+  if (typeof body.result === "string" && body.result) return body.result;
+  if (body.message) return body.message;
+  return "unexpected explorer response";
+}

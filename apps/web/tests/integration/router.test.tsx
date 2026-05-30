@@ -9,11 +9,13 @@ import { AppProviders } from "../../src/app-providers";
 import { NotFound, createAppRouter } from "../../src/router";
 
 describe("router shell", () => {
-  it("registers the dashboard as the index route", () => {
+  it("registers the dashboard and tax transaction routes", () => {
     const router = createAppRouter();
 
     expect(Object.keys(router.routesByPath)).toContain("/");
+    expect(Object.keys(router.routesByPath)).toContain("/tax");
     expect(router.routesByPath["/"]?.path).toBe("/");
+    expect(router.routesByPath["/tax"]).toBeDefined();
   });
 
   it("accepts memory history for deterministic route tests", () => {

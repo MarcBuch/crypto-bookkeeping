@@ -39,6 +39,60 @@ export interface StoredSnapshot {
   net_pnl: number;
 }
 
+export type TaxTransactionLabel = "Trade" | "Transfer" | null;
+export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
+
+export interface StoredTaxTransaction {
+  id: string;
+  hash: string;
+  block_number: number | null;
+  time_stamp: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  value: string | null;
+  gas_used: string | null;
+  gas_price: string | null;
+  fee: string | null;
+  method_id: string | null;
+  function_name: string | null;
+  input: string | null;
+  contract_address: string | null;
+  token_symbol: string | null;
+  token_decimal: number | null;
+  token_name: string | null;
+  transaction_type: string | null;
+  source: string;
+  is_error: number | null;
+  label: TaxTransactionLabel;
+  comment: string | null;
+  synced_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SyncedTaxTransaction = Omit<
+  StoredTaxTransaction,
+  "label" | "comment" | "created_at" | "updated_at"
+>;
+
+export interface TaxTransactionUpdate {
+  label?: TaxTransactionLabel;
+  comment?: string | null;
+}
+
+export interface StoredTaxSyncState {
+  wallet: string;
+  last_synced_at: string;
+  last_block_number: number | null;
+  source: string;
+}
+
+function assertValidTaxTransactionLabel(label: TaxTransactionLabel | undefined): void {
+  if (label !== undefined && label !== null && label !== "Trade" && label !== "Transfer") {
+    throw new Error("Tax transaction label must be 'Trade', 'Transfer', or null");
+  }
+}
+
 export function upsertPosition(position: Omit<StoredPosition, "created_at">): void {
   const db = getDb();
   db.run(
@@ -133,4 +187,152 @@ export function getAllLatestSnapshots(): StoredSnapshot[] {
        ORDER BY s.token_id`,
     )
     .all() as StoredSnapshot[];
+}
+
+export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): void {
+  const db = getDb();
+  db.run(
+    `INSERT INTO tax_transactions
+     (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used, gas_price,
+       fee, method_id, function_name, input, contract_address, token_symbol, token_decimal,
+       token_name, transaction_type, source, is_error, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       hash = excluded.hash,
+       block_number = excluded.block_number,
+       time_stamp = excluded.time_stamp,
+       from_address = excluded.from_address,
+       to_address = excluded.to_address,
+       value = excluded.value,
+       gas_used = excluded.gas_used,
+       gas_price = excluded.gas_price,
+       fee = excluded.fee,
+       method_id = excluded.method_id,
+       function_name = excluded.function_name,
+       input = excluded.input,
+       contract_address = excluded.contract_address,
+       token_symbol = excluded.token_symbol,
+       token_decimal = excluded.token_decimal,
+       token_name = excluded.token_name,
+       transaction_type = excluded.transaction_type,
+       source = excluded.source,
+       is_error = excluded.is_error,
+       synced_at = excluded.synced_at,
+       updated_at = datetime('now')`,
+    [
+      transaction.id,
+      transaction.hash,
+      transaction.block_number,
+      transaction.time_stamp,
+      transaction.from_address,
+      transaction.to_address,
+      transaction.value,
+      transaction.gas_used,
+      transaction.gas_price,
+      transaction.fee,
+      transaction.method_id,
+      transaction.function_name,
+      transaction.input,
+      transaction.contract_address,
+      transaction.token_symbol,
+      transaction.token_decimal,
+      transaction.token_name,
+      transaction.transaction_type,
+      transaction.source,
+      transaction.is_error,
+      transaction.synced_at,
+    ],
+  );
+}
+
+export function getTaxTransaction(id: string): StoredTaxTransaction | null {
+  const db = getDb();
+  return db
+    .query("SELECT * FROM tax_transactions WHERE id = ?")
+    .get(id) as StoredTaxTransaction | null;
+}
+
+export function listTaxTransactions(
+  limit = 100,
+  offset = 0,
+  label?: TaxTransactionLabelFilter,
+): StoredTaxTransaction[] {
+  const db = getDb();
+  if (label === "unlabeled") {
+    return db
+      .query(
+        `SELECT * FROM tax_transactions
+         WHERE label IS NULL
+         ORDER BY time_stamp DESC, block_number DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(limit, offset) as StoredTaxTransaction[];
+  }
+
+  if (label !== undefined) {
+    return db
+      .query(
+        `SELECT * FROM tax_transactions
+         WHERE label = ?
+         ORDER BY time_stamp DESC, block_number DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(label, limit, offset) as StoredTaxTransaction[];
+  }
+
+  return db
+    .query(
+      `SELECT * FROM tax_transactions
+       ORDER BY time_stamp DESC, block_number DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset) as StoredTaxTransaction[];
+}
+
+export function updateTaxTransaction(
+  id: string,
+  update: TaxTransactionUpdate,
+): StoredTaxTransaction | null {
+  assertValidTaxTransactionLabel(update.label);
+
+  const assignments: string[] = [];
+  const params: (string | null)[] = [];
+  if ("label" in update) {
+    assignments.push("label = ?");
+    params.push(update.label ?? null);
+  }
+  if ("comment" in update) {
+    assignments.push("comment = ?");
+    params.push(update.comment ?? null);
+  }
+  if (assignments.length === 0) {
+    return getTaxTransaction(id);
+  }
+
+  const db = getDb();
+  db.run(
+    `UPDATE tax_transactions SET ${assignments.join(", ")}, updated_at = datetime('now') WHERE id = ?`,
+    [...params, id],
+  );
+  return getTaxTransaction(id);
+}
+
+export function upsertTaxSyncState(syncState: StoredTaxSyncState): void {
+  const db = getDb();
+  db.run(
+    `INSERT INTO tax_sync_state (wallet, last_synced_at, last_block_number, source)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(wallet) DO UPDATE SET
+       last_synced_at = excluded.last_synced_at,
+       last_block_number = excluded.last_block_number,
+       source = excluded.source`,
+    [syncState.wallet, syncState.last_synced_at, syncState.last_block_number, syncState.source],
+  );
+}
+
+export function getTaxSyncState(wallet: string): StoredTaxSyncState | null {
+  const db = getDb();
+  return db
+    .query("SELECT * FROM tax_sync_state WHERE wallet = ?")
+    .get(wallet) as StoredTaxSyncState | null;
 }

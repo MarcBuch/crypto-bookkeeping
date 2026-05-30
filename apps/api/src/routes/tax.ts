@@ -55,6 +55,37 @@ function parseTaxTransactionUpdateBody(body: unknown): TaxTransactionUpdate {
   return update;
 }
 
+async function handleTaxTransactionUpdate(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  id: string,
+) {
+  let update: TaxTransactionUpdate;
+  try {
+    update = parseTaxTransactionUpdateBody(request.body);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return reply.status(400).send({ error: err.message });
+    }
+    throw err;
+  }
+
+  let transaction;
+  try {
+    transaction = await updateTaxTransaction(id, update);
+  } catch (err) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: "Failed to update tax transaction" });
+  }
+
+  if (transaction === null) {
+    return reply.status(404).send({ error: "Tax transaction not found", id });
+  }
+
+  return { transaction };
+}
+
 export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/tax/transactions/sync", async (_request, reply) => {
     try {
@@ -107,31 +138,21 @@ export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
       }>,
       reply: FastifyReply,
     ) => {
-      let update: TaxTransactionUpdate;
-      try {
-        update = parseTaxTransactionUpdateBody(request.body);
-      } catch (err) {
-        if (err instanceof ValidationError) {
-          return reply.status(400).send({ error: err.message });
-        }
-        throw err;
-      }
+      return handleTaxTransactionUpdate(fastify, request, reply, request.params.id);
+    },
+  );
 
-      let transaction;
-      try {
-        transaction = await updateTaxTransaction(request.params.id, update);
-      } catch (err) {
-        fastify.log.error(err);
-        return reply.status(500).send({ error: "Failed to update tax transaction" });
-      }
-
-      if (transaction === null) {
-        return reply
-          .status(404)
-          .send({ error: "Tax transaction not found", id: request.params.id });
-      }
-
-      return { transaction };
+  fastify.patch<{
+    Params: { "*": string };
+  }>(
+    "/tax/transactions/*",
+    async (
+      request: FastifyRequest<{
+        Params: { "*": string };
+      }>,
+      reply: FastifyReply,
+    ) => {
+      return handleTaxTransactionUpdate(fastify, request, reply, request.params["*"]);
     },
   );
 }

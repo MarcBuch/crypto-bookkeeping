@@ -357,6 +357,23 @@ describe("PATCH /tax/transactions/:id", () => {
     ]);
   });
 
+  it("updates transaction ids with token fallback discriminators", async () => {
+    const id =
+      "hyperscan:tokentx:0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8:token:0x5555555555555555555555555555555555555555::Wrapped HYPE:WHYPE:25000000000000000000:0x0a0758d937d1059c356d4714e57f5df0239bce1a:0xcbb12c1d36a4c599a1b63ab76f508a179ca1f34d";
+    const updatedTransaction = { ...fakeTransaction, id, label: "Trade" };
+    mockUpdateTaxTransaction = () => updatedTransaction;
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: `/tax/transactions/${encodeURIComponent(id)}`,
+      payload: { label: "Trade" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expect(lastUpdateArgs).toEqual([id, { label: "Trade" }]);
+  });
+
   it("updates only the label without sending a comment field", async () => {
     const updatedTransaction = { ...fakeTransaction, label: "Transfer" };
     mockUpdateTaxTransaction = () => updatedTransaction;

@@ -711,7 +711,57 @@ function formatTransactionValue(transaction: TaxTransaction): string {
 }
 
 function formatGroupValueSummary(group: TaxTransactionGroup): string {
+  const native = group.transactions.find((transaction) => transaction.token_symbol === null);
+  const whype = group.transactions.find((transaction) => transaction.token_symbol === "WHYPE");
+
+  if (native && whype) {
+    const nativeValue = transactionValueBigInt(native);
+    const whypeValue = transactionValueBigInt(whype);
+    if (nativeValue === 0n && whypeValue !== null && whypeValue > 0n) {
+      const nativeAmount = formatTokenAmount(whype.value, 18, "native");
+      if (isWhypeUnwrap(native)) return `${formatTransactionValue(whype)} -> ${nativeAmount}`;
+      if (isWhypeWrap(native)) return `${nativeAmount} -> ${formatTransactionValue(whype)}`;
+    }
+  }
+
   return group.transactions.map(formatTransactionValue).join(" -> ");
+}
+
+function transactionValueBigInt(transaction: TaxTransaction): bigint | null {
+  if (!transaction.value) return 0n;
+  try {
+    return BigInt(transaction.value);
+  } catch {
+    return null;
+  }
+}
+
+function isWhypeUnwrap(transaction: TaxTransaction): boolean {
+  const text = `${transaction.function_name ?? ""} ${transaction.method_id ?? ""}`.toLowerCase();
+  return text.includes("withdraw") || text.includes("unwrap");
+}
+
+function isWhypeWrap(transaction: TaxTransaction): boolean {
+  const text = `${transaction.function_name ?? ""} ${transaction.method_id ?? ""}`.toLowerCase();
+  return text.includes("deposit") || text.includes("wrap");
+}
+
+function formatTokenAmount(value: string | null, decimals: number, symbol: string): string {
+  if (!value) return `0 ${symbol}`;
+
+  try {
+    const parsed = BigInt(value);
+    const divisor = 10n ** BigInt(decimals);
+    const whole = parsed / divisor;
+    const remainder = parsed % divisor;
+    const decimal = remainder
+      .toString()
+      .padStart(decimals, "0")
+      .replace(/0+$/, "");
+    return `${whole.toString()}${decimal ? `.${decimal.slice(0, 6)}` : ""} ${symbol}`;
+  } catch {
+    return `${value} ${symbol}`;
+  }
 }
 
 function groupLabel(group: TaxTransactionGroup): string {

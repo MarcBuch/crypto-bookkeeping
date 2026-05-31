@@ -166,6 +166,7 @@ describe("tax transactions rendering", () => {
             token_symbol: null,
             token_decimal: null,
             transaction_type: "txlist",
+            function_name: "deposit()",
             label: null,
           },
           {
@@ -194,6 +195,74 @@ describe("tax transactions rendering", () => {
     expect(html.match(/aria-expanded="false"/g)?.length).toBe(2);
     expect(html).not.toContain("txlist</span>");
     expect(html).not.toContain("tokentx</span>");
+  });
+
+  it("summarizes WHYPE unwraps with the received native amount", () => {
+    const hash = "0x27c12a5d4c8445f762fb4e9355b373ed30b48c042f2efeccf0321badd7cd71d3";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          {
+            ...taxTransaction,
+            id: "hyperscan:tokentx:0xunwrap:token",
+            hash,
+            value: "25000000000000000000",
+            token_symbol: "WHYPE",
+            token_decimal: 18,
+            transaction_type: "tokentx",
+          },
+          {
+            ...taxTransaction,
+            id: "hyperscan:txlist:0xunwrap:external",
+            hash,
+            value: "0",
+            token_symbol: null,
+            token_decimal: null,
+            transaction_type: "txlist",
+            function_name: "withdraw(uint256)",
+          },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("25 WHYPE -&gt; 25 native");
+    expect(html).not.toContain("25 WHYPE -&gt; 0 native");
+  });
+
+  it("summarizes zero-value WHYPE wraps in native-to-WHYPE order", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          {
+            ...taxTransaction,
+            id: "hyperscan:txlist:0xwrap:external",
+            hash,
+            value: "0",
+            token_symbol: null,
+            token_decimal: null,
+            transaction_type: "txlist",
+            function_name: "deposit()",
+          },
+          {
+            ...taxTransaction,
+            id: "hyperscan:tokentx:0xwrap:token",
+            hash,
+            value: "25000000000000000000",
+            token_symbol: "WHYPE",
+            token_decimal: 18,
+            transaction_type: "tokentx",
+          },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("25 native -&gt; 25 WHYPE");
+    expect(html).not.toContain("25 WHYPE -&gt; 25 native");
   });
 
   it("can render expanded duplicate-hash groups with all child parts", () => {

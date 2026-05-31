@@ -4,12 +4,12 @@ A monorepo for tracking concentrated liquidity (Uniswap V3-style) positions on [
 
 ## Packages
 
-| Package         | Description                                            |
-| --------------- | ------------------------------------------------------ |
-| `packages/core` | Shared library — chain clients, math, DB, services     |
-| `apps/cli`      | CLI tool (all original commands)                       |
-| `apps/api`      | Fastify REST API exposing LP position data             |
-| `apps/web`      | Vite React dashboard for LP positions, status, and P&L |
+| Package         | Description                                                                   |
+| --------------- | ----------------------------------------------------------------------------- |
+| `packages/core` | Shared library — chain clients, math, DB, tax sync, services                  |
+| `apps/cli`      | CLI tool (all original commands)                                              |
+| `apps/api`      | Fastify REST API exposing LP position data and tax transaction labeling       |
+| `apps/web`      | Vite React dashboard for LP positions, status, P&L, and tax transaction notes |
 
 ## Prerequisites
 
@@ -41,6 +41,9 @@ Edit `config.json`:
 | `contracts`            | ProjectX contract addresses — defaults are correct for mainnet                |
 | `positions`            | _(Optional)_ Known open/close tx hashes per token ID for faster event lookups |
 | `pricing.coingeckoIds` | _(Optional)_ CoinGecko token IDs for live USD pricing                         |
+| `tax.explorerApiUrl`   | _(Optional)_ Hyperscan/Etherscan-compatible explorer API URL for tax sync     |
+| `tax.explorerChainId`  | _(Optional)_ Explorer API chain ID for HyperEVM (`999`)                       |
+| `tax.explorerApiKey`   | _(Optional)_ Explorer API key, only needed by endpoints that require one      |
 
 The `positions` map speeds up on-chain event lookups by narrowing the block range:
 
@@ -71,6 +74,19 @@ The optional `pricing.coingeckoIds` map enables live USD prices for fee tokens. 
 
 Pricing depends on CoinGecko's live simple-price API. P&L output includes USD fee income when `pricing.coingeckoIds` mappings exist and live prices are available. Successful prices are cached briefly in memory to reduce repeated requests. Missing config mappings remain unavailable until `config.json` is updated; failed requests, malformed responses, and unavailable API values for mapped IDs return `null` and are retried after a short cooldown. USD fee income is best-effort mark-to-current-price, not historical execution-time accounting.
 
+The optional `tax` config enables on-demand wallet transaction sync through Hyperscan's Etherscan-compatible API. The default endpoint is `https://www.hyperscan.com/api` and does not require an Etherscan API key:
+
+```json
+"tax": {
+  "explorerApiUrl": "https://www.hyperscan.com/api",
+  "explorerChainId": 999
+}
+```
+
+If you override `tax.explorerApiUrl` with `https://api.etherscan.io/v2/api`, set `tax.explorerApiKey` to a valid Etherscan API key.
+
+Tax sync imports normal transactions, ERC-20 transfers, NFT transfers, and internal transactions when supported by the explorer. A single chain transaction can produce multiple taxable rows, so rows are keyed by a stable internal `id` while preserving the original transaction `hash`. Existing labels and comments are preserved when the same row is synced again.
+
 > **Note:** `config.json` is gitignored and will never be committed.
 
 Config resolution order (for both CLI and API):
@@ -98,6 +114,10 @@ bun run cli pnl
 bun run cli il
 bun run cli snapshot
 bun run cli history <tokenId>
+bun run cli tax sync
+bun run cli tax list --label unlabeled --limit 20
+bun run cli tax get <transaction-id>
+bun run cli tax label <transaction-id> --label Trade --comment "..."
 
 # Or directly from apps/cli:
 cd apps/cli
@@ -106,6 +126,10 @@ bun run pnl
 bun run il
 bun run snapshot
 bun run history
+bun run start tax sync
+bun run start tax list --label unlabeled --limit 20
+bun run start tax get <transaction-id>
+bun run start tax label <transaction-id> --label Trade --comment "..."
 ```
 
 ### Commands
@@ -147,6 +171,47 @@ bun run cli history <tokenId>
 bun run cli history <tokenId> --limit 50
 ```
 
+#### Tax transaction ledger
+
+Sync wallet transactions into the local SQLite tax ledger:
+
+```bash
+bun run cli tax sync
+bun run --filter @lp-tracker/cli start -- --json tax sync
+```
+
+List synced transactions, optionally filtering labels with `Trade`, `Transfer`, or `unlabeled`:
+
+```bash
+bun run cli tax list --limit 20
+bun run cli tax list --label unlabeled --limit 20
+bun run --filter @lp-tracker/cli start -- --json tax list --label unlabeled --limit 20
+```
+
+Inspect one transaction by stable tax row ID:
+
+```bash
+bun run cli tax get <transaction-id>
+bun run --filter @lp-tracker/cli start -- --json tax get "<transaction-id>"
+```
+
+Label a transaction as `Trade` or `Transfer`; clear the label with `null`, `clear`, `none`, or `unlabeled`:
+
+```bash
+bun run cli tax label <transaction-id> --label Trade --comment "..."
+bun run --filter @lp-tracker/cli start -- --json tax label "<transaction-id>" --label Trade --comment "..."
+```
+
+Agent workflow:
+
+1. Run `tax sync` to import fresh wallet activity.
+2. Run `tax list --label unlabeled --limit 20` to find rows needing review.
+3. Run `tax get "<transaction-id>"` to inspect hashes, transfers, amounts, and existing notes.
+4. Look up the transaction hash externally or manually classify the activity.
+5. Run `tax label "<transaction-id>" --label Trade --comment "..."` or `--label Transfer`; use a clear value if the row should return to unlabeled.
+
+Tax JSON commands return stable envelopes: `{ "sync": ... }`, `{ "transactions": [...] }`, `{ "transaction": ... }`, or controlled errors such as `{ "error": "...", "id": "..." }` for not found and validation failures.
+
 ### JSON output (for scripting / agent use)
 
 Append `--json` to any command to get structured JSON on stdout:
@@ -177,21 +242,26 @@ PORT=8080 bun run start
 
 ### REST Endpoints
 
-| Method | Path                            | Description                             |
-| ------ | ------------------------------- | --------------------------------------- |
-| `GET`  | `/health`                       | Health check                            |
-| `GET`  | `/positions`                    | All LP positions                        |
-| `GET`  | `/positions/:tokenId`           | Single position by token ID             |
-| `GET`  | `/pnl`                          | P&L for all positions                   |
-| `GET`  | `/positions/:tokenId/pnl`       | P&L for a specific position             |
-| `GET`  | `/il`                           | Divergence loss for all positions       |
-| `GET`  | `/positions/:tokenId/il`        | Divergence loss for a specific position |
-| `GET`  | `/positions/:tokenId/history`   | Historical snapshots (`?limit=20`)      |
-| `GET`  | `/positions/:tokenId/snapshots` | All recent snapshots (up to 200)        |
+| Method  | Path                            | Description                                                   |
+| ------- | ------------------------------- | ------------------------------------------------------------- |
+| `GET`   | `/health`                       | Health check                                                  |
+| `GET`   | `/positions`                    | All LP positions                                              |
+| `GET`   | `/positions/:tokenId`           | Single position by token ID                                   |
+| `GET`   | `/pnl`                          | P&L for all positions                                         |
+| `GET`   | `/positions/:tokenId/pnl`       | P&L for a specific position                                   |
+| `GET`   | `/il`                           | Divergence loss for all positions                             |
+| `GET`   | `/positions/:tokenId/il`        | Divergence loss for a specific position                       |
+| `GET`   | `/positions/:tokenId/history`   | Historical snapshots (`?limit=20`)                            |
+| `GET`   | `/positions/:tokenId/snapshots` | All recent snapshots (up to 200)                              |
+| `GET`   | `/tax/transactions`             | Synced tax transactions (`limit`, `offset`, optional `label`) |
+| `POST`  | `/tax/transactions/sync`        | On-demand wallet transaction sync                             |
+| `PATCH` | `/tax/transactions/:id`         | Update tax transaction label/comment                          |
 
 ### Response format
 
 Success responses follow the shape of the corresponding CLI `--json` output, including best-effort USD fee fields such as `feesValueUsd`, per-token USD fee values, token USD prices, and `usdPriceSource` when pricing is available.
+
+Tax transaction responses are stored locally in SQLite and are not synced on read. Call `POST /tax/transactions/sync` when you want to fetch fresh blockchain data. Labels currently support `Trade` and `Transfer`; use `null` to clear a label. Comments are stored locally and limited to 1000 JavaScript string code units.
 
 Error responses:
 
@@ -203,7 +273,7 @@ HTTP status codes:
 
 - `400` — invalid parameter (non-numeric tokenId, bad limit)
 - `404` — position not found or unknown route
-- `503` — RPC rate limited (retry after a few seconds)
+- `503` — RPC/indexer rate limited or tax sync failed (retry after a few seconds)
 - `500` — internal server error
 
 ### Environment variables
@@ -218,7 +288,7 @@ HTTP status codes:
 
 ## Web (`apps/web`)
 
-The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position and P&L data. It uses TanStack Router for client routing, reads `/positions` and `/pnl` from the API, and merges rows by token ID. P&L cards prioritize Fee Income USD when available and show USD unavailable for missing or `null` pricing values.
+The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position, P&L, and tax transaction labeling data. It uses TanStack Router for client routing, reads `/positions` and `/pnl` from the API for the dashboard, and exposes `/tax` for manually syncing wallet transactions, selecting `Trade`/`Transfer` labels, and saving local comments. P&L cards prioritize Fee Income USD when available and show USD unavailable for missing or `null` pricing values.
 
 ### Start the app
 

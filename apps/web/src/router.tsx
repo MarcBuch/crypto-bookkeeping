@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 
 import { App } from "./App";
+import { TaxTransactions } from "./TaxTransactions";
 
 export function NotFound() {
   return (
@@ -31,7 +32,13 @@ const dashboardRoute = createRoute({
   component: App,
 });
 
-export const routeTree = rootRoute.addChildren([dashboardRoute]);
+const taxTransactionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tax",
+  component: TaxTransactions,
+});
+
+export const routeTree = rootRoute.addChildren([dashboardRoute, taxTransactionsRoute]);
 
 type RouterOptions = Omit<Parameters<typeof createRouter>[0], "routeTree">;
 

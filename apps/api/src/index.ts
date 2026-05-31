@@ -10,6 +10,7 @@ import { historyRoutes } from "./routes/history.js";
 import { ilRoutes } from "./routes/il.js";
 import { pnlRoutes } from "./routes/pnl.js";
 import { positionsRoutes } from "./routes/positions.js";
+import { taxRoutes } from "./routes/tax.js";
 
 export async function buildServer(config?: Config): Promise<FastifyInstance> {
   const fastify = Fastify({ logger: true });
@@ -24,6 +25,7 @@ export async function buildServer(config?: Config): Promise<FastifyInstance> {
   await fastify.register(errorHandlerPlugin);
 
   await fastify.register(cors, {
+    methods: ["GET", "POST", "PATCH", "OPTIONS"],
     origin: process.env.CORS_ORIGIN ?? process.env.NODE_ENV !== "production",
   });
 
@@ -33,6 +35,7 @@ export async function buildServer(config?: Config): Promise<FastifyInstance> {
   fastify.register(pnlRoutes);
   fastify.register(ilRoutes);
   fastify.register(historyRoutes);
+  fastify.register(taxRoutes);
 
   return fastify;
 }

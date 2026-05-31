@@ -24,9 +24,24 @@ export {
   getSnapshots,
   getLatestSnapshot,
   getAllLatestSnapshots,
+  upsertSyncedTaxTransaction,
+  getTaxTransaction,
+  listTaxTransactions,
+  updateTaxTransaction,
+  upsertTaxSyncState,
+  getTaxSyncState,
 } from "./db/store.js";
 export { getAllPositions as getAllStoredPositions } from "./db/store.js";
-export type { StoredPosition, StoredSnapshot } from "./db/store.js";
+export type {
+  StoredPosition,
+  StoredSnapshot,
+  TaxTransactionLabel,
+  TaxTransactionLabelFilter,
+  StoredTaxTransaction,
+  SyncedTaxTransaction,
+  TaxTransactionUpdate,
+  StoredTaxSyncState,
+} from "./db/store.js";
 export * from "./db/schema.js";
 
 // Display
@@ -43,3 +58,4 @@ export * from "./services/il.js";
 export * from "./services/snapshot.js";
 export * from "./services/history.js";
 export * from "./services/pricing.js";
+export * from "./services/tax-transactions.js";

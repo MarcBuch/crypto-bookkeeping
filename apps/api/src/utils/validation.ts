@@ -11,9 +11,29 @@ export class ValidationError extends Error {
 
 export function parseLimit(raw: string | undefined, defaultVal = 20, max = 200): number {
   if (raw === undefined) return defaultVal;
+  if (!isNumericString(raw)) {
+    throw new ValidationError(`limit must be a positive integer, got: ${raw}`);
+  }
   const n = parseInt(raw, 10);
-  if (isNaN(n) || n < 1) {
+  if (n < 1) {
     throw new ValidationError(`limit must be a positive integer, got: ${raw}`);
   }
   return Math.min(n, max);
+}
+
+export function parseOffset(raw: string | undefined, defaultVal = 0): number {
+  if (raw === undefined) return defaultVal;
+  if (!isNumericString(raw)) {
+    throw new ValidationError(`offset must be a non-negative integer, got: ${raw}`);
+  }
+  const n = parseInt(raw, 10);
+  return n;
+}
+
+export function parseTaxTransactionLabel(
+  raw: string | undefined,
+): "Trade" | "Transfer" | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === "Trade" || raw === "Transfer") return raw;
+  throw new ValidationError(`label must be Trade or Transfer, got: ${raw}`);
 }

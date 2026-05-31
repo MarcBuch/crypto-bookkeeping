@@ -11,7 +11,11 @@ export function App() {
           <div className="border-b border-neutral-200 px-5 py-3 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
               <span>HyperEVM ProjectX</span>
-              <span className="flex items-center gap-2 text-neutral-700">
+              <span className="flex flex-wrap items-center gap-3 text-neutral-700">
+                <a className="transition hover:text-neutral-950" href="/tax">
+                  Tax Ledger
+                </a>
+                <span className="h-3 w-px bg-neutral-300" />
                 <span className="h-2 w-2 rounded-full bg-neutral-950" />
                 {isFetching && !isLoading ? "Reconciling On-Chain Data" : "Live Execution View"}
               </span>

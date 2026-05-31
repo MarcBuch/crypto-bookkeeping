@@ -85,11 +85,58 @@ function parseUpdateTaxLabel(raw: string): TaxTransactionLabel {
 function formatTaxTransaction(transaction: StoredTaxTransaction): string {
   const label = transaction.label ?? "unlabeled";
   const timestamp = transaction.time_stamp ?? "unknown time";
-  const direction = `${transaction.from_address ?? "?"} -> ${transaction.to_address ?? "?"}`;
-  const value = transaction.value ?? "0";
-  const token = transaction.token_symbol ?? transaction.token_name ?? "native";
-  const comment = transaction.comment ? ` | ${transaction.comment}` : "";
-  return `${transaction.id} | ${label} | ${timestamp} | ${transaction.transaction_type ?? "tx"} | ${value} ${token} | ${direction}${comment}`;
+  const incoming = formatTaxAmount(transaction.incoming_quantity, transaction.incoming_asset);
+  const outgoing = formatTaxAmount(transaction.outgoing_quantity, transaction.outgoing_asset);
+  const fee = formatTaxFee(transaction);
+  const cost = formatTaxValue(transaction.cost_eur);
+  const proceeds = formatTaxValue(transaction.proceeds_eur);
+  const gain = formatTaxValue(transaction.gain_eur);
+  const holdingDays = formatTaxValue(transaction.holding_duration_days);
+  const note = transaction.comment ?? "-";
+  return [
+    transaction.id,
+    label,
+    timestamp,
+    `in ${incoming}`,
+    `out ${outgoing}`,
+    `fee ${fee}`,
+    `cost EUR ${cost}`,
+    `proceeds EUR ${proceeds}`,
+    `gain EUR ${gain}`,
+    `holding days ${holdingDays}`,
+    `note ${note}`,
+  ].join(" | ");
+}
+
+function formatTaxAmount(quantity: string | null, asset: string | null): string {
+  if (!quantity && !asset) return "-";
+  return `${quantity ?? "-"} ${asset ?? "?"}`;
+}
+
+function formatTaxFee(transaction: StoredTaxTransaction): string {
+  if (!transaction.fee) return "-";
+  return `${formatTaxBaseUnitAmount(transaction.fee, 18)} HYPE`;
+}
+
+function formatTaxBaseUnitAmount(value: string, decimals: number): string {
+  try {
+    const parsed = BigInt(value);
+    const divisor = 10n ** BigInt(decimals);
+    const whole = parsed / divisor;
+    const remainder = parsed % divisor;
+    const decimal = remainder
+      .toString()
+      .padStart(decimals, "0")
+      .replace(/0+$/, "");
+    return `${whole.toString()}${decimal ? `.${decimal}` : ""}`;
+  } catch {
+    return value;
+  }
+}
+
+function formatTaxValue(value: string | number | null): string {
+  if (value === null || value === "") return "-";
+  return String(value);
 }
 
 function printCommandError(message: string): void {

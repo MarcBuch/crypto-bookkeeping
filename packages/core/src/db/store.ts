@@ -64,6 +64,14 @@ export interface StoredTaxTransaction {
   source: string;
   is_error: number | null;
   label: TaxTransactionLabel;
+  incoming_quantity: string | null;
+  incoming_asset: string | null;
+  outgoing_quantity: string | null;
+  outgoing_asset: string | null;
+  cost_eur: string | null;
+  proceeds_eur: string | null;
+  gain_eur: string | null;
+  holding_duration_days: number | null;
   comment: string | null;
   synced_at: string;
   created_at: string;
@@ -194,12 +202,14 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
   db.run(
     `INSERT INTO tax_transactions
      (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used, gas_price,
-       fee, method_id, function_name, input, contract_address, token_symbol, token_decimal,
-       token_name, transaction_type, source, is_error, synced_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       hash = excluded.hash,
-       block_number = excluded.block_number,
+        fee, method_id, function_name, input, contract_address, token_symbol, token_decimal,
+        token_name, transaction_type, source, is_error, incoming_quantity, incoming_asset,
+        outgoing_quantity, outgoing_asset, cost_eur, proceeds_eur, gain_eur,
+        holding_duration_days, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        hash = excluded.hash,
+        block_number = excluded.block_number,
        time_stamp = excluded.time_stamp,
        from_address = excluded.from_address,
        to_address = excluded.to_address,
@@ -214,11 +224,15 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
        token_symbol = excluded.token_symbol,
        token_decimal = excluded.token_decimal,
        token_name = excluded.token_name,
-       transaction_type = excluded.transaction_type,
-       source = excluded.source,
-       is_error = excluded.is_error,
-       synced_at = excluded.synced_at,
-       updated_at = datetime('now')`,
+        transaction_type = excluded.transaction_type,
+        source = excluded.source,
+        is_error = excluded.is_error,
+        incoming_quantity = excluded.incoming_quantity,
+        incoming_asset = excluded.incoming_asset,
+        outgoing_quantity = excluded.outgoing_quantity,
+        outgoing_asset = excluded.outgoing_asset,
+        synced_at = excluded.synced_at,
+        updated_at = datetime('now')`,
     [
       transaction.id,
       transaction.hash,
@@ -240,6 +254,14 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
       transaction.transaction_type,
       transaction.source,
       transaction.is_error,
+      transaction.incoming_quantity,
+      transaction.incoming_asset,
+      transaction.outgoing_quantity,
+      transaction.outgoing_asset,
+      transaction.cost_eur,
+      transaction.proceeds_eur,
+      transaction.gain_eur,
+      transaction.holding_duration_days,
       transaction.synced_at,
     ],
   );

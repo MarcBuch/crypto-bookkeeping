@@ -93,6 +93,7 @@ export async function syncTaxTransactions(
         const row = toSyncedTaxTransaction({
           action,
           item,
+          wallet,
           source,
           syncedAt,
         });
@@ -178,6 +179,7 @@ async function fetchExplorerPage(args: {
 function toSyncedTaxTransaction(args: {
   action: TaxExplorerAction;
   item: ExplorerTransaction;
+  wallet: string;
   source: string;
   syncedAt: string;
 }): SyncedTaxTransaction | null {
@@ -187,15 +189,29 @@ function toSyncedTaxTransaction(args: {
   const gasUsed = stringValue(args.item.gasUsed ?? args.item.gas);
   const gasPrice = stringValue(args.item.gasPrice);
   const blockNumber = integerValue(args.item.blockNumber);
+  const value = stringValue(args.item.value);
+  const fromAddress = stringValue(args.item.from);
+  const toAddress = stringValue(args.item.to);
+  const tokenSymbol = stringValue(args.item.tokenSymbol);
+  const tokenDecimal = integerValue(args.item.tokenDecimal);
+  const taxFields = taxLedgerFields({
+    action: args.action,
+    fromAddress,
+    toAddress,
+    value,
+    tokenDecimal,
+    tokenSymbol,
+    wallet: args.wallet,
+  });
 
   return {
     id: makeTaxTransactionId(args.source, args.action, hash, args.item),
     hash,
     block_number: blockNumber,
     time_stamp: timestampValue(args.item.timeStamp),
-    from_address: stringValue(args.item.from),
-    to_address: stringValue(args.item.to),
-    value: stringValue(args.item.value),
+    from_address: fromAddress,
+    to_address: toAddress,
+    value,
     gas_used: gasUsed,
     gas_price: gasPrice,
     fee: calculateFee(gasUsed, gasPrice),
@@ -203,14 +219,87 @@ function toSyncedTaxTransaction(args: {
     function_name: stringValue(args.item.functionName),
     input: stringValue(args.item.input),
     contract_address: stringValue(args.item.contractAddress),
-    token_symbol: stringValue(args.item.tokenSymbol),
-    token_decimal: integerValue(args.item.tokenDecimal),
+    token_symbol: tokenSymbol,
+    token_decimal: tokenDecimal,
     token_name: stringValue(args.item.tokenName),
     transaction_type: args.action,
     source: args.source,
     is_error: integerValue(args.item.isError),
+    ...taxFields,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
     synced_at: args.syncedAt,
   };
+}
+
+function taxLedgerFields(args: {
+  action: TaxExplorerAction;
+  fromAddress: string | null;
+  toAddress: string | null;
+  value: string | null;
+  tokenDecimal: number | null;
+  tokenSymbol: string | null;
+  wallet: string;
+}): Pick<
+  SyncedTaxTransaction,
+  "incoming_quantity" | "incoming_asset" | "outgoing_quantity" | "outgoing_asset"
+> {
+  const quantity = formatTaxQuantity(args.value, args.tokenDecimal ?? nativeDecimals(args.action));
+  const asset = args.tokenSymbol ?? "HYPE";
+
+  if (isSameAddress(args.toAddress, args.wallet)) {
+    return {
+      incoming_quantity: quantity,
+      incoming_asset: asset,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+    };
+  }
+
+  if (isSameAddress(args.fromAddress, args.wallet)) {
+    return {
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: quantity,
+      outgoing_asset: asset,
+    };
+  }
+
+  return {
+    incoming_quantity: null,
+    incoming_asset: null,
+    outgoing_quantity: null,
+    outgoing_asset: null,
+  };
+}
+
+function nativeDecimals(action: TaxExplorerAction): number | null {
+  return action === "txlist" || action === "txlistinternal" ? 18 : null;
+}
+
+function isSameAddress(left: string | null, right: string): boolean {
+  return left?.toLowerCase() === right.toLowerCase();
+}
+
+function formatTaxQuantity(value: string | null, decimals: number | null): string | null {
+  if (!value) return null;
+  if (decimals === null) return value;
+
+  try {
+    const parsed = BigInt(value);
+    const divisor = 10n ** BigInt(decimals);
+    const whole = parsed / divisor;
+    const remainder = parsed % divisor;
+    const decimal = remainder
+      .toString()
+      .padStart(decimals, "0")
+      .replace(/0+$/, "");
+    return `${whole.toString()}${decimal ? `.${decimal}` : ""}`;
+  } catch {
+    return value;
+  }
 }
 
 function makeTaxTransactionId(

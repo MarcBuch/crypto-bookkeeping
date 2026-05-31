@@ -41,7 +41,19 @@ async function runCli(args: string[], dataDir = makeDataDir()): Promise<CliResul
 
 async function seedTaxTransaction(
   dataDir: string,
-  overrides: { id?: string; label?: "Trade" | "Transfer" | null; comment?: string | null } = {},
+  overrides: {
+    id?: string;
+    label?: "Trade" | "Transfer" | null;
+    comment?: string | null;
+    incoming_quantity?: string | null;
+    incoming_asset?: string | null;
+    outgoing_quantity?: string | null;
+    outgoing_asset?: string | null;
+    cost_eur?: string | null;
+    proceeds_eur?: string | null;
+    gain_eur?: string | null;
+    holding_duration_days?: number | null;
+  } = {},
 ): Promise<void> {
   const id = overrides.id ?? "tx-1:external";
   const proc = Bun.spawn(
@@ -73,6 +85,14 @@ async function seedTaxTransaction(
           transaction_type: "txlist",
           source: "test",
           is_error: 0,
+          incoming_quantity: ${JSON.stringify(overrides.incoming_quantity ?? null)},
+          incoming_asset: ${JSON.stringify(overrides.incoming_asset ?? null)},
+          outgoing_quantity: ${JSON.stringify(overrides.outgoing_quantity ?? null)},
+          outgoing_asset: ${JSON.stringify(overrides.outgoing_asset ?? null)},
+          cost_eur: ${JSON.stringify(overrides.cost_eur ?? null)},
+          proceeds_eur: ${JSON.stringify(overrides.proceeds_eur ?? null)},
+          gain_eur: ${JSON.stringify(overrides.gain_eur ?? null)},
+          holding_duration_days: ${JSON.stringify(overrides.holding_duration_days ?? null)},
           synced_at: "2026-05-30T12:01:00.000Z",
         });
         updateTaxTransaction(id, {
@@ -184,6 +204,33 @@ describe("tax CLI argument handling", () => {
 });
 
 describe("tax CLI JSON output contracts", () => {
+  it("prints tax ledger fields in human-readable tax list output", async () => {
+    const dataDir = makeDataDir();
+    await seedTaxTransaction(dataDir, {
+      label: "Transfer",
+      comment: "coinbase deposit",
+      incoming_quantity: "0.25245129",
+      incoming_asset: "HYPE",
+      cost_eur: "100.00",
+      proceeds_eur: "-",
+      gain_eur: "0.00",
+      holding_duration_days: 0,
+    });
+
+    const result = await runCli(["tax", "list"], dataDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("tx-1:external | Transfer | 2026-05-30T12:00:00.000Z");
+    expect(result.stdout).toContain("in 0.25245129 HYPE");
+    expect(result.stdout).toContain("out -");
+    expect(result.stdout).toContain("fee 0.000021 HYPE");
+    expect(result.stdout).toContain("cost EUR 100.00");
+    expect(result.stdout).toContain("proceeds EUR -");
+    expect(result.stdout).toContain("gain EUR 0.00");
+    expect(result.stdout).toContain("holding days 0");
+    expect(result.stdout).toContain("note coinbase deposit");
+  });
+
   it("returns an exact empty list shape for tax list --json", async () => {
     const result = await runCli(["tax", "list", "--json"]);
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { TaxTransaction, TaxTransactionLabel } from "./api";
+import type { TaxTransaction, TaxTransactionLabel, TaxTransactionUpdate } from "./api";
 import {
   useSyncTaxTransactions,
   useTaxTransactions,
@@ -31,6 +31,12 @@ export interface TaxTransactionGroup {
   transactions: TaxTransaction[];
 }
 
+type UpdateTaxTransaction = (id: string, update: TaxTransactionUpdate) => void;
+
+type TaxTransactionControlTarget = Pick<TaxTransaction, "id" | "hash" | "comment"> & {
+  label: TaxTransactionLabel | "mixed";
+};
+
 export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransactionGroup[] {
   const groups = new Map<string, TaxTransactionGroup>();
 
@@ -50,6 +56,16 @@ export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransac
   }
 
   return [...groups.values()];
+}
+
+export function updateTaxTransactionGroup(
+  group: TaxTransactionGroup,
+  update: TaxTransactionUpdate,
+  updateTransaction: UpdateTaxTransaction,
+) {
+  for (const transaction of group.transactions) {
+    updateTransaction(transaction.id, update);
+  }
 }
 
 export function TaxTransactions() {
@@ -122,10 +138,7 @@ export function TaxTransactionLedger({
   defaultExpandedGroups = [],
 }: {
   transactions: TaxTransaction[];
-  updateTransaction: (
-    id: string,
-    update: { label?: TaxTransactionLabel; comment?: string | null },
-  ) => void;
+  updateTransaction: UpdateTaxTransaction;
   updateError?: unknown;
   isUpdating?: boolean;
   defaultExpandedGroups?: string[];
@@ -150,7 +163,7 @@ export function TaxTransactionLedger({
   }
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
+    <section className="overflow-x-clip rounded-3xl border border-neutral-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
         <div>
           <p className="text-[0.65rem] font-semibold tracking-[0.28em] text-neutral-500 uppercase">
@@ -167,16 +180,38 @@ export function TaxTransactionLedger({
           Could not save transaction metadata: {errorMessage(updateError)}
         </div>
       ) : null}
-      <div className="hidden overflow-x-auto lg:block">
-        <table className="min-w-full divide-y divide-neutral-200 text-sm">
-          <thead className="bg-neutral-50 text-left text-[0.68rem] tracking-[0.18em] text-neutral-500 uppercase">
+      <div className="hidden lg:block">
+        <table className="w-full table-fixed divide-y divide-neutral-200 text-sm">
+          <colgroup>
+            <col className="w-[11%]" />
+            <col className="w-[10%]" />
+            <col className="w-[9%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[8%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[6%]" />
+            <col className="w-[6%]" />
+            <col className="w-[8%]" />
+          </colgroup>
+          <thead className="text-left text-[0.68rem] tracking-[0.18em] text-neutral-500 uppercase">
             <tr>
-              <th className="px-5 py-3">Hash</th>
-              <th className="px-5 py-3">Time / Block</th>
-              <th className="px-5 py-3">From / To</th>
-              <th className="px-5 py-3">Value / Function</th>
-              <th className="px-5 py-3">Label</th>
-              <th className="px-5 py-3">Comment</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Hash</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Time / Block</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Label</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Incoming Qty</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Incoming Asset</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Outgoing Qty</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Outgoing Asset</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Fee</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Cost EUR</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Proceeds EUR</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Gain EUR</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Holding Days</th>
+              <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Note</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200">
@@ -245,40 +280,81 @@ function TaxTransactionGroupRows({
   toggleGroup,
 }: {
   group: TaxTransactionGroup;
-  updateTransaction: (
-    id: string,
-    update: { label?: TaxTransactionLabel; comment?: string | null },
-  ) => void;
+  updateTransaction: UpdateTaxTransaction;
   isUpdating?: boolean;
   isExpanded: boolean;
   toggleGroup: () => void;
 }) {
+  const parentControlTarget = groupControlTarget(group);
+  const updateGroup = (update: TaxTransactionUpdate) =>
+    updateTaxTransactionGroup(group, update, updateTransaction);
+
   return (
     <>
       <tr className="align-top text-neutral-700 transition hover:bg-neutral-50">
-        <td className="max-w-[180px] px-5 py-4 font-mono text-xs font-bold text-neutral-950">
+        <td className="px-2 py-4 font-mono text-xs font-bold text-neutral-950">
           <TransactionHashLink hash={group.hash} />
           <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
             grouped trade
           </span>
         </td>
-        <td className="px-5 py-4 font-mono text-xs whitespace-nowrap text-neutral-600">
+        <td className="px-2 py-4 font-mono text-xs text-neutral-600">
           <p className="font-bold text-neutral-950">{formatTimestamp(group.primary.time_stamp)}</p>
           <p className="mt-1">Block {group.primary.block_number ?? "n/a"}</p>
         </td>
-        <td className="max-w-[220px] px-5 py-4 text-xs text-neutral-600">
-          <p className="font-semibold text-neutral-950">{group.transactions.length} transaction parts</p>
-          <p className="mt-1 text-neutral-500">{groupLabel(group)}</p>
+        <td className="px-2 py-4">
+          <LabelSelect
+            transaction={parentControlTarget}
+            updateTransaction={(_id, update) => updateGroup(update)}
+            disabled={isUpdating}
+          />
+          <p className="mt-2 text-xs font-semibold text-neutral-500">Applies to all parts</p>
         </td>
-        <td className="max-w-[240px] px-5 py-4 text-neutral-700">
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "incoming_quantity")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "incoming_asset")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "outgoing_quantity")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "outgoing_asset")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {formatGroupFee(group)}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "cost_eur")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "proceeds_eur")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "gain_eur")}
+        </td>
+        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
+          {mixedTaxField(group, "holding_duration_days")}
+        </td>
+        <td className="px-2 py-4">
+          <CommentEditor
+            transaction={parentControlTarget}
+            updateTransaction={(_id, update) => updateGroup(update)}
+            disabled={isUpdating}
+            mixedComment={hasMixedGroupComments(group)}
+          />
+        </td>
+      </tr>
+      <tr className="bg-neutral-50/70 text-neutral-600">
+        <td className="px-2 py-3" colSpan={13}>
+          <p className="font-semibold text-neutral-950">{group.transactions.length} transaction parts</p>
           <p className="font-mono text-sm font-bold text-neutral-950">{formatGroupValueSummary(group)}</p>
           <p className="mt-1 text-xs font-semibold text-neutral-500">Same transaction hash</p>
-        </td>
-        <td className="px-5 py-4" colSpan={2}>
           <button
             aria-expanded={isExpanded}
             aria-label={`${isExpanded ? "Hide" : "Show"} transaction parts for ${group.hash}`}
-            className="rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+            className="mt-3 rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
             type="button"
             onClick={toggleGroup}
           >
@@ -310,14 +386,15 @@ function TaxTransactionGroupCard({
   toggleGroup,
 }: {
   group: TaxTransactionGroup;
-  updateTransaction: (
-    id: string,
-    update: { label?: TaxTransactionLabel; comment?: string | null },
-  ) => void;
+  updateTransaction: UpdateTaxTransaction;
   isUpdating?: boolean;
   isExpanded: boolean;
   toggleGroup: () => void;
 }) {
+  const parentControlTarget = groupControlTarget(group);
+  const updateGroup = (update: TaxTransactionUpdate) =>
+    updateTaxTransactionGroup(group, update, updateTransaction);
+
   return (
     <article className="p-5 text-sm text-neutral-700">
       <div className="flex items-start justify-between gap-3">
@@ -337,6 +414,25 @@ function TaxTransactionGroupCard({
         </p>
         <p className="mt-1 font-mono font-bold text-neutral-950">{formatGroupValueSummary(group)}</p>
         <p className="mt-1 text-xs font-semibold text-neutral-500">{groupLabel(group)}</p>
+        <div className="mt-4">
+          <TaxDetail label="Fee" value={formatGroupFee(group)} />
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:grid-cols-[180px_1fr]">
+        <div>
+          <LabelSelect
+            transaction={parentControlTarget}
+            updateTransaction={(_id, update) => updateGroup(update)}
+            disabled={isUpdating}
+          />
+          <p className="mt-2 text-xs font-semibold text-neutral-500">Applies to all parts</p>
+        </div>
+        <CommentEditor
+          transaction={parentControlTarget}
+          updateTransaction={(_id, update) => updateGroup(update)}
+          disabled={isUpdating}
+          mixedComment={hasMixedGroupComments(group)}
+        />
       </div>
       <button
         aria-expanded={isExpanded}
@@ -358,6 +454,7 @@ function TaxTransactionGroupCard({
                 transaction={transaction}
                 updateTransaction={updateTransaction}
                 isUpdating={isUpdating}
+                suppressFee
               />
             </div>
           ))}
@@ -375,57 +472,50 @@ function TaxTransactionRow({
   isLastGroupedChild = false,
 }: {
   transaction: TaxTransaction;
-  updateTransaction: (
-    id: string,
-    update: { label?: TaxTransactionLabel; comment?: string | null },
-  ) => void;
+  updateTransaction: UpdateTaxTransaction;
   isUpdating?: boolean;
   isGroupedChild?: boolean;
   isLastGroupedChild?: boolean;
 }) {
   const groupedChildConnectorClass = isLastGroupedChild
-    ? "pl-12 before:absolute before:top-0 before:left-6 before:h-7 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-6 after:h-px after:w-4 after:bg-neutral-300"
-    : "pl-12 before:absolute before:top-0 before:bottom-0 before:left-6 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-6 after:h-px after:w-4 after:bg-neutral-300";
+    ? "before:absolute before:top-0 before:left-5 before:h-7 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-5 after:h-px after:w-4 after:bg-neutral-300"
+    : "before:absolute before:top-0 before:bottom-0 before:left-5 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-5 after:h-px after:w-4 after:bg-neutral-300";
 
   return (
     <tr
       className={`align-top text-neutral-700 transition hover:bg-neutral-50 ${isGroupedChild ? "bg-neutral-50/60" : ""}`}
     >
       <td
-        className={`relative max-w-[180px] py-4 pr-5 font-mono text-xs font-bold text-neutral-950 ${isGroupedChild ? groupedChildConnectorClass : "pl-5"}`}
+        className={`relative py-4 pr-2 pl-2 font-mono text-xs font-bold text-neutral-950 ${isGroupedChild ? groupedChildConnectorClass : ""}`}
       >
-        <TransactionHashLink hash={transaction.hash} />
-        <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
-          {transaction.transaction_type ?? transaction.source}
-        </span>
+        <div className={isGroupedChild ? "translate-x-7" : undefined}>
+          <TransactionHashLink hash={transaction.hash} />
+          <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
+            {transaction.transaction_type ?? transaction.source}
+          </span>
+        </div>
       </td>
-      <td className="px-5 py-4 font-mono text-xs whitespace-nowrap text-neutral-600">
+      <td className="px-2 py-4 font-mono text-xs text-neutral-600">
         <p className="font-bold text-neutral-950">{formatTimestamp(transaction.time_stamp)}</p>
         <p className="mt-1">Block {transaction.block_number ?? "n/a"}</p>
       </td>
-      <td className="max-w-[220px] px-5 py-4 font-mono text-xs text-neutral-600">
-        <AddressLine label="From" value={transaction.from_address} />
-        <AddressLine label="To" value={transaction.to_address} />
-      </td>
-      <td className="max-w-[240px] px-5 py-4 text-neutral-700">
-        <p className="font-mono text-sm font-bold text-neutral-950">
-          {formatTransactionValue(transaction)}
-        </p>
-        <p
-          className="mt-1 truncate text-xs font-semibold text-neutral-500"
-          title={functionLabel(transaction)}
-        >
-          {functionLabel(transaction)}
-        </p>
-      </td>
-      <td className="px-5 py-4">
+      <td className="px-2 py-4">
         <LabelSelect
           transaction={transaction}
           updateTransaction={updateTransaction}
           disabled={isUpdating}
         />
       </td>
-      <td className="min-w-[260px] px-5 py-4">
+      <TaxValueCell value={transaction.incoming_quantity} />
+      <TaxValueCell value={transaction.incoming_asset} />
+      <TaxValueCell value={transaction.outgoing_quantity} />
+      <TaxValueCell value={transaction.outgoing_asset} />
+      <TaxValueCell value={isGroupedChild ? null : formatFee(transaction.fee)} />
+      <TaxValueCell value={transaction.cost_eur} />
+      <TaxValueCell value={transaction.proceeds_eur} />
+      <TaxValueCell value={transaction.gain_eur} />
+      <TaxValueCell value={transaction.holding_duration_days} />
+      <td className="px-2 py-4">
         <CommentEditor
           transaction={transaction}
           updateTransaction={updateTransaction}
@@ -440,13 +530,12 @@ function TaxTransactionCard({
   transaction,
   updateTransaction,
   isUpdating,
+  suppressFee = false,
 }: {
   transaction: TaxTransaction;
-  updateTransaction: (
-    id: string,
-    update: { label?: TaxTransactionLabel; comment?: string | null },
-  ) => void;
+  updateTransaction: UpdateTaxTransaction;
   isUpdating?: boolean;
+  suppressFee?: boolean;
 }) {
   return (
     <article className="p-5 text-sm text-neutral-700">
@@ -475,6 +564,15 @@ function TaxTransactionCard({
             {functionLabel(transaction)}
           </p>
         </div>
+        <TaxDetail label="Incoming Qty" value={transaction.incoming_quantity} />
+        <TaxDetail label="Incoming Asset" value={transaction.incoming_asset} />
+        <TaxDetail label="Outgoing Qty" value={transaction.outgoing_quantity} />
+        <TaxDetail label="Outgoing Asset" value={transaction.outgoing_asset} />
+        <TaxDetail label="Fee" value={suppressFee ? null : formatFee(transaction.fee)} />
+        <TaxDetail label="Cost EUR" value={transaction.cost_eur} />
+        <TaxDetail label="Proceeds EUR" value={transaction.proceeds_eur} />
+        <TaxDetail label="Gain EUR" value={transaction.gain_eur} />
+        <TaxDetail label="Holding Days" value={transaction.holding_duration_days} />
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-[180px_1fr]">
         <LabelSelect
@@ -497,21 +595,28 @@ function LabelSelect({
   updateTransaction,
   disabled,
 }: {
-  transaction: TaxTransaction;
+  transaction: TaxTransactionControlTarget;
   updateTransaction: (id: string, update: { label?: TaxTransactionLabel }) => void;
   disabled?: boolean;
 }) {
+  const value = transaction.label === "mixed" ? "mixed" : (transaction.label ?? "");
+
   return (
     <select
       className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-950 transition outline-none focus:border-neutral-950 disabled:bg-neutral-100 disabled:text-neutral-500"
       data-transaction-id={transaction.id}
       disabled={disabled}
-      value={transaction.label ?? ""}
+      value={value}
       onChange={(event) => {
         const value = event.currentTarget.value as "" | NonNullable<TaxTransactionLabel>;
         updateTransaction(transaction.id, { label: value === "" ? null : value });
       }}
     >
+      {transaction.label === "mixed" ? (
+        <option value="mixed" disabled>
+          Mixed labels
+        </option>
+      ) : null}
       {taxTransactionLabelOptions.map((option) => (
         <option key={option.label} value={option.value}>
           {option.label}
@@ -525,10 +630,12 @@ function CommentEditor({
   transaction,
   updateTransaction,
   disabled,
+  mixedComment = false,
 }: {
-  transaction: TaxTransaction;
+  transaction: Pick<TaxTransaction, "id" | "hash" | "comment">;
   updateTransaction: (id: string, update: { comment?: string | null }) => void;
   disabled?: boolean;
+  mixedComment?: boolean;
 }) {
   const [comment, setComment] = useState(transaction.comment ?? "");
 
@@ -545,7 +652,7 @@ function CommentEditor({
         className="min-h-20 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 transition outline-none placeholder:text-neutral-400 focus:border-neutral-950 disabled:bg-neutral-100 disabled:text-neutral-500"
         data-transaction-id={transaction.id}
         disabled={disabled}
-        placeholder="Add tax note"
+        placeholder={mixedComment ? "Mixed notes; type to replace all" : "Add tax note"}
         value={comment}
         onChange={(event) => setComment(event.currentTarget.value)}
       />
@@ -558,6 +665,25 @@ function CommentEditor({
       >
         Save comment
       </button>
+    </div>
+  );
+}
+
+function TaxValueCell({ value }: { value: string | number | null | undefined }) {
+  return (
+    <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600" title={formatTaxLedgerValue(value)}>
+      {formatTaxLedgerValue(value)}
+    </td>
+  );
+}
+
+function TaxDetail({ label, value }: { label: string; value: string | number | null | undefined }) {
+  return (
+    <div>
+      <p className="text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+        {label}
+      </p>
+      <p className="mt-1 font-mono font-bold text-neutral-950">{formatTaxLedgerValue(value)}</p>
     </div>
   );
 }
@@ -710,6 +836,51 @@ function formatTransactionValue(transaction: TaxTransaction): string {
   }
 }
 
+function formatFee(fee: string | null): string | null {
+  if (!fee) return null;
+  return `${formatBaseUnitAmount(fee, 18)} HYPE`;
+}
+
+function formatBaseUnitAmount(value: string, decimals: number): string {
+  try {
+    const parsed = BigInt(value);
+    const divisor = 10n ** BigInt(decimals);
+    const whole = parsed / divisor;
+    const remainder = parsed % divisor;
+    const decimal = remainder
+      .toString()
+      .padStart(decimals, "0")
+      .replace(/0+$/, "");
+    return `${whole.toString()}${decimal ? `.${decimal}` : ""}`;
+  } catch {
+    return value;
+  }
+}
+
+function formatGroupFee(group: TaxTransactionGroup): string {
+  return formatTaxLedgerValue(formatFee(group.primary.fee));
+}
+
+function formatTaxLedgerValue(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "-";
+  return String(value);
+}
+
+type TaxLedgerField =
+  | "incoming_quantity"
+  | "incoming_asset"
+  | "outgoing_quantity"
+  | "outgoing_asset"
+  | "cost_eur"
+  | "proceeds_eur"
+  | "gain_eur"
+  | "holding_duration_days";
+
+function mixedTaxField(group: TaxTransactionGroup, field: TaxLedgerField): string {
+  const values = new Set(group.transactions.map((transaction) => transaction[field] ?? ""));
+  return values.size === 1 ? formatTaxLedgerValue([...values][0]) : "Mixed";
+}
+
 function formatGroupValueSummary(group: TaxTransactionGroup): string {
   const native = group.transactions.find((transaction) => transaction.token_symbol === null);
   const whype = group.transactions.find((transaction) => transaction.token_symbol === "WHYPE");
@@ -767,6 +938,30 @@ function formatTokenAmount(value: string | null, decimals: number, symbol: strin
 function groupLabel(group: TaxTransactionGroup): string {
   const labels = new Set(group.transactions.map((transaction) => transaction.label ?? "Unlabeled"));
   return labels.size === 1 ? [...labels][0] : "Mixed labels";
+}
+
+function groupControlTarget(group: TaxTransactionGroup): TaxTransactionControlTarget {
+  return {
+    id: group.id,
+    hash: group.hash,
+    label: groupControlLabel(group),
+    comment: groupControlComment(group),
+  };
+}
+
+function groupControlLabel(group: TaxTransactionGroup): TaxTransactionLabel | "mixed" {
+  const labels = new Set(group.transactions.map((transaction) => transaction.label));
+  return labels.size === 1 ? [...labels][0] : "mixed";
+}
+
+function groupControlComment(group: TaxTransactionGroup): string | null {
+  const comments = new Set(group.transactions.map((transaction) => transaction.comment ?? ""));
+  if (comments.size !== 1) return "";
+  return [...comments][0] || null;
+}
+
+function hasMixedGroupComments(group: TaxTransactionGroup): boolean {
+  return new Set(group.transactions.map((transaction) => transaction.comment ?? "")).size > 1;
 }
 
 function functionLabel(transaction: TaxTransaction): string {

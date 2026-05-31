@@ -116,6 +116,14 @@ function initSchema(database: Database): void {
       source TEXT NOT NULL,
       is_error INTEGER,
       label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+      incoming_quantity TEXT,
+      incoming_asset TEXT,
+      outgoing_quantity TEXT,
+      outgoing_asset TEXT,
+      cost_eur TEXT,
+      proceeds_eur TEXT,
+      gain_eur TEXT,
+      holding_duration_days INTEGER,
       comment TEXT,
       synced_at TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now')),
@@ -176,6 +184,14 @@ function initSchema(database: Database): void {
         source TEXT NOT NULL,
         is_error INTEGER,
         label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+        incoming_quantity TEXT,
+        incoming_asset TEXT,
+        outgoing_quantity TEXT,
+        outgoing_asset TEXT,
+        cost_eur TEXT,
+        proceeds_eur TEXT,
+        gain_eur TEXT,
+        holding_duration_days INTEGER,
         comment TEXT,
         synced_at TEXT NOT NULL,
         created_at TEXT DEFAULT (datetime('now')),
@@ -185,18 +201,39 @@ function initSchema(database: Database): void {
       INSERT INTO tax_transactions_new
         (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used,
          gas_price, fee, method_id, function_name, input, contract_address, token_symbol,
-         token_decimal, token_name, transaction_type, source, is_error, label, comment,
-         synced_at, created_at, updated_at)
+         token_decimal, token_name, transaction_type, source, is_error, label,
+         incoming_quantity, incoming_asset, outgoing_quantity, outgoing_asset, cost_eur,
+         proceeds_eur, gain_eur, holding_duration_days, comment, synced_at, created_at,
+         updated_at)
       SELECT
         ${idExpression}, hash, block_number, time_stamp, from_address, to_address, value, gas_used,
         gas_price, fee, method_id, function_name, input, contract_address, token_symbol,
-        token_decimal, token_name, transaction_type, source, is_error, label, comment,
-        synced_at, created_at, updated_at
+        token_decimal, token_name, transaction_type, source, is_error, label,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, comment, synced_at, created_at, updated_at
       FROM tax_transactions;
 
       DROP TABLE tax_transactions;
       ALTER TABLE tax_transactions_new RENAME TO tax_transactions;
     `);
+  }
+
+  const taxLedgerColumns = [
+    ["incoming_quantity", "TEXT"],
+    ["incoming_asset", "TEXT"],
+    ["outgoing_quantity", "TEXT"],
+    ["outgoing_asset", "TEXT"],
+    ["cost_eur", "TEXT"],
+    ["proceeds_eur", "TEXT"],
+    ["gain_eur", "TEXT"],
+    ["holding_duration_days", "INTEGER"],
+  ] as const;
+  const migratedTaxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
+    name: string;
+  }[];
+  for (const [name, type] of taxLedgerColumns) {
+    if (!migratedTaxTransactionCols.some((c) => c.name === name)) {
+      database.exec(`ALTER TABLE tax_transactions ADD COLUMN ${name} ${type}`);
+    }
   }
 
   database.exec(`

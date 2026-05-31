@@ -39,6 +39,14 @@ function makeSyncedTaxTransaction(
     transaction_type: "txlist",
     source: "hyperevmscan",
     is_error: 0,
+    incoming_quantity: null,
+    incoming_asset: null,
+    outgoing_quantity: null,
+    outgoing_asset: null,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
     synced_at: "2026-05-30T12:01:00.000Z",
     ...overrides,
   };
@@ -57,7 +65,7 @@ describe("tax transaction persistence", () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it("upserts the same id by updating synced fields while preserving label and comment", () => {
+  it("upserts the same id by updating synced fields while preserving manual metadata", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
     expect(
       updateTaxTransaction("tx-1:external", { label: "Trade", comment: "manual note" }),
@@ -65,6 +73,13 @@ describe("tax transaction persistence", () => {
       label: "Trade",
       comment: "manual note",
     });
+    getDb()
+      .query(
+        `UPDATE tax_transactions
+         SET cost_eur = ?, proceeds_eur = ?, gain_eur = ?, holding_duration_days = ?
+         WHERE id = ?`,
+      )
+      .run("100.00", "125.00", "25.00", 30, "tx-1:external");
 
     upsertSyncedTaxTransaction(
       makeSyncedTaxTransaction({
@@ -88,6 +103,29 @@ describe("tax transaction persistence", () => {
       synced_at: "2026-05-30T12:05:00.000Z",
       label: "Trade",
       comment: "manual note",
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+      cost_eur: "100.00",
+      proceeds_eur: "125.00",
+      gain_eur: "25.00",
+      holding_duration_days: 30,
+    });
+  });
+
+  it("creates nullable tax ledger fields for synced transactions", () => {
+    upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
+
+    expect(getTaxTransaction("tx-1:external")).toMatchObject({
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+      cost_eur: null,
+      proceeds_eur: null,
+      gain_eur: null,
+      holding_duration_days: null,
     });
   });
 

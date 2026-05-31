@@ -78,6 +78,14 @@ export interface TaxTransaction {
   source: string;
   is_error: number | null;
   label: TaxTransactionLabel;
+  incoming_quantity: string | null;
+  incoming_asset: string | null;
+  outgoing_quantity: string | null;
+  outgoing_asset: string | null;
+  cost_eur: string | null;
+  proceeds_eur: string | null;
+  gain_eur: string | null;
+  holding_duration_days: number | null;
   comment: string | null;
   synced_at: string;
   created_at: string;

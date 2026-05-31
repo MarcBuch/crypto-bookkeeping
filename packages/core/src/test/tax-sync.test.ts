@@ -268,6 +268,60 @@ describe("tax transaction explorer sync", () => {
     expect(listTaxTransactions().map((row) => row.hash)).toEqual(["0xgood"]);
   });
 
+  it("destructures native transfers relative to the configured wallet", async () => {
+    const hash = "0x211d72eb6f3afa99f8de8e95ea4b27f5088892721da22672ee6700abdd2216d6";
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({
+            hash,
+            from: "0x57955467e2fd905dbb3026963a144dcacd566687",
+            to: WALLET,
+            value: "252451290000000000",
+          }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(config(), { fetcher, source: "hyperscan" });
+
+    expect(getTaxTransaction(`hyperscan:txlist:${hash}:external`)).toMatchObject({
+      incoming_quantity: "0.25245129",
+      incoming_asset: "HYPE",
+      outgoing_quantity: null,
+      outgoing_asset: null,
+    });
+  });
+
+  it("destructures token transfers relative to the configured wallet", async () => {
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "tokentx") {
+        return envelope([
+          tokenTx({
+            hash: "0xtokenout",
+            logIndex: "4",
+            from: WALLET.toUpperCase(),
+            to: "0xreceiver",
+            value: "25000000",
+            tokenSymbol: "USDC",
+            tokenDecimal: "6",
+          }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(config(), { fetcher, source: "hyperscan" });
+
+    expect(getTaxTransaction("hyperscan:tokentx:0xtokenout:4")).toMatchObject({
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: "25",
+      outgoing_asset: "USDC",
+    });
+  });
+
   it("throws useful explorer errors without wiping existing metadata or sync state", async () => {
     upsertTaxSyncState({
       wallet: WALLET,

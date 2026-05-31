@@ -15,6 +15,7 @@ import {
   TaxTransactions,
   taxCommentDraftState,
   taxTransactionLabelOptions,
+  updateTaxTransactionGroup,
 } from "../../src/TaxTransactions";
 
 const taxTransaction: TaxTransaction = {
@@ -39,6 +40,14 @@ const taxTransaction: TaxTransaction = {
   source: "hyperevmscan",
   is_error: 0,
   label: "Trade",
+  incoming_quantity: null,
+  incoming_asset: null,
+  outgoing_quantity: null,
+  outgoing_asset: null,
+  cost_eur: null,
+  proceeds_eur: null,
+  gain_eur: null,
+  holding_duration_days: null,
   comment: "LP rebalance",
   synced_at: "2026-05-30T12:00:00.000Z",
   created_at: "2026-05-30T12:00:00.000Z",
@@ -107,12 +116,52 @@ describe("tax transactions rendering", () => {
     expect(html).toContain("Synced Transactions");
     expect(html).toContain("0x1234...cdef");
     expect(html.match(/href="https:\/\/www\.hyperscan\.com\/tx\/0x1234567890abcdef"/g)?.length).toBe(2);
+    expect(html).toContain("Incoming Qty");
+    expect(html).toContain("Incoming Asset");
+    expect(html).toContain("Outgoing Qty");
+    expect(html).toContain("Outgoing Asset");
+    expect(html).toContain("0.000021 HYPE");
+    expect(html).not.toContain("0.000021 WHYPE");
+    expect(html).toContain("Cost EUR");
+    expect(html).toContain("Proceeds EUR");
+    expect(html).toContain("Gain EUR");
+    expect(html).toContain("Holding Days");
     expect(html).toContain("1 WHYPE");
     expect(html).toContain("transfer(address,uint256)");
     expect(html).toContain("Trade");
     expect(html).toContain("Transfer");
     expect(html).toContain("LP rebalance");
     expect(html).toContain("Save comment");
+  });
+
+  it("renders populated tax ledger fields", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          {
+            ...taxTransaction,
+            incoming_quantity: "25",
+            incoming_asset: "WHYPE",
+            outgoing_quantity: "25",
+            outgoing_asset: "HYPE",
+            cost_eur: "1000.00",
+            proceeds_eur: "1100.00",
+            gain_eur: "100.00",
+            holding_duration_days: 42,
+          },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("25");
+    expect(html).toContain("WHYPE");
+    expect(html).toContain("HYPE");
+    expect(html).toContain("1000.00");
+    expect(html).toContain("1100.00");
+    expect(html).toContain("100.00");
+    expect(html).toContain("42");
   });
 
   it("groups duplicate transaction hashes while preserving child rows", () => {
@@ -301,8 +350,11 @@ describe("tax transactions rendering", () => {
     expect(html).toContain("Hide transaction parts");
     expect(html).toContain(`aria-label="Hide transaction parts for ${hash}"`);
     expect(html.match(/aria-expanded="true"/g)?.length).toBe(2);
+    expect(html).toContain("Applies to all parts");
     expect(html).toContain("txlist</span>");
     expect(html).toContain("tokentx</span>");
+    expect(html.match(/0\.000021 HYPE/g)?.length).toBe(2);
+    expect(html).not.toContain("0.000021 WHYPE");
     expect(html.match(/25 native/g)?.length).toBeGreaterThanOrEqual(1);
     expect(html.match(/25 WHYPE/g)?.length).toBeGreaterThanOrEqual(1);
   });
@@ -333,11 +385,29 @@ describe("tax transactions rendering", () => {
       />,
     );
 
+    expect(collapsedHtml).toContain(`data-transaction-id="hash:${hash}"`);
     expect(collapsedHtml).not.toContain(`data-transaction-id="${firstId}"`);
     expect(collapsedHtml).not.toContain(`data-transaction-id="${secondId}"`);
     expect(expandedHtml.match(new RegExp(`data-transaction-id="${firstId}"`, "g"))?.length).toBe(6);
     expect(expandedHtml.match(new RegExp(`data-transaction-id="${secondId}"`, "g"))?.length).toBe(6);
-    expect(expandedHtml).not.toContain(`data-transaction-id="hash:${hash}"`);
+    expect(expandedHtml).toContain(`data-transaction-id="hash:${hash}"`);
+  });
+
+  it("applies grouped annotation updates to every child transaction", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const first = { ...taxTransaction, id: "part-1", hash, label: null, comment: null };
+    const second = { ...taxTransaction, id: "part-2", hash, label: "Trade" as const };
+    const [group] = groupTaxTransactions([first, second]);
+    const updates: Array<{ id: string; label?: TaxTransaction["label"]; comment?: string | null }> = [];
+
+    updateTaxTransactionGroup(group, { label: "Transfer", comment: "WHYPE wrap" }, (id, update) =>
+      updates.push({ id, ...update }),
+    );
+
+    expect(updates).toEqual([
+      { id: "part-1", label: "Transfer", comment: "WHYPE wrap" },
+      { id: "part-2", label: "Transfer", comment: "WHYPE wrap" },
+    ]);
   });
 
   it("groups sparse same-hash rows without throwing", () => {
@@ -453,8 +523,8 @@ describe("tax transactions rendering", () => {
     expect(html).toContain("0xsparse");
     expect(html.match(/Time n\/a/g)?.length).toBe(2);
     expect(html.match(/Block n\/a/g)?.length).toBe(2);
-    expect(html.match(/>n\/a<\/span>/g)?.length).toBe(4);
-    expect(html.match(/0 native/g)?.length).toBe(2);
+    expect(html.match(/>n\/a<\/span>/g)?.length).toBe(2);
+    expect(html).toContain("0 native");
     expect(html).toContain("Unknown function");
     expect(html).toContain("Unlabeled");
   });
@@ -475,7 +545,7 @@ describe("tax transactions rendering", () => {
       />,
     );
 
-    expect(html.match(/0\.252451 native/g)?.length).toBe(2);
+    expect(html.match(/0\.252451 native/g)?.length).toBe(1);
     expect(html).not.toContain("252451290000000000 native");
   });
 

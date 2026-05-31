@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -6,7 +6,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { TaxTransaction } from "../../src/api";
 import { taxTransactionQueryKeys } from "../../src/hooks/useTaxTransactions";
 import {
+  buildManualTaxTransactionCreateInput,
+  buildManualTaxTransactionUpdate,
+  emptyManualTaxTransactionForm,
   groupTaxTransactions,
+  manualTransactionFormFromTransaction,
+  ManualTransactionEditor,
+  ManualTaxTransactionForm,
   SyncStatus,
   TaxEmptyState,
   TaxErrorState,
@@ -15,6 +21,7 @@ import {
   TaxTransactions,
   taxCommentDraftState,
   taxTransactionLabelOptions,
+  submitManualTaxTransactionForm,
   updateTaxTransactionGroup,
 } from "../../src/TaxTransactions";
 
@@ -99,9 +106,398 @@ describe("tax transactions rendering", () => {
     const html = renderTaxScreen(queryClient);
 
     expect(html).toContain("Transaction Labeling Ledger");
+    expect(html).toContain("Add manual transaction");
     expect(html).toContain("Sync blockchain data");
     expect(html).toContain("No tax transactions synced");
     expect(html).not.toContain("Loading tax transactions");
+  });
+
+  it("renders the manual tax transaction form fields", () => {
+    const html = renderToStaticMarkup(
+      <ManualTaxTransactionForm
+        createTransaction={() => undefined}
+        isCreating={false}
+        isSuccess={false}
+      />,
+    );
+
+    expect(html).toContain("Add manual transaction");
+    expect(html).not.toContain("Create manual transaction");
+  });
+
+  it("renders the manual tax transaction creation form in a centered modal", () => {
+    const html = renderToStaticMarkup(
+      <ManualTaxTransactionForm
+        createTransaction={() => undefined}
+        isCreating={false}
+        isSuccess={false}
+        initialIsOpen
+      />,
+    );
+
+    expect(html).toContain("<dialog");
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain("top-1/2");
+    expect(html).toContain("left-1/2");
+    expect(html).toContain("Incoming Qty");
+    expect(html).toContain("Outgoing Asset");
+    expect(html).toContain("Holding Days");
+    expect(html).toContain("Create manual transaction");
+    expect(html).toContain("Close manual transaction creator");
+  });
+
+  it("renders tax ledger controls inline with transaction count", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+    const syncIndex = html.indexOf("Sync blockchain data");
+    const addIndex = html.indexOf("Add manual transaction");
+    const countIndex = html.indexOf("1 transaction");
+
+    expect(syncIndex).toBeGreaterThan(-1);
+    expect(addIndex).toBeGreaterThan(syncIndex);
+    expect(countIndex).toBeGreaterThan(addIndex);
+  });
+
+  it("builds trimmed manual tax transaction create inputs", () => {
+    expect(
+      buildManualTaxTransactionCreateInput({
+        ...emptyManualTaxTransactionForm,
+        id: " manual deposit ",
+        label: "Trade",
+        incoming_quantity: " 1.5 ",
+        incoming_asset: " HYPE ",
+        outgoing_quantity: " 42.00 ",
+        outgoing_asset: " USDC ",
+        cost_eur: " 1000.00 ",
+        proceeds_eur: " 1100.00 ",
+        gain_eur: " 100.00 ",
+        holding_duration_days: " 42 ",
+        comment: " Manual deposit ",
+      }),
+    ).toEqual({
+      input: {
+        id: "manual deposit",
+        label: "Trade",
+        incoming_quantity: "1.5",
+        incoming_asset: "HYPE",
+        outgoing_quantity: "42.00",
+        outgoing_asset: "USDC",
+        cost_eur: "1000.00",
+        proceeds_eur: "1100.00",
+        gain_eur: "100.00",
+        holding_duration_days: 42,
+        comment: "Manual deposit",
+      },
+    });
+  });
+
+  it("omits empty manual tax transaction fields and preserves explicit zero holding days", () => {
+    expect(
+      buildManualTaxTransactionCreateInput({
+        ...emptyManualTaxTransactionForm,
+        id: "   ",
+        label: "Transfer",
+        incoming_quantity: " 0 ",
+        incoming_asset: " USDC ",
+        outgoing_quantity: " ",
+        holding_duration_days: " 0 ",
+        comment: "   ",
+      }),
+    ).toEqual({
+      input: {
+        label: "Transfer",
+        incoming_quantity: "0",
+        incoming_asset: "USDC",
+        holding_duration_days: 0,
+      },
+    });
+  });
+
+  it("rejects empty and invalid manual tax transaction forms", () => {
+    expect(buildManualTaxTransactionCreateInput(emptyManualTaxTransactionForm)).toEqual({
+      error: "Add at least one field before creating a transaction.",
+    });
+    expect(
+      buildManualTaxTransactionCreateInput({
+        ...emptyManualTaxTransactionForm,
+        holding_duration_days: "-1",
+      }),
+    ).toEqual({ error: "Holding days must be a non-negative whole number." });
+    expect(
+      buildManualTaxTransactionCreateInput({
+        ...emptyManualTaxTransactionForm,
+        holding_duration_days: "1.5",
+      }),
+    ).toEqual({ error: "Holding days must be a non-negative whole number." });
+    expect(
+      buildManualTaxTransactionCreateInput({
+        ...emptyManualTaxTransactionForm,
+        holding_duration_days: "forty two",
+      }),
+    ).toEqual({ error: "Holding days must be a non-negative whole number." });
+  });
+
+  it("does not call create when manual tax transaction submission is empty", () => {
+    const createTransaction = mock(() => undefined);
+    const validationErrors: Array<string | null> = [];
+    const resetForm = mock(() => undefined);
+
+    submitManualTaxTransactionForm({
+      form: emptyManualTaxTransactionForm,
+      createTransaction,
+      setValidationError: (error) => validationErrors.push(error),
+      resetForm,
+    });
+
+    expect(createTransaction).not.toHaveBeenCalled();
+    expect(resetForm).not.toHaveBeenCalled();
+    expect(validationErrors).toEqual(["Add at least one field before creating a transaction."]);
+  });
+
+  it("does not call create when manual tax transaction holding days are invalid", () => {
+    for (const holdingDays of ["-1", "1.5", "not a number"]) {
+      const createTransaction = mock(() => undefined);
+      const validationErrors: Array<string | null> = [];
+
+      submitManualTaxTransactionForm({
+        form: { ...emptyManualTaxTransactionForm, holding_duration_days: holdingDays },
+        createTransaction,
+        setValidationError: (error) => validationErrors.push(error),
+        resetForm: () => undefined,
+      });
+
+      expect(createTransaction).not.toHaveBeenCalled();
+      expect(validationErrors).toEqual(["Holding days must be a non-negative whole number."]);
+    }
+  });
+
+  it("submits trimmed manual tax transaction payloads and resets after success", () => {
+    let successHandler: (() => void) | undefined;
+    const createTransaction = mock((_, options) => {
+      successHandler = options?.onSuccess;
+    });
+    const validationErrors: Array<string | null> = [];
+    const resetForm = mock(() => undefined);
+
+    submitManualTaxTransactionForm({
+      form: {
+        ...emptyManualTaxTransactionForm,
+        id: " manual-1 ",
+        label: "Trade",
+        incoming_quantity: " 1.5 ",
+        incoming_asset: " HYPE ",
+        outgoing_quantity: "   ",
+        holding_duration_days: " 7 ",
+        comment: " rebalance note ",
+      },
+      createTransaction,
+      setValidationError: (error) => validationErrors.push(error),
+      resetForm,
+    });
+
+    expect(createTransaction).toHaveBeenCalledWith(
+      {
+        id: "manual-1",
+        label: "Trade",
+        incoming_quantity: "1.5",
+        incoming_asset: "HYPE",
+        holding_duration_days: 7,
+        comment: "rebalance note",
+      },
+      { onSuccess: successHandler },
+    );
+    expect(resetForm).not.toHaveBeenCalled();
+
+    successHandler?.();
+
+    expect(resetForm).toHaveBeenCalledTimes(1);
+    expect(validationErrors).toEqual([null]);
+  });
+
+  it("preserves manual tax transaction input until a failed create reports success", () => {
+    const createTransaction = mock(() => undefined);
+    const validationErrors: Array<string | null> = [];
+    const resetForm = mock(() => undefined);
+
+    submitManualTaxTransactionForm({
+      form: {
+        ...emptyManualTaxTransactionForm,
+        incoming_quantity: " 2.5 ",
+        incoming_asset: " HYPE ",
+      },
+      createTransaction,
+      setValidationError: (error) => validationErrors.push(error),
+      resetForm,
+    });
+
+    expect(createTransaction).toHaveBeenCalledTimes(1);
+    expect(resetForm).not.toHaveBeenCalled();
+    expect(validationErrors).toEqual([]);
+  });
+
+  it("renders manual tax transaction pending, success, error, and prefilled input states", () => {
+    const pendingHtml = renderToStaticMarkup(
+      <ManualTaxTransactionForm
+        createTransaction={() => undefined}
+        isCreating
+        isSuccess={false}
+        initialForm={{
+          ...emptyManualTaxTransactionForm,
+          incoming_quantity: "2.5",
+          incoming_asset: "HYPE",
+        }}
+        initialIsOpen
+      />,
+    );
+    const successHtml = renderToStaticMarkup(
+      <ManualTaxTransactionForm
+        createTransaction={() => undefined}
+        isCreating={false}
+        isSuccess
+        initialIsOpen
+      />,
+    );
+    const errorHtml = renderToStaticMarkup(
+      <ManualTaxTransactionForm
+        createTransaction={() => undefined}
+        createError={new Error("write rejected")}
+        isCreating={false}
+        isSuccess={false}
+        initialForm={{
+          ...emptyManualTaxTransactionForm,
+          incoming_quantity: "2.5",
+          incoming_asset: "HYPE",
+        }}
+        initialIsOpen
+      />,
+    );
+
+    expect(pendingHtml).toContain("Creating...");
+    expect(pendingHtml).toContain('disabled=""');
+    expect(successHtml).toContain("Manual transaction created. Refreshing ledger...");
+    expect(errorHtml).toContain("Could not create transaction: write rejected");
+    expect(errorHtml).toContain('value="2.5"');
+    expect(errorHtml).toContain('value="HYPE"');
+  });
+
+  it("builds manual transaction updates from changed fields only", () => {
+    const manualTransaction: TaxTransaction = {
+      ...taxTransaction,
+      id: "manual:editable",
+      hash: "manual-original",
+      source: "manual",
+      transaction_type: "manual",
+      block_number: null,
+      incoming_quantity: "1",
+      incoming_asset: "HYPE",
+      comment: null,
+    };
+    const form = {
+      ...manualTransactionFormFromTransaction(manualTransaction),
+      hash: " manual-updated ",
+      block_number: "42",
+      incoming_quantity: " 2 ",
+      incoming_asset: " WHYPE ",
+      holding_duration_days: "7",
+      comment: " edited ",
+    };
+
+    expect(buildManualTaxTransactionUpdate(manualTransaction, form)).toEqual({
+      update: {
+        hash: "manual-updated",
+        block_number: 42,
+        incoming_quantity: "2",
+        incoming_asset: "WHYPE",
+        holding_duration_days: 7,
+        comment: "edited",
+      },
+    });
+  });
+
+  it("rejects empty and invalid manual transaction updates", () => {
+    const manualTransaction: TaxTransaction = {
+      ...taxTransaction,
+      id: "manual:editable",
+      source: "manual",
+      transaction_type: "manual",
+      holding_duration_days: 1,
+    };
+
+    expect(
+      buildManualTaxTransactionUpdate(
+        manualTransaction,
+        manualTransactionFormFromTransaction(manualTransaction),
+      ),
+    ).toEqual({ error: "Change at least one field before saving." });
+    expect(
+      buildManualTaxTransactionUpdate(manualTransaction, {
+        ...manualTransactionFormFromTransaction(manualTransaction),
+        hash: "   ",
+      }),
+    ).toEqual({ error: "Hash cannot be empty." });
+    expect(
+      buildManualTaxTransactionUpdate(manualTransaction, {
+        ...manualTransactionFormFromTransaction(manualTransaction),
+        holding_duration_days: "-1",
+      }),
+    ).toEqual({ error: "Holding days must be a non-negative whole number." });
+    expect(
+      buildManualTaxTransactionUpdate(manualTransaction, {
+        ...manualTransactionFormFromTransaction(manualTransaction),
+        block_number: "1.5",
+      }),
+    ).toEqual({ error: "Block Number must be a whole number." });
+  });
+
+  it("renders manual edit affordances only for manual rows", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          taxTransaction,
+          {
+            ...taxTransaction,
+            id: "manual:editable",
+            hash: "manual-row",
+            source: "manual",
+            transaction_type: "manual",
+          },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html.match(/Edit manual fields/g)?.length).toBe(2);
+    expect(html).toContain("manual");
+  });
+
+  it("renders manual field editing in a modal dialog", () => {
+    const html = renderToStaticMarkup(
+      <ManualTransactionEditor
+        transaction={{
+          ...taxTransaction,
+          id: "manual:editable",
+          source: "manual",
+          transaction_type: "manual",
+          incoming_quantity: "1",
+          incoming_asset: "HYPE",
+        }}
+        updateTransaction={() => undefined}
+        initialIsEditing
+      />,
+    );
+
+    expect(html).toContain("<dialog");
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain("Edit manual transaction");
+    expect(html).toContain("Close manual transaction editor");
+    expect(html).toContain("Manual Incoming Qty");
+    expect(html).toContain("Save manual fields");
   });
 
   it("renders transaction labels and comments", () => {
@@ -115,7 +511,9 @@ describe("tax transactions rendering", () => {
 
     expect(html).toContain("Synced Transactions");
     expect(html).toContain("0x1234...cdef");
-    expect(html.match(/href="https:\/\/www\.hyperscan\.com\/tx\/0x1234567890abcdef"/g)?.length).toBe(2);
+    expect(
+      html.match(/href="https:\/\/www\.hyperscan\.com\/tx\/0x1234567890abcdef"/g)?.length,
+    ).toBe(2);
     expect(html).toContain("Incoming Qty");
     expect(html).toContain("Incoming Asset");
     expect(html).toContain("Outgoing Qty");
@@ -200,6 +598,43 @@ describe("tax transactions rendering", () => {
       whypePart.id,
     ]);
     expect(groups[1].transactions.map((transaction) => transaction.id)).toEqual([standalone.id]);
+  });
+
+  it("sorts tax transaction groups newest first by date and time", () => {
+    const newest: TaxTransaction = {
+      ...taxTransaction,
+      id: "newest",
+      hash: "0xnewest",
+      time_stamp: "2026-05-31T12:00:00.000Z",
+      block_number: 1,
+    };
+    const oldest: TaxTransaction = {
+      ...taxTransaction,
+      id: "oldest",
+      hash: "0xoldest",
+      time_stamp: "2026-05-30T12:00:00.000Z",
+      block_number: 3,
+    };
+    const sameTimeHigherBlock: TaxTransaction = {
+      ...taxTransaction,
+      id: "same-time-higher-block",
+      hash: "0xsame-time-higher-block",
+      time_stamp: "2026-05-31T12:00:00.000Z",
+      block_number: 2,
+    };
+    const missingTime: TaxTransaction = {
+      ...taxTransaction,
+      id: "missing-time",
+      hash: "0xmissing-time",
+      time_stamp: null,
+      block_number: 999,
+    };
+
+    expect(
+      groupTaxTransactions([oldest, missingTime, newest, sameTimeHigherBlock]).map(
+        (group) => group.primary.id,
+      ),
+    ).toEqual(["same-time-higher-block", "newest", "oldest", "missing-time"]);
   });
 
   it("renders duplicate hashes as one collapsed grouped trade", () => {
@@ -389,7 +824,9 @@ describe("tax transactions rendering", () => {
     expect(collapsedHtml).not.toContain(`data-transaction-id="${firstId}"`);
     expect(collapsedHtml).not.toContain(`data-transaction-id="${secondId}"`);
     expect(expandedHtml.match(new RegExp(`data-transaction-id="${firstId}"`, "g"))?.length).toBe(6);
-    expect(expandedHtml.match(new RegExp(`data-transaction-id="${secondId}"`, "g"))?.length).toBe(6);
+    expect(expandedHtml.match(new RegExp(`data-transaction-id="${secondId}"`, "g"))?.length).toBe(
+      6,
+    );
     expect(expandedHtml).toContain(`data-transaction-id="hash:${hash}"`);
   });
 
@@ -398,7 +835,8 @@ describe("tax transactions rendering", () => {
     const first = { ...taxTransaction, id: "part-1", hash, label: null, comment: null };
     const second = { ...taxTransaction, id: "part-2", hash, label: "Trade" as const };
     const [group] = groupTaxTransactions([first, second]);
-    const updates: Array<{ id: string; label?: TaxTransaction["label"]; comment?: string | null }> = [];
+    const updates: Array<{ id: string; label?: TaxTransaction["label"]; comment?: string | null }> =
+      [];
 
     updateTaxTransactionGroup(group, { label: "Transfer", comment: "WHYPE wrap" }, (id, update) =>
       updates.push({ id, ...update }),

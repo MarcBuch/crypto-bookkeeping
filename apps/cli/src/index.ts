@@ -10,6 +10,7 @@ import {
   listTaxTransactions,
   getTaxTransaction,
   updateTaxTransaction,
+  createManualTaxTransaction,
   NotFoundError,
   // Display
   displayPositions,
@@ -25,6 +26,7 @@ import {
   type TaxTransactionLabel,
   type TaxTransactionLabelFilter,
   type TaxTransactionUpdate,
+  type ManualTaxTransactionInput,
 } from "@lp-tracker/core";
 import { Command } from "commander";
 
@@ -124,10 +126,7 @@ function formatTaxBaseUnitAmount(value: string, decimals: number): string {
     const divisor = 10n ** BigInt(decimals);
     const whole = parsed / divisor;
     const remainder = parsed % divisor;
-    const decimal = remainder
-      .toString()
-      .padStart(decimals, "0")
-      .replace(/0+$/, "");
+    const decimal = remainder.toString().padStart(decimals, "0").replace(/0+$/, "");
     return `${whole.toString()}${decimal ? `.${decimal}` : ""}`;
   } catch {
     return value;
@@ -324,7 +323,81 @@ program
   });
 
 // ===== TAX COMMANDS =====
-const tax = program.command("tax").description("Sync, inspect, and label tax transactions");
+const tax = program.command("tax").description("Sync, inspect, add, and label tax transactions");
+
+tax
+  .command("add")
+  .description("Add a manual tax transaction")
+  .option("--id <id>", "Manual transaction ID")
+  .option("--hash <hash>", "Transaction hash or manual reference")
+  .option("--time <iso>", "Transaction timestamp as an ISO string")
+  .option("--label <label>", "Trade, Transfer, null, clear, none, or unlabeled")
+  .option("--comment <comment>", "Comment to store with the transaction")
+  .option("--incoming-quantity <quantity>", "Incoming asset quantity")
+  .option("--incoming-asset <asset>", "Incoming asset symbol")
+  .option("--outgoing-quantity <quantity>", "Outgoing asset quantity")
+  .option("--outgoing-asset <asset>", "Outgoing asset symbol")
+  .option("--fee <fee>", "Fee amount in base units")
+  .option("--cost-eur <amount>", "Cost basis in EUR")
+  .option("--proceeds-eur <amount>", "Proceeds in EUR")
+  .option("--gain-eur <amount>", "Gain in EUR")
+  .option("--holding-days <days>", "Holding duration in days")
+  .action(
+    (options: {
+      id?: string;
+      hash?: string;
+      time?: string;
+      label?: string;
+      comment?: string;
+      incomingQuantity?: string;
+      incomingAsset?: string;
+      outgoingQuantity?: string;
+      outgoingAsset?: string;
+      fee?: string;
+      costEur?: string;
+      proceedsEur?: string;
+      gainEur?: string;
+      holdingDays?: string;
+    }) => {
+      const transaction: ManualTaxTransactionInput = {};
+      try {
+        if (options.id !== undefined) transaction.id = options.id;
+        if (options.hash !== undefined) transaction.hash = options.hash;
+        if (options.time !== undefined) transaction.time_stamp = options.time;
+        if (options.label !== undefined) transaction.label = parseUpdateTaxLabel(options.label);
+        if (options.comment !== undefined) transaction.comment = options.comment;
+        if (options.incomingQuantity !== undefined) {
+          transaction.incoming_quantity = options.incomingQuantity;
+        }
+        if (options.incomingAsset !== undefined) transaction.incoming_asset = options.incomingAsset;
+        if (options.outgoingQuantity !== undefined) {
+          transaction.outgoing_quantity = options.outgoingQuantity;
+        }
+        if (options.outgoingAsset !== undefined) transaction.outgoing_asset = options.outgoingAsset;
+        if (options.fee !== undefined) transaction.fee = options.fee;
+        if (options.costEur !== undefined) transaction.cost_eur = options.costEur;
+        if (options.proceedsEur !== undefined) transaction.proceeds_eur = options.proceedsEur;
+        if (options.gainEur !== undefined) transaction.gain_eur = options.gainEur;
+        if (options.holdingDays !== undefined) {
+          transaction.holding_duration_days = parseNonNegativeInteger(
+            options.holdingDays,
+            "holding-days",
+          );
+        }
+        if (Object.keys(transaction).length === 0) {
+          throw new Error("tax add requires at least one manual field");
+        }
+
+        const created = createManualTaxTransaction(transaction);
+        output({ transaction: created }, () => {
+          console.log(`Added tax transaction ${created.id}.`);
+          console.log(formatTaxTransaction(created));
+        });
+      } catch (err) {
+        printCommandError(err instanceof Error ? err.message : "Invalid tax add options");
+      }
+    },
+  );
 
 tax
   .command("sync")

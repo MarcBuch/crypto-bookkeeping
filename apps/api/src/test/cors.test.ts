@@ -26,6 +26,7 @@ mock.module("@lp-tracker/core", () => ({
   listTaxTransactions: () => [],
   syncTaxTransactions: async () => ({}),
   updateTaxTransaction: () => null,
+  createManualTaxTransaction: () => null,
   NotFoundError: class NotFoundError extends Error {},
   RpcError: class RpcError extends Error {
     code?: number;

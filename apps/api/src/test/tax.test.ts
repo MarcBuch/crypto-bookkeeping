@@ -25,9 +25,11 @@ const fakeTransaction = {
 let lastListArgs: unknown[] = [];
 let lastSyncArgs: unknown[] = [];
 let lastUpdateArgs: unknown[] = [];
+let lastCreateArgs: unknown[] = [];
 let allListArgs: unknown[][] = [];
 let allSyncArgs: unknown[][] = [];
 let allUpdateArgs: unknown[][] = [];
+let allCreateArgs: unknown[][] = [];
 let mockListTaxTransactions: (...args: unknown[]) => unknown = () => [fakeTransaction];
 let mockSyncTaxTransactions: (...args: unknown[]) => unknown = () => ({
   scanned: 2,
@@ -38,6 +40,7 @@ let mockUpdateTaxTransaction: (...args: unknown[]) => unknown = () => ({
   ...fakeTransaction,
   comment: "Updated comment",
 });
+let mockCreateManualTaxTransaction: (...args: unknown[]) => unknown = () => fakeTransaction;
 
 mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
@@ -60,6 +63,11 @@ mock.module("@lp-tracker/core", () => ({
     lastUpdateArgs = args;
     allUpdateArgs.push(args);
     return mockUpdateTaxTransaction(...args);
+  },
+  createManualTaxTransaction: (...args: unknown[]) => {
+    lastCreateArgs = args;
+    allCreateArgs.push(args);
+    return mockCreateManualTaxTransaction(...args);
   },
   NotFoundError: class NotFoundError extends Error {},
   RpcError: class RpcError extends Error {
@@ -84,9 +92,11 @@ beforeEach(() => {
   lastListArgs = [];
   lastSyncArgs = [];
   lastUpdateArgs = [];
+  lastCreateArgs = [];
   allListArgs = [];
   allSyncArgs = [];
   allUpdateArgs = [];
+  allCreateArgs = [];
   mockListTaxTransactions = () => [fakeTransaction];
   mockSyncTaxTransactions = () => ({
     scanned: 2,
@@ -97,6 +107,7 @@ beforeEach(() => {
     ...fakeTransaction,
     comment: "Updated comment",
   });
+  mockCreateManualTaxTransaction = () => fakeTransaction;
 });
 
 describe("GET /tax/transactions", () => {
@@ -317,6 +328,284 @@ describe("POST /tax/transactions/sync", () => {
   });
 });
 
+describe("POST /tax/transactions", () => {
+  it.each([
+    ["null", "null"],
+    ["array", []],
+    ["string", '"invalid"'],
+  ])("rejects %s request bodies", async (_name, payload) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      headers: { "content-type": "application/json" },
+      payload,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "request body must be an object" });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it("creates a manual tax transaction with validated ledger fields", async () => {
+    const createdTransaction = { ...fakeTransaction, id: "manual:deposit", source: "manual" };
+    mockCreateManualTaxTransaction = () => createdTransaction;
+
+    const payload = {
+      id: "Deposit",
+      hash: "manual-deposit",
+      time_stamp: "2026-05-30T12:00:00.000Z",
+      incoming_quantity: "1.5",
+      incoming_asset: "HYPE",
+      outgoing_quantity: "42.00",
+      outgoing_asset: "USDC",
+      cost_eur: null,
+      proceeds_eur: "45.00",
+      gain_eur: "5.00",
+      holding_duration_days: 7,
+      label: "Trade",
+      comment: "Manual deposit",
+    };
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions", payload });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expect(lastCreateArgs).toEqual([payload]);
+    expect(allListArgs).toEqual([]);
+    expect(allSyncArgs).toEqual([]);
+    expect(allUpdateArgs).toEqual([]);
+  });
+
+  it("passes nullable integer fields through as null after validation", async () => {
+    const createdTransaction = { ...fakeTransaction, id: "manual:null-integers" };
+    mockCreateManualTaxTransaction = () => createdTransaction;
+
+    const payload = {
+      block_number: null,
+      token_decimal: null,
+      is_error: null,
+      holding_duration_days: null,
+      comment: "Nullable integer fields",
+    };
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions", payload });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expect(allCreateArgs).toEqual([[payload]]);
+  });
+
+  it.each(["source", "transaction_type"])("rejects client-controlled %s", async (field) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { [field]: "manual" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: `unknown field: ${field}` });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it("rejects unknown fields beyond reserved source and transaction_type", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { comment: "Known", category: "Unknown" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "unknown field: category" });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it.each([
+    ["number", 1],
+    ["object", { value: "Trade" }],
+    ["empty string", ""],
+    ["lowercase", "trade"],
+    ["unexpected value", "Income"],
+  ])("rejects %s labels", async (_name, label) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { label },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, or null" });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it.each([
+    ["number", 1],
+    ["object", { value: "Comment" }],
+    ["array", ["Comment"]],
+  ])("rejects %s comments", async (_name, comment) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { comment },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "comment must be a string or null" });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it("rejects overlong comments", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { comment: "a".repeat(1001) },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "comment must be at most 1000 characters" });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it("accepts null label and comment annotations", async () => {
+    const createdTransaction = { ...fakeTransaction, label: null, comment: null };
+    mockCreateManualTaxTransaction = () => createdTransaction;
+
+    const payload = { label: null, comment: null };
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions", payload });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expect(allCreateArgs).toEqual([[payload]]);
+  });
+
+  it.each([
+    ["incoming_quantity", 1, "incoming_quantity must be a string or null"],
+    ["incoming_asset", { symbol: "HYPE" }, "incoming_asset must be a string or null"],
+    ["cost_eur", ["1.00"], "cost_eur must be a string or null"],
+  ])("rejects invalid nullable string field %s", async (field, value, error) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { [field]: value },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it.each([
+    ["id", null, "id must be a string"],
+    ["id", 1, "id must be a string"],
+    ["hash", null, "hash must be a string"],
+    ["hash", { value: "0xhash" }, "hash must be a string"],
+  ])("rejects invalid %s values", async (field, value, error) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { [field]: value },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it.each([
+    ["block_number", 1.5, "block_number must be a safe integer or null"],
+    ["token_decimal", Number.MAX_SAFE_INTEGER + 1, "token_decimal must be a safe integer or null"],
+    ["is_error", "0", "is_error must be a safe integer or null"],
+    ["holding_duration_days", -1, "holding_duration_days must be non-negative or null"],
+  ])("rejects invalid integer field %s", async (field, value, error) => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { [field]: value },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error });
+    expect(allCreateArgs).toEqual([]);
+  });
+
+  it("does not affect existing GET or PATCH behavior after rejected manual creates", async () => {
+    const rejectedCreate = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { unknown: "field" },
+    });
+
+    expect(rejectedCreate.statusCode).toBe(400);
+
+    const getRes = await server.inject({ method: "GET", url: "/tax/transactions" });
+    const patchRes = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/tx-1%3Aexternal",
+      payload: { comment: "Still works" },
+    });
+
+    expect(getRes.statusCode).toBe(200);
+    expect(getRes.json()).toEqual({ transactions: [fakeTransaction] });
+    expect(patchRes.statusCode).toBe(200);
+    expect(patchRes.json()).toEqual({
+      transaction: { ...fakeTransaction, comment: "Updated comment" },
+    });
+    expect(allCreateArgs).toEqual([]);
+    expect(allListArgs).toEqual([[50, 0, undefined]]);
+    expect(allUpdateArgs).toEqual([["tx-1:external", { comment: "Still works" }]]);
+  });
+
+  it("returns a controlled 500 error response when manual create throws", async () => {
+    mockCreateManualTaxTransaction = () => {
+      throw new Error("create exploded");
+    };
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { comment: "Valid manual entry" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Failed to create tax transaction" });
+    expect(allCreateArgs).toEqual([[{ comment: "Valid manual entry" }]]);
+  });
+
+  it("maps invalid manual id create errors to a controlled 400 response", async () => {
+    mockCreateManualTaxTransaction = () => {
+      throw new Error("Manual tax transaction id must contain at least one safe character");
+    };
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { id: " -- !! ", comment: "Invalid id" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({
+      error: "Manual tax transaction id must contain at least one safe character",
+    });
+    expect(allCreateArgs).toEqual([[{ id: " -- !! ", comment: "Invalid id" }]]);
+  });
+
+  it("maps duplicate manual id create errors to a controlled 409 response", async () => {
+    mockCreateManualTaxTransaction = () => {
+      throw new Error("Manual tax transaction already exists: manual:deposit");
+    };
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { id: "deposit", comment: "Duplicate id" },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "Manual tax transaction already exists: manual:deposit" });
+    expect(allCreateArgs).toEqual([[{ id: "deposit", comment: "Duplicate id" }]]);
+  });
+});
+
 describe("PATCH /tax/transactions/:id", () => {
   it.each([
     ["null", "null"],
@@ -402,6 +691,62 @@ describe("PATCH /tax/transactions/:id", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { comment: "Only comment" }]]);
+  });
+
+  it("accepts full manual ledger property updates", async () => {
+    const updatedTransaction = {
+      ...fakeTransaction,
+      source: "manual",
+      hash: "manual-updated",
+      block_number: 42,
+      incoming_quantity: "2",
+      incoming_asset: "HYPE",
+      holding_duration_days: 7,
+    };
+    mockUpdateTaxTransaction = () => updatedTransaction;
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/manual%3Aeditable",
+      payload: {
+        hash: "manual-updated",
+        block_number: 42,
+        incoming_quantity: "2",
+        incoming_asset: "HYPE",
+        holding_duration_days: 7,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expect(lastUpdateArgs).toEqual([
+      "manual:editable",
+      {
+        hash: "manual-updated",
+        block_number: 42,
+        incoming_quantity: "2",
+        incoming_asset: "HYPE",
+        holding_duration_days: 7,
+      },
+    ]);
+  });
+
+  it("returns a controlled validation error when synced rows reject ledger property updates", async () => {
+    mockUpdateTaxTransaction = () => {
+      throw new Error("Only manual tax transactions can update ledger properties");
+    };
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/tx-1%3Aexternal",
+      payload: { incoming_quantity: "2" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({
+      error: "Only manual tax transactions can update ledger properties",
+    });
+    expect(allUpdateArgs).toEqual([["tx-1:external", { incoming_quantity: "2" }]]);
   });
 
   it("returns 404 when the transaction does not exist", async () => {
@@ -512,7 +857,19 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "request body must include label or comment" });
+    expect(res.json()).toEqual({ error: "request body must include at least one editable field" });
+    expect(allUpdateArgs).toEqual([]);
+  });
+
+  it("rejects invalid manual update integer fields", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/manual%3Aeditable",
+      payload: { holding_duration_days: -1 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "holding_duration_days must be non-negative or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 

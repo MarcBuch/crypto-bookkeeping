@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { getDb } from "./schema";
 
 export interface StoredPosition {
@@ -84,9 +86,69 @@ export type SyncedTaxTransaction = Omit<
 >;
 
 export interface TaxTransactionUpdate {
+  hash?: string;
+  block_number?: number | null;
+  time_stamp?: string | null;
+  from_address?: string | null;
+  to_address?: string | null;
+  value?: string | null;
+  gas_used?: string | null;
+  gas_price?: string | null;
+  fee?: string | null;
+  method_id?: string | null;
+  function_name?: string | null;
+  input?: string | null;
+  contract_address?: string | null;
+  token_symbol?: string | null;
+  token_decimal?: number | null;
+  token_name?: string | null;
+  is_error?: number | null;
   label?: TaxTransactionLabel;
+  incoming_quantity?: string | null;
+  incoming_asset?: string | null;
+  outgoing_quantity?: string | null;
+  outgoing_asset?: string | null;
+  cost_eur?: string | null;
+  proceeds_eur?: string | null;
+  gain_eur?: string | null;
+  holding_duration_days?: number | null;
   comment?: string | null;
 }
+
+const manualOnlyTaxTransactionUpdateFields = [
+  "hash",
+  "block_number",
+  "time_stamp",
+  "from_address",
+  "to_address",
+  "value",
+  "gas_used",
+  "gas_price",
+  "fee",
+  "method_id",
+  "function_name",
+  "input",
+  "contract_address",
+  "token_symbol",
+  "token_decimal",
+  "token_name",
+  "is_error",
+  "incoming_quantity",
+  "incoming_asset",
+  "outgoing_quantity",
+  "outgoing_asset",
+  "cost_eur",
+  "proceeds_eur",
+  "gain_eur",
+  "holding_duration_days",
+] as const satisfies ReadonlyArray<keyof TaxTransactionUpdate>;
+
+export type ManualTaxTransactionInput = Partial<
+  Omit<
+    StoredTaxTransaction,
+    "source" | "transaction_type" | "synced_at" | "created_at" | "updated_at"
+  >
+>;
 
 export interface StoredTaxSyncState {
   wallet: string;
@@ -267,6 +329,104 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
   );
 }
 
+export function createManualTaxTransaction(
+  transaction: ManualTaxTransactionInput,
+): StoredTaxTransaction {
+  assertValidTaxTransactionLabel(transaction.label);
+
+  const db = getDb();
+  const syncedAt = new Date().toISOString();
+  const hasExplicitId = "id" in transaction;
+  const id = hasExplicitId
+    ? manualTaxTransactionId(transaction.id ?? "")
+    : nextManualTaxTransactionId(
+        manualTaxTransactionId(`auto:${manualTaxTransactionHash(transaction)}`),
+      );
+  const hash = transaction.hash ?? id;
+
+  if (hasExplicitId && getTaxTransaction(id)) {
+    throw new Error(`Manual tax transaction already exists: ${id}`);
+  }
+
+  db.run(
+    `INSERT INTO tax_transactions
+     (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used, gas_price,
+        fee, method_id, function_name, input, contract_address, token_symbol, token_decimal,
+        token_name, transaction_type, source, is_error, label, incoming_quantity, incoming_asset,
+        outgoing_quantity, outgoing_asset, cost_eur, proceeds_eur, gain_eur,
+        holding_duration_days, comment, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      hash,
+      transaction.block_number ?? null,
+      transaction.time_stamp ?? null,
+      transaction.from_address ?? null,
+      transaction.to_address ?? null,
+      transaction.value ?? null,
+      transaction.gas_used ?? null,
+      transaction.gas_price ?? null,
+      transaction.fee ?? null,
+      transaction.method_id ?? null,
+      transaction.function_name ?? null,
+      transaction.input ?? null,
+      transaction.contract_address ?? null,
+      transaction.token_symbol ?? null,
+      transaction.token_decimal ?? null,
+      transaction.token_name ?? null,
+      "manual",
+      "manual",
+      transaction.is_error ?? null,
+      transaction.label ?? null,
+      transaction.incoming_quantity ?? null,
+      transaction.incoming_asset ?? null,
+      transaction.outgoing_quantity ?? null,
+      transaction.outgoing_asset ?? null,
+      transaction.cost_eur ?? null,
+      transaction.proceeds_eur ?? null,
+      transaction.gain_eur ?? null,
+      transaction.holding_duration_days ?? null,
+      transaction.comment ?? null,
+      syncedAt,
+    ],
+  );
+
+  const stored = getTaxTransaction(id);
+  if (!stored) throw new Error(`Manual tax transaction was not created: ${id}`);
+  return stored;
+}
+
+function manualTaxTransactionId(value: string): string {
+  const trimmed = value.trim();
+  const raw = trimmed.toLowerCase().startsWith("manual:")
+    ? trimmed.slice("manual:".length)
+    : trimmed;
+  const id = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96);
+  if (!id) throw new Error("Manual tax transaction id must contain at least one safe character");
+  return `manual:${id}`;
+}
+
+function nextManualTaxTransactionId(baseId: string): string {
+  let id = baseId;
+  let suffix = 2;
+  while (getTaxTransaction(id)) {
+    id = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  return id;
+}
+
+function manualTaxTransactionHash(transaction: ManualTaxTransactionInput): string {
+  const entries = Object.entries(transaction)
+    .filter(([key, value]) => key !== "id" && value !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return createHash("sha256").update(JSON.stringify(entries)).digest("hex").slice(0, 24);
+}
+
 export function getTaxTransaction(id: string): StoredTaxTransaction | null {
   const db = getDb();
   return db
@@ -317,8 +477,22 @@ export function updateTaxTransaction(
 ): StoredTaxTransaction | null {
   assertValidTaxTransactionLabel(update.label);
 
+  const existing = getTaxTransaction(id);
+  if (!existing) return null;
+
+  const hasManualOnlyUpdate = manualOnlyTaxTransactionUpdateFields.some((field) => field in update);
+  if (hasManualOnlyUpdate && existing.source !== "manual") {
+    throw new Error("Only manual tax transactions can update ledger properties");
+  }
+
   const assignments: string[] = [];
-  const params: (string | null)[] = [];
+  const params: Array<string | number | null> = [];
+  for (const field of manualOnlyTaxTransactionUpdateFields) {
+    if (field in update) {
+      assignments.push(`${field} = ?`);
+      params.push(update[field] ?? null);
+    }
+  }
   if ("label" in update) {
     assignments.push("label = ?");
     params.push(update.label ?? null);
@@ -328,7 +502,7 @@ export function updateTaxTransaction(
     params.push(update.comment ?? null);
   }
   if (assignments.length === 0) {
-    return getTaxTransaction(id);
+    return existing;
   }
 
   const db = getDb();

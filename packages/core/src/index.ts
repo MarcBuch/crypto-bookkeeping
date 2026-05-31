@@ -25,6 +25,7 @@ export {
   getLatestSnapshot,
   getAllLatestSnapshots,
   upsertSyncedTaxTransaction,
+  createManualTaxTransaction,
   getTaxTransaction,
   listTaxTransactions,
   updateTaxTransaction,
@@ -39,6 +40,7 @@ export type {
   TaxTransactionLabelFilter,
   StoredTaxTransaction,
   SyncedTaxTransaction,
+  ManualTaxTransactionInput,
   TaxTransactionUpdate,
   StoredTaxSyncState,
 } from "./db/store.js";

@@ -4,9 +4,11 @@ import { join } from "path";
 
 import { getDb, resetDb } from "../db/schema.js";
 import {
+  createManualTaxTransaction,
   getTaxSyncState,
   getTaxTransaction,
   listTaxTransactions,
+  type ManualTaxTransactionInput,
   type SyncedTaxTransaction,
   upsertSyncedTaxTransaction,
   upsertTaxSyncState,
@@ -48,6 +50,25 @@ function makeSyncedTaxTransaction(
     gain_eur: null,
     holding_duration_days: null,
     synced_at: "2026-05-30T12:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeManualTaxTransaction(
+  overrides: ManualTaxTransactionInput = {},
+): ManualTaxTransactionInput {
+  return {
+    time_stamp: "2026-05-30T12:00:00.000Z",
+    label: "Trade",
+    incoming_quantity: "1.5",
+    incoming_asset: "HYPE",
+    outgoing_quantity: "42.00",
+    outgoing_asset: "USDC",
+    cost_eur: "40.00",
+    proceeds_eur: "45.00",
+    gain_eur: "5.00",
+    holding_duration_days: 7,
+    comment: "manual ledger entry",
     ...overrides,
   };
 }
@@ -129,6 +150,135 @@ describe("tax transaction persistence", () => {
     });
   });
 
+  it("creates a valid minimal manual transaction with generated id and ledger fields", () => {
+    const created = createManualTaxTransaction(makeManualTaxTransaction());
+    const createdId = created.id;
+
+    expect(created).toMatchObject({
+      id: expect.stringMatching(/^manual:auto:[a-f0-9]{24}$/),
+      hash: createdId,
+      block_number: null,
+      time_stamp: "2026-05-30T12:00:00.000Z",
+      from_address: null,
+      to_address: null,
+      value: null,
+      gas_used: null,
+      gas_price: null,
+      fee: null,
+      method_id: null,
+      function_name: null,
+      input: null,
+      contract_address: null,
+      token_symbol: null,
+      token_decimal: null,
+      token_name: null,
+      transaction_type: "manual",
+      source: "manual",
+      is_error: null,
+      label: "Trade",
+      incoming_quantity: "1.5",
+      incoming_asset: "HYPE",
+      outgoing_quantity: "42.00",
+      outgoing_asset: "USDC",
+      cost_eur: "40.00",
+      proceeds_eur: "45.00",
+      gain_eur: "5.00",
+      holding_duration_days: 7,
+      comment: "manual ledger entry",
+    });
+    expect(created.synced_at).toBeString();
+    expect(created.created_at).toBeString();
+    expect(created.updated_at).toBeString();
+    expect(getTaxTransaction(createdId)).toEqual(created);
+  });
+
+  it("suffixes duplicate generated manual ids while avoiding existing collisions", () => {
+    const input = makeManualTaxTransaction({ comment: "same generated identity" });
+    const first = createManualTaxTransaction(input);
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({
+        id: `${first.id}-2`,
+        hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+      }),
+    );
+
+    const second = createManualTaxTransaction(input);
+
+    expect(second.id).toBe(`${first.id}-3`);
+    expect(getTaxTransaction(first.id)).toMatchObject({ source: "manual" });
+    expect(getTaxTransaction(`${first.id}-2`)).toMatchObject({ source: "hyperevmscan" });
+    expect(getTaxTransaction(second.id)).toMatchObject({ source: "manual" });
+  });
+
+  it("rejects duplicate explicit manual ids", () => {
+    createManualTaxTransaction(makeManualTaxTransaction({ id: "tax-lot-1" }));
+
+    expect(() =>
+      createManualTaxTransaction(makeManualTaxTransaction({ id: "manual:tax-lot-1" })),
+    ).toThrow("Manual tax transaction already exists: manual:tax-lot-1");
+  });
+
+  it("namespaces and sanitizes explicit manual ids with case-insensitive manual prefix", () => {
+    const created = createManualTaxTransaction(
+      makeManualTaxTransaction({ id: "  Manual:My Tax Lot #1  " }),
+    );
+
+    expect(created.id).toBe("manual:my-tax-lot-1");
+    expect(
+      createManualTaxTransaction(makeManualTaxTransaction({ id: "MANUAL:Second Lot" })).id,
+    ).toBe("manual:second-lot");
+    expect(() => createManualTaxTransaction(makeManualTaxTransaction({ id: " -- !! " }))).toThrow(
+      "Manual tax transaction id must contain at least one safe character",
+    );
+  });
+
+  it("rejects empty explicit manual ids without inserting a row", () => {
+    expect(() => createManualTaxTransaction(makeManualTaxTransaction({ id: "" }))).toThrow(
+      "Manual tax transaction id must contain at least one safe character",
+    );
+
+    expect(listTaxTransactions()).toHaveLength(0);
+  });
+
+  it("rejects invalid labels during manual creation", () => {
+    expect(() =>
+      createManualTaxTransaction(makeManualTaxTransaction({ label: "Income" as never })),
+    ).toThrow("Tax transaction label");
+
+    expect(listTaxTransactions()).toHaveLength(0);
+  });
+
+  it("keeps synced upsert behavior unchanged and prevents manual creation from overwriting synced rows", () => {
+    upsertSyncedTaxTransaction(makeSyncedTaxTransaction({ id: "manual:reserved" }));
+    updateTaxTransaction("manual:reserved", { label: "Transfer", comment: "synced note" });
+
+    expect(() =>
+      createManualTaxTransaction(
+        makeManualTaxTransaction({ id: "Manual:Reserved", label: "Trade" }),
+      ),
+    ).toThrow("Manual tax transaction already exists: manual:reserved");
+    expect(getTaxTransaction("manual:reserved")).toMatchObject({
+      source: "hyperevmscan",
+      label: "Transfer",
+      comment: "synced note",
+    });
+
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({
+        id: "manual:reserved",
+        hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        value: "3",
+      }),
+    );
+    expect(getTaxTransaction("manual:reserved")).toMatchObject({
+      source: "hyperevmscan",
+      hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+      value: "3",
+      label: "Transfer",
+      comment: "synced note",
+    });
+  });
+
   it("allows multiple rows with the same hash when ids differ", () => {
     const hash = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction({ id: "tx-1:external", hash }));
@@ -179,6 +329,92 @@ describe("tax transaction persistence", () => {
 
     expect(updateTaxTransaction("tx-1:external", { comment: null })?.comment).toBeNull();
     expect(getTaxTransaction("tx-1:external")?.comment).toBeNull();
+  });
+
+  it("updates all editable properties for manual tax transactions", () => {
+    const transaction = createManualTaxTransaction(
+      makeManualTaxTransaction({
+        id: "editable",
+        hash: "manual-edit-original",
+        incoming_quantity: "1",
+        incoming_asset: "HYPE",
+      }),
+    );
+
+    const updated = updateTaxTransaction(transaction.id, {
+      hash: "manual-edit-updated",
+      block_number: 42,
+      time_stamp: "2026-05-31T12:00:00.000Z",
+      from_address: "0xfrom",
+      to_address: "0xto",
+      value: "1000000000000000000",
+      gas_used: "21000",
+      gas_price: "1000",
+      fee: "21000000",
+      method_id: "0xabcdef12",
+      function_name: "manual()",
+      input: "0xabcdef12",
+      contract_address: "0xcontract",
+      token_symbol: "HYPE",
+      token_decimal: 18,
+      token_name: "Hyperliquid",
+      is_error: 0,
+      label: "Trade",
+      incoming_quantity: "2",
+      incoming_asset: "WHYPE",
+      outgoing_quantity: "3",
+      outgoing_asset: "USDC",
+      cost_eur: "10.00",
+      proceeds_eur: "12.00",
+      gain_eur: "2.00",
+      holding_duration_days: 7,
+      comment: "edited",
+    });
+
+    expect(updated).toMatchObject({
+      id: transaction.id,
+      source: "manual",
+      transaction_type: "manual",
+      hash: "manual-edit-updated",
+      block_number: 42,
+      time_stamp: "2026-05-31T12:00:00.000Z",
+      from_address: "0xfrom",
+      to_address: "0xto",
+      value: "1000000000000000000",
+      gas_used: "21000",
+      gas_price: "1000",
+      fee: "21000000",
+      method_id: "0xabcdef12",
+      function_name: "manual()",
+      input: "0xabcdef12",
+      contract_address: "0xcontract",
+      token_symbol: "HYPE",
+      token_decimal: 18,
+      token_name: "Hyperliquid",
+      is_error: 0,
+      label: "Trade",
+      incoming_quantity: "2",
+      incoming_asset: "WHYPE",
+      outgoing_quantity: "3",
+      outgoing_asset: "USDC",
+      cost_eur: "10.00",
+      proceeds_eur: "12.00",
+      gain_eur: "2.00",
+      holding_duration_days: 7,
+      comment: "edited",
+    });
+  });
+
+  it("rejects ledger-property updates for synced tax transactions", () => {
+    upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
+
+    expect(() => updateTaxTransaction("tx-1:external", { incoming_quantity: "1" })).toThrow(
+      "Only manual tax transactions can update ledger properties",
+    );
+    expect(getTaxTransaction("tx-1:external")).toMatchObject({
+      source: "hyperevmscan",
+      incoming_quantity: null,
+    });
   });
 
   it("lists newest timestamp and highest block first while respecting limit and offset", () => {

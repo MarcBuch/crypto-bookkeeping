@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 
 import {
   ApiError,
+  createTaxTransaction,
   getDashboardPositions,
   getPnL,
   getPositions,
@@ -382,6 +383,87 @@ describe("API client", () => {
       message: "API request failed with status 504",
       status: 504,
     });
+  });
+
+  it("creates manual tax transactions with JSON POST", async () => {
+    const input = {
+      hash: "manual:2026-05-31",
+      time_stamp: "1760000000",
+      label: "Trade" as const,
+      incoming_quantity: "100.5",
+      incoming_asset: "USDC",
+      outgoing_quantity: "1.25",
+      outgoing_asset: "WHYPE",
+      fee: "0.01",
+      comment: "Manual import",
+    };
+    const created = { ...taxTransaction, ...input, id: "manual:manual:2026-05-31" };
+
+    mockFetch((url, init) => {
+      expect(url).toBe("http://localhost:3000/tax/transactions");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({ "content-type": "application/json" });
+      expect(init?.body).toBe(JSON.stringify(input));
+      return jsonResponse({ transaction: created });
+    });
+
+    await expect(createTaxTransaction(input)).resolves.toEqual(created);
+  });
+
+  it("throws when tax create response lacks a transaction object", async () => {
+    mockFetch(() => jsonResponse({}));
+
+    await expect(createTaxTransaction({ hash: "manual:missing" })).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API response did not include tax transaction.",
+    });
+  });
+
+  it("throws when tax create response transaction misses id or hash", async () => {
+    mockFetch(() => jsonResponse({ transaction: { ...taxTransaction, hash: undefined } }));
+
+    await expect(createTaxTransaction({ hash: "manual:malformed" })).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API response included malformed tax transaction.",
+    });
+  });
+
+  it("propagates tax create non-2xx JSON server errors", async () => {
+    mockFetch(() => jsonResponse({ error: "manual transaction already exists" }, 409));
+
+    await expect(createTaxTransaction({ hash: "manual:duplicate" })).rejects.toMatchObject({
+      name: "ApiError",
+      message: "manual transaction already exists",
+      status: 409,
+    });
+
+    mockFetch(() => jsonResponse({ error: "hash is required" }, 400));
+
+    await expect(createTaxTransaction({})).rejects.toMatchObject({
+      name: "ApiError",
+      message: "hash is required",
+      status: 400,
+    });
+  });
+
+  it("propagates tax create non-JSON failures with generic status message", async () => {
+    mockFetch(() => new Response("conflict", { status: 409 }));
+
+    await expect(createTaxTransaction({ hash: "manual:non-json" })).rejects.toMatchObject({
+      name: "ApiError",
+      message: "API request failed with status 409",
+      status: 409,
+    });
+  });
+
+  it("propagates tax create network failures when fetch rejects", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.reject(new TypeError("create fetch failed")),
+    ) as unknown as typeof fetch;
+
+    await expect(createTaxTransaction({ hash: "manual:network" })).rejects.toThrow(
+      "create fetch failed",
+    );
   });
 
   it("updates tax transaction metadata with PATCH", async () => {

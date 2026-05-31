@@ -188,6 +188,64 @@ describe("tax CLI argument handling", () => {
     });
   });
 
+  it("rejects empty tax add requests with controlled JSON", async () => {
+    const result = await runCli(["--json", "tax", "add"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJsonStdout(result)).toEqual({
+      error: "tax add requires at least one manual field",
+    });
+  });
+
+  it("rejects invalid tax add labels with controlled JSON", async () => {
+    const result = await runCli(["--json", "tax", "add", "--label", "Income"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJsonStdout(result)).toEqual({
+      error: "label must be Trade, Transfer, null, clear, none, or unlabeled",
+    });
+  });
+
+  it("rejects malformed tax add holding days with controlled JSON", async () => {
+    const result = await runCli(["--json", "tax", "add", "--holding-days", "abc"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJsonStdout(result)).toEqual({
+      error: "holding-days must be a non-negative integer",
+    });
+  });
+
+  it("rejects negative tax add holding days with controlled JSON", async () => {
+    const result = await runCli(["--json", "tax", "add", "--holding-days=-1"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJsonStdout(result)).toEqual({
+      error: "holding-days must be a non-negative integer",
+    });
+  });
+
+  it("rejects invalid explicit tax add ids with controlled JSON", async () => {
+    const result = await runCli(["--json", "tax", "add", "--id", " -- !! "]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJsonStdout(result)).toEqual({
+      error: "Manual tax transaction id must contain at least one safe character",
+    });
+  });
+
+  it("rejects duplicate explicit tax add ids with controlled JSON", async () => {
+    const dataDir = makeDataDir();
+    const first = await runCli(["--json", "tax", "add", "--id", "duplicate-lot"], dataDir);
+    expect(first.exitCode).toBe(0);
+
+    const result = await runCli(["--json", "tax", "add", "--id", "manual:duplicate-lot"], dataDir);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJsonStdout(result)).toEqual({
+      error: "Manual tax transaction already exists: manual:duplicate-lot",
+    });
+  });
+
   it("lets Commander reject missing get ids", async () => {
     const result = await runCli(["tax", "get"]);
 
@@ -266,6 +324,122 @@ describe("tax CLI JSON output contracts", () => {
         label: "Transfer",
       },
     });
+  });
+
+  it("adds a manual tax transaction as JSON and retrieves it from the same data dir", async () => {
+    const dataDir = makeDataDir();
+
+    const add = await runCli(
+      [
+        "tax",
+        "add",
+        "--json",
+        "--id",
+        "cli-lot-1",
+        "--hash",
+        "0xmanual",
+        "--time",
+        "2026-05-31T10:11:12.000Z",
+        "--label",
+        "Trade",
+        "--comment",
+        "manual trade",
+        "--incoming-quantity",
+        "1.5",
+        "--incoming-asset",
+        "HYPE",
+        "--outgoing-quantity",
+        "42",
+        "--outgoing-asset",
+        "USDC",
+        "--fee",
+        "21000000000000",
+        "--cost-eur",
+        "100.00",
+        "--proceeds-eur",
+        "120.50",
+        "--gain-eur",
+        "20.50",
+        "--holding-days",
+        "365",
+      ],
+      dataDir,
+    );
+
+    expect(add.exitCode).toBe(0);
+    expect(parseJsonStdout(add)).toMatchObject({
+      transaction: {
+        id: "manual:cli-lot-1",
+        hash: "0xmanual",
+        time_stamp: "2026-05-31T10:11:12.000Z",
+        label: "Trade",
+        comment: "manual trade",
+        incoming_quantity: "1.5",
+        incoming_asset: "HYPE",
+        outgoing_quantity: "42",
+        outgoing_asset: "USDC",
+        fee: "21000000000000",
+        cost_eur: "100.00",
+        proceeds_eur: "120.50",
+        gain_eur: "20.50",
+        holding_duration_days: 365,
+        source: "manual",
+        transaction_type: "manual",
+      },
+    });
+
+    const list = await runCli(["tax", "list", "--json"], dataDir);
+    expect(list.exitCode).toBe(0);
+    expect(parseJsonStdout(list)).toMatchObject({
+      transactions: [{ id: "manual:cli-lot-1", label: "Trade", comment: "manual trade" }],
+    });
+
+    const get = await runCli(["tax", "get", "manual:cli-lot-1", "--json"], dataDir);
+    expect(get.exitCode).toBe(0);
+    expect(parseJsonStdout(get)).toMatchObject({
+      transaction: { id: "manual:cli-lot-1", label: "Trade", comment: "manual trade" },
+    });
+  });
+
+  it("prints tax add confirmation and formatted ledger fields in human-readable output", async () => {
+    const result = await runCli([
+      "tax",
+      "add",
+      "--id",
+      "human-lot",
+      "--time",
+      "2026-05-31T11:00:00.000Z",
+      "--label",
+      "Transfer",
+      "--comment",
+      "manual deposit",
+      "--incoming-quantity",
+      "0.25",
+      "--incoming-asset",
+      "HYPE",
+      "--fee",
+      "21000000000000",
+      "--cost-eur",
+      "50.00",
+      "--proceeds-eur",
+      "-",
+      "--gain-eur",
+      "0.00",
+      "--holding-days",
+      "0",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Added tax transaction manual:human-lot.");
+    expect(result.stdout).toContain("manual:human-lot | Transfer | 2026-05-31T11:00:00.000Z");
+    expect(result.stdout).toContain("in 0.25 HYPE");
+    expect(result.stdout).toContain("out -");
+    expect(result.stdout).toContain("fee 0.000021 HYPE");
+    expect(result.stdout).toContain("cost EUR 50.00");
+    expect(result.stdout).toContain("proceeds EUR -");
+    expect(result.stdout).toContain("gain EUR 0.00");
+    expect(result.stdout).toContain("holding days 0");
+    expect(result.stdout).toContain("note manual deposit");
   });
 
   it("returns an updated transaction envelope for tax label id --json", async () => {

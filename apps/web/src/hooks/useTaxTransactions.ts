@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  createTaxTransaction,
   getTaxTransactions,
   syncTaxTransactions,
   updateTaxTransaction,
+  type ManualTaxTransactionCreateInput,
   type TaxTransactionUpdate,
   type TaxTransactionsOptions,
 } from "../api";
@@ -26,6 +28,17 @@ export function useSyncTaxTransactions() {
 
   return useMutation({
     mutationFn: syncTaxTransactions,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: taxTransactionQueryKeys.all });
+    },
+  });
+}
+
+export function useCreateTaxTransaction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: ManualTaxTransactionCreateInput) => createTaxTransaction(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: taxTransactionQueryKeys.all });
     },

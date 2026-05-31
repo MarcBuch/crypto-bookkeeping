@@ -108,8 +108,64 @@ export interface TaxTransactionsOptions {
 }
 
 export interface TaxTransactionUpdate {
+  hash?: string;
+  block_number?: number | null;
+  time_stamp?: string | null;
+  from_address?: string | null;
+  to_address?: string | null;
+  value?: string | null;
+  gas_used?: string | null;
+  gas_price?: string | null;
+  fee?: string | null;
+  method_id?: string | null;
+  function_name?: string | null;
+  input?: string | null;
+  contract_address?: string | null;
+  token_symbol?: string | null;
+  token_decimal?: number | null;
+  token_name?: string | null;
+  is_error?: number | null;
+  label?: TaxTransactionLabel;
+  incoming_quantity?: string | null;
+  incoming_asset?: string | null;
+  outgoing_quantity?: string | null;
+  outgoing_asset?: string | null;
+  cost_eur?: string | null;
+  proceeds_eur?: string | null;
+  gain_eur?: string | null;
+  holding_duration_days?: number | null;
+  comment?: string | null;
+}
+
+export interface ManualTaxTransactionCreateInput {
+  id?: string;
+  hash?: string;
+  block_number?: number | null;
+  time_stamp?: string | null;
+  from_address?: string | null;
+  to_address?: string | null;
+  value?: string | null;
+  gas_used?: string | null;
+  gas_price?: string | null;
   label?: TaxTransactionLabel;
   comment?: string | null;
+  incoming_quantity?: string | null;
+  incoming_asset?: string | null;
+  outgoing_quantity?: string | null;
+  outgoing_asset?: string | null;
+  fee?: string | null;
+  method_id?: string | null;
+  function_name?: string | null;
+  input?: string | null;
+  contract_address?: string | null;
+  token_symbol?: string | null;
+  token_decimal?: number | null;
+  token_name?: string | null;
+  is_error?: number | null;
+  cost_eur?: string | null;
+  proceeds_eur?: string | null;
+  gain_eur?: string | null;
+  holding_duration_days?: number | null;
 }
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
@@ -240,6 +296,25 @@ export async function syncTaxTransactions(): Promise<TaxSyncSummary> {
   }
 
   return data.sync as TaxSyncSummary;
+}
+
+export async function createTaxTransaction(
+  input: ManualTaxTransactionCreateInput,
+): Promise<TaxTransaction> {
+  const data = await fetchJson<{ transaction?: unknown }>("/tax/transactions", {
+    method: "POST",
+    body: input,
+  });
+
+  if (!isObject(data.transaction)) {
+    throw new ApiError("API response did not include tax transaction.");
+  }
+
+  if (!isTaxTransaction(data.transaction)) {
+    throw new ApiError("API response included malformed tax transaction.");
+  }
+
+  return data.transaction as unknown as TaxTransaction;
 }
 
 export async function updateTaxTransaction(

@@ -31,6 +31,19 @@ const numericStringSortingFn: SortingFn<TaxTableRow> = (rowA, rowB, columnId) =>
   return a - b;
 };
 
+// Sort for time_stamp — handles both ISO 8601 strings ("2026-05-30T12:00:00.000Z")
+// and legacy Unix epoch-second strings ("1760000000").
+const timestampSortingFn: SortingFn<TaxTableRow> = (rowA, rowB, columnId) => {
+  const parse = (v: unknown): number => {
+    if (v == null || v === "") return Number.NEGATIVE_INFINITY;
+    const s = String(v);
+    const n = Number(s);
+    const ms = Number.isFinite(n) ? n * 1000 : new Date(s).getTime();
+    return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+  };
+  return parse(rowA.getValue(columnId)) - parse(rowB.getValue(columnId));
+};
+
 const columnHelper = createColumnHelper<TaxTableRow>();
 
 export const taxTableColumns = [
@@ -88,7 +101,7 @@ export const taxTableColumns = [
     header: "Time / Block",
     size: 10,
     enableSorting: true,
-    sortingFn: numericStringSortingFn,
+    sortingFn: timestampSortingFn,
     cell: ({ row }) => (
       <div className="font-mono text-xs text-neutral-600">
         <p className="font-bold text-neutral-950">{formatTimestamp(row.original.time_stamp)}</p>

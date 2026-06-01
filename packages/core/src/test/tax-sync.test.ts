@@ -6,11 +6,14 @@ import { resetDb } from "../db/schema.js";
 import {
   getTaxSyncState,
   getTaxTransaction,
+  getTaxTransactionsNeedingEurEnrichment,
   listTaxTransactions,
   updateTaxTransaction,
+  updateTaxTransactionEurValues,
+  upsertSyncedTaxTransaction,
   upsertTaxSyncState,
 } from "../db/store.js";
-import { syncTaxTransactions } from "../services/tax-transactions.js";
+import { enrichTaxTransactionsEurValues, syncTaxTransactions } from "../services/tax-transactions.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-tax-sync-tests";
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
@@ -487,5 +490,804 @@ describe("tax transaction explorer sync", () => {
         })),
       }),
     ).rejects.toThrow("Tax transaction sync failed for txlist: OK");
+  });
+});
+
+describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
+  function configWithPricing() {
+    return {
+      ...config(),
+      pricing: { coingeckoIds: { HYPE: "hyperliquid", USDC: "usd-coin", TOK: "test-token-id" } },
+    };
+  }
+
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("null time_stamp → EUR fields stay null", async () => {
+    let cgCallCount = 0;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("coingecko.com")) {
+        cgCallCount++;
+      }
+      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xnullts1", timeStamp: "", from: "0xsender", to: WALLET, value: "1000000000000000000" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest" });
+
+    const row = listTaxTransactions().find((r) => r.hash === "0xnullts1");
+    expect(row).toBeDefined();
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.gain_eur).toBeNull();
+    expect(cgCallCount).toBe(0);
+  });
+
+  it("null incoming_asset AND null outgoing_asset → EUR fields stay null", async () => {
+    let cgCallCount = 0;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("coingecko.com")) {
+        cgCallCount++;
+      }
+      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    // txlistinternal where neither from nor to matches the wallet
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlistinternal") {
+        return envelope([
+          {
+            transactionHash: "0xnomatch1",
+            blockNumber: "800",
+            timeStamp: "1770001000",
+            from: "0xsomebody",
+            to: "0xsomeoneelse",
+            value: "500000000000000000",
+            gasUsed: "0",
+            gasPrice: "1000000000",
+            type: "call",
+          },
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest2" });
+
+    const rows = listTaxTransactions();
+    const row = rows.find((r) => r.hash === "0xnomatch1");
+    expect(row).toBeDefined();
+    expect(row!.incoming_asset).toBeNull();
+    expect(row!.outgoing_asset).toBeNull();
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.gain_eur).toBeNull();
+    expect(cgCallCount).toBe(0);
+  });
+
+  it("incoming-only transfer (received HYPE) → proceeds_eur set, cost_eur null, gain_eur = proceeds", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xincoming1", timeStamp: "1770002000", from: "0xsender", to: WALLET, value: "2000000000000000000" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest3" });
+
+    const row = listTaxTransactions().find((r) => r.hash === "0xincoming1");
+    expect(row).toBeDefined();
+    expect(row!.incoming_asset).toBe("HYPE");
+    expect(row!.outgoing_asset).toBeNull();
+    expect(row!.proceeds_eur).toBe("40");
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.gain_eur).toBe("40");
+  });
+
+  it("outgoing-only transfer (sent HYPE) → cost_eur set, proceeds_eur null, gain_eur = -cost", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xoutgoing1", timeStamp: "1770003000", from: WALLET, to: "0xrecipient", value: "3000000000000000000" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest4" });
+
+    const row = listTaxTransactions().find((r) => r.hash === "0xoutgoing1");
+    expect(row).toBeDefined();
+    expect(row!.outgoing_asset).toBe("HYPE");
+    expect(row!.incoming_asset).toBeNull();
+    expect(row!.cost_eur).toBe("60");
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.gain_eur).toBe("-60");
+  });
+
+  it("asset without coingeckoId mapping → EUR fields stay null", async () => {
+    let cgCallCount = 0;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("coingecko.com")) {
+        cgCallCount++;
+      }
+      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "tokentx") {
+        return envelope([
+          tokenTx({
+            hash: "0xunknownasset1",
+            logIndex: "1",
+            timeStamp: "1770005000",
+            from: "0xsender",
+            to: WALLET,
+            value: "1000000000000000000",
+            tokenSymbol: "UNKNOWN_TOKEN_XYZ",
+            tokenDecimal: "18",
+          }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest6" });
+
+    const row = listTaxTransactions().find((r) => r.hash === "0xunknownasset1");
+    expect(row).toBeDefined();
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.gain_eur).toBeNull();
+    expect(cgCallCount).toBe(0);
+  });
+
+  it("USDC token transfer out → correct decimal handling", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com") && urlStr.includes("usd-coin")) {
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 0.92 } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "tokentx") {
+        return envelope([
+          tokenTx({
+            hash: "0xusdcout1",
+            logIndex: "7",
+            timeStamp: "1770004000",
+            from: WALLET,
+            to: "0xrecipient",
+            value: "50000000",
+            tokenSymbol: "USDC",
+            tokenDecimal: "6",
+          }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest5" });
+
+    const row = listTaxTransactions().find((r) => r.hash === "0xusdcout1");
+    expect(row).toBeDefined();
+    expect(row!.outgoing_asset).toBe("USDC");
+    expect(row!.incoming_asset).toBeNull();
+    expect(row!.cost_eur).toBe("46");
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.gain_eur).toBe("-46");
+  });
+});
+
+describe("syncTaxTransactions — EUR enrichment (resilience and value preservation)", () => {
+  function configWithPricing(coingeckoIds: Record<string, string>) {
+    return { ...config(), pricing: { coingeckoIds } };
+  }
+
+  const originalFetchResil = globalThis.fetch;
+  beforeEach(() => {
+    mkdirSync(TMP, { recursive: true });
+    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
+    resetDb();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetchResil;
+    delete process.env.LP_TRACKER_DATA_DIR;
+    resetDb();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("CoinGecko unavailable → sync completes, EUR fields all null", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com")) {
+        throw new Error("network down");
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xresil1", timeStamp: "1770010000", from: "0xsender", to: WALLET, value: "1000000000000000000" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await expect(
+      syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-1" }), { fetcher, source: "resil1" }),
+    ).resolves.toBeDefined();
+
+    const row = listTaxTransactions().find((r) => r.hash === "0xresil1");
+    expect(row).toBeDefined();
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.gain_eur).toBeNull();
+  });
+
+  it("API failure for asset A, success for asset B → partial enrichment", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com")) {
+        if (urlStr.includes("resilience-hype")) throw new Error("network down");
+        if (urlStr.includes("resilience-usdc")) {
+          return { ok: true, json: async () => ({ market_data: { current_price: { eur: 0.9 } } }) } as Response;
+        }
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xresil2hype", timeStamp: "1770011000", from: "0xsender", to: WALLET, value: "1000000000000000000" }),
+        ]);
+      }
+      if (params.get("action") === "tokentx") {
+        return envelope([
+          tokenTx({
+            hash: "0xresil2usdc",
+            logIndex: "1",
+            timeStamp: "1770011001",
+            from: "0xsender",
+            to: WALLET,
+            value: "1000000",
+            tokenSymbol: "USDC",
+            tokenDecimal: "6",
+          }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(
+      configWithPricing({ HYPE: "resilience-hype", USDC: "resilience-usdc" }),
+      { fetcher, source: "resil2" },
+    );
+
+    const hypeRow = listTaxTransactions().find((r) => r.hash === "0xresil2hype");
+    expect(hypeRow).toBeDefined();
+    expect(hypeRow!.proceeds_eur).toBeNull();
+    expect(hypeRow!.cost_eur).toBeNull();
+    expect(hypeRow!.gain_eur).toBeNull();
+
+    const usdcRow = listTaxTransactions().find((r) => r.hash === "0xresil2usdc");
+    expect(usdcRow).toBeDefined();
+    expect(usdcRow!.proceeds_eur).not.toBeNull();
+  });
+
+  it("re-sync preserves existing cost_eur (upsert does NOT overwrite EUR values)", async () => {
+    // First sync: CoinGecko returns price 10.0
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com")) {
+        return { ok: true, json: async () => ({ market_data: { current_price: { eur: 10.0 } } }) } as Response;
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher1 = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xresil3", timeStamp: "1770012000", from: "0xsender", to: WALLET, value: "252451290000000000" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), { fetcher: fetcher1, source: "resil3" });
+
+    const rowAfterFirst = listTaxTransactions().find((r) => r.hash === "0xresil3");
+    expect(rowAfterFirst).toBeDefined();
+    const originalProceedsEur = rowAfterFirst!.proceeds_eur;
+    expect(originalProceedsEur).not.toBeNull();
+
+    // Second sync: CoinGecko would return 99.0 but upsert should NOT overwrite
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com")) {
+        return { ok: true, json: async () => ({ market_data: { current_price: { eur: 99.0 } } }) } as Response;
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher2 = makeFetcher((params) => {
+      if (params.get("action") === "txlist") {
+        return envelope([
+          tx({ hash: "0xresil3", timeStamp: "1770012000", from: "0xsender", to: WALLET, value: "999999999999999999" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), { fetcher: fetcher2, source: "resil3" });
+
+    const rowAfterSecond = listTaxTransactions().find((r) => r.hash === "0xresil3");
+    expect(rowAfterSecond).toBeDefined();
+    expect(rowAfterSecond!.proceeds_eur).toBe(originalProceedsEur);
+  });
+
+  it("deduplicates CoinGecko calls: 5 transactions with same asset and date → 1 API call", async () => {
+    const cgCalls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com")) {
+        cgCalls.push(urlStr);
+        return {
+          ok: true,
+          json: async () => ({ market_data: { current_price: { eur: 5.0 } } }),
+        } as Response;
+      }
+      throw new Error(`unexpected globalThis.fetch call: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "tokentx") {
+        return envelope([
+          tokenTx({ hash: "0xdedup1", logIndex: "1", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
+          tokenTx({ hash: "0xdedup2", logIndex: "2", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
+          tokenTx({ hash: "0xdedup3", logIndex: "3", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
+          tokenTx({ hash: "0xdedup4", logIndex: "4", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
+          tokenTx({ hash: "0xdedup5", logIndex: "5", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
+        ]);
+      }
+      return envelope([]);
+    });
+
+    await syncTaxTransactions(
+      { ...config(), pricing: { coingeckoIds: { DEDUP_TOK: "dedup-coingecko-id" } } },
+      { fetcher, source: "dedup-test" },
+    );
+
+    // Only 1 CoinGecko call despite 5 transactions with same asset+date
+    expect(cgCalls).toHaveLength(1);
+
+    // All 5 rows should have EUR values
+    const rows = listTaxTransactions();
+    expect(rows).toHaveLength(5);
+    for (const row of rows) {
+      expect(row.proceeds_eur).not.toBeNull();
+      expect(row.gain_eur).not.toBeNull();
+    }
+  });
+});
+
+describe("DB EUR update functions", () => {
+  const TMP_EUR = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-eur-tests";
+
+  function makeRow(id: string, overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {}): import("../db/store.js").SyncedTaxTransaction {
+    return {
+      id,
+      hash: id,
+      block_number: 100,
+      time_stamp: "1770000000",
+      from_address: "0xfrom",
+      to_address: "0xto",
+      value: "1000000000000000000",
+      gas_used: "21000",
+      gas_price: "1000000000",
+      fee: null,
+      method_id: null,
+      function_name: null,
+      input: null,
+      contract_address: null,
+      token_symbol: null,
+      token_decimal: null,
+      token_name: null,
+      transaction_type: "txlist",
+      source: "testsource",
+      is_error: 0,
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+      cost_eur: null,
+      proceeds_eur: null,
+      gain_eur: null,
+      holding_duration_days: null,
+      synced_at: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    mkdirSync(TMP_EUR, { recursive: true });
+    process.env.LP_TRACKER_DATA_DIR = join(TMP_EUR, crypto.randomUUID());
+    resetDb();
+  });
+
+  afterEach(() => {
+    delete process.env.LP_TRACKER_DATA_DIR;
+    resetDb();
+    rmSync(TMP_EUR, { recursive: true, force: true });
+  });
+
+  // Test 1: getTaxTransactionsNeedingEurEnrichment returns only null-EUR rows
+  it("getTaxTransactionsNeedingEurEnrichment — returns only rows where both EUR fields are null", () => {
+    upsertSyncedTaxTransaction(makeRow("dbeur-t1-row1", { cost_eur: null, proceeds_eur: null }));
+    upsertSyncedTaxTransaction(makeRow("dbeur-t1-row2", { cost_eur: null, proceeds_eur: null }));
+    upsertSyncedTaxTransaction(makeRow("dbeur-t1-row3", { proceeds_eur: "50", cost_eur: null }));
+
+    const result = getTaxTransactionsNeedingEurEnrichment();
+    const ids = result.map((r) => r.id);
+
+    expect(ids).toContain("dbeur-t1-row1");
+    expect(ids).toContain("dbeur-t1-row2");
+    expect(ids).not.toContain("dbeur-t1-row3");
+    expect(result).toHaveLength(2);
+  });
+
+  // Test 2: excludes rows where only one EUR field is set
+  it("getTaxTransactionsNeedingEurEnrichment — excludes row with cost_eur set but proceeds_eur null", () => {
+    upsertSyncedTaxTransaction(makeRow("dbeur-t2-row1", { cost_eur: "30", proceeds_eur: null }));
+
+    const result = getTaxTransactionsNeedingEurEnrichment();
+    const ids = result.map((r) => r.id);
+
+    expect(ids).not.toContain("dbeur-t2-row1");
+  });
+
+  // Test 3: updateTaxTransactionEurValues — non-existent id is a no-op
+  it("updateTaxTransactionEurValues — non-existent id does not throw", () => {
+    expect(() =>
+      updateTaxTransactionEurValues("nonexistent-id", {
+        cost_eur: "5",
+        proceeds_eur: "5",
+        gain_eur: "5",
+      }),
+    ).not.toThrow();
+  });
+
+  // Test 4: updateTaxTransactionEurValues — updates all three fields
+  it("updateTaxTransactionEurValues — updates cost_eur, proceeds_eur, and gain_eur", () => {
+    upsertSyncedTaxTransaction(makeRow("dbeur-t4-row1"));
+
+    updateTaxTransactionEurValues("dbeur-t4-row1", {
+      cost_eur: "10",
+      proceeds_eur: "20",
+      gain_eur: "10",
+    });
+
+    const row = getTaxTransaction("dbeur-t4-row1");
+    expect(row).not.toBeNull();
+    expect(row!.cost_eur).toBe("10");
+    expect(row!.proceeds_eur).toBe("20");
+    expect(row!.gain_eur).toBe("10");
+  });
+
+  // Test 5: updateTaxTransactionEurValues — partial null values (field isolation)
+  it("updateTaxTransactionEurValues — allows cost_eur null while setting proceeds_eur and gain_eur", () => {
+    upsertSyncedTaxTransaction(makeRow("dbeur-t5-row1"));
+
+    updateTaxTransactionEurValues("dbeur-t5-row1", {
+      cost_eur: null,
+      proceeds_eur: "15",
+      gain_eur: "15",
+    });
+
+    const row = getTaxTransaction("dbeur-t5-row1");
+    expect(row).not.toBeNull();
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.proceeds_eur).toBe("15");
+    expect(row!.gain_eur).toBe("15");
+  });
+
+  // Test 6: updateTaxTransactionEurValues — does not clobber other fields
+  it("updateTaxTransactionEurValues — does not overwrite unrelated fields", () => {
+    upsertSyncedTaxTransaction(
+      makeRow("dbeur-t6-row1", {
+        incoming_asset: "HYPE",
+        incoming_quantity: "2.5",
+      }),
+    );
+
+    updateTaxTransactionEurValues("dbeur-t6-row1", {
+      cost_eur: "100",
+      proceeds_eur: "200",
+      gain_eur: "100",
+    });
+
+    const row = getTaxTransaction("dbeur-t6-row1");
+    expect(row).not.toBeNull();
+    expect(row!.incoming_asset).toBe("HYPE");
+    expect(row!.incoming_quantity).toBe("2.5");
+    expect(row!.cost_eur).toBe("100");
+    expect(row!.proceeds_eur).toBe("200");
+    expect(row!.gain_eur).toBe("100");
+  });
+});
+
+describe("enrichTaxTransactionsEurValues — backfill service", () => {
+  const TMP_BACKFILL =
+    "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-backfill-tests";
+
+  function configWithPricing(coingeckoIds: Record<string, string>) {
+    return {
+      ...config(),
+      pricing: { coingeckoIds },
+    };
+  }
+
+  function makeRow(
+    id: string,
+    overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {},
+  ): import("../db/store.js").SyncedTaxTransaction {
+    return {
+      id,
+      hash: id,
+      block_number: 100,
+      time_stamp: new Date(1770000000 * 1000).toISOString(),
+      from_address: "0xfrom",
+      to_address: "0xto",
+      value: "1000000000000000000",
+      gas_used: "21000",
+      gas_price: "1000000000",
+      fee: null,
+      method_id: null,
+      function_name: null,
+      input: null,
+      contract_address: null,
+      token_symbol: null,
+      token_decimal: null,
+      token_name: null,
+      transaction_type: "txlist",
+      source: "backfill-test",
+      is_error: 0,
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+      cost_eur: null,
+      proceeds_eur: null,
+      gain_eur: null,
+      holding_duration_days: null,
+      synced_at: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mkdirSync(TMP_BACKFILL, { recursive: true });
+    process.env.LP_TRACKER_DATA_DIR = join(TMP_BACKFILL, crypto.randomUUID());
+    resetDb();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env.LP_TRACKER_DATA_DIR;
+    resetDb();
+    rmSync(TMP_BACKFILL, { recursive: true, force: true });
+  });
+
+  // Test 1 — already-enriched rows are not in the enrichment queue
+  it("already-enriched rows are not re-processed (DB query filters them out)", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("should not call fetch for already-enriched rows");
+    }) as unknown as typeof globalThis.fetch;
+
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t1-row1", { incoming_asset: "BACKFILL_TOK", incoming_quantity: "2" }),
+    );
+    updateTaxTransactionEurValues("backfill-t1-row1", {
+      cost_eur: null,
+      proceeds_eur: "20",
+      gain_eur: "20",
+    });
+
+    const result = await enrichTaxTransactionsEurValues(
+      configWithPricing({ BACKFILL_TOK: "backfill-token" }),
+    );
+
+    // Row is not in the enrichment queue (already has proceeds_eur set), so counts are both 0
+    expect(result.enriched).toBe(0);
+    expect(result.skipped).toBe(0);
+
+    // EUR values must remain unchanged
+    const row = getTaxTransaction("backfill-t1-row1");
+    expect(row!.proceeds_eur).toBe("20");
+    expect(row!.gain_eur).toBe("20");
+    expect(row!.cost_eur).toBeNull();
+  });
+
+  // Test 2 — rows with null asset are skipped
+  it("rows with null asset_in and null asset_out are skipped", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("should not call fetch for null-asset rows");
+    }) as unknown as typeof globalThis.fetch;
+
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t2-row1", {
+        incoming_asset: null,
+        outgoing_asset: null,
+        time_stamp: "1770000000",
+      }),
+    );
+
+    const result = await enrichTaxTransactionsEurValues(configWithPricing({}));
+
+    expect(result.skipped).toBe(1);
+    expect(result.enriched).toBe(0);
+  });
+
+  // Test 3 — rows with null timestamp are skipped
+  it("rows with null timestamp are skipped", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("should not call fetch for null-timestamp rows");
+    }) as unknown as typeof globalThis.fetch;
+
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t3-row1", {
+        incoming_asset: "BACKFILL_TOK",
+        incoming_quantity: "1",
+        time_stamp: null,
+      }),
+    );
+
+    const result = await enrichTaxTransactionsEurValues(
+      configWithPricing({ BACKFILL_TOK: "backfill-token" }),
+    );
+
+    expect(result.skipped).toBe(1);
+    expect(result.enriched).toBe(0);
+  });
+
+  // Test 4 — CoinGecko returns HTTP 500 → row is skipped, EUR fields remain null
+  it("CoinGecko HTTP 500 → row is skipped, EUR fields remain null", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com")) {
+        return new Response("{}", { status: 500 });
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t4-row1", {
+        incoming_asset: "BACKFILL_TOK",
+        incoming_quantity: "2",
+        time_stamp: new Date(1770100000 * 1000).toISOString(),
+      }),
+    );
+
+    const result = await enrichTaxTransactionsEurValues(
+      configWithPricing({ BACKFILL_TOK: "backfill-token" }),
+    );
+
+    expect(result.skipped).toBe(1);
+    expect(result.enriched).toBe(0);
+
+    const row = getTaxTransaction("backfill-t4-row1");
+    expect(row!.proceeds_eur).toBeNull();
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.gain_eur).toBeNull();
+  });
+
+  // Test 5 — successful enrichment: incoming-only (BACKFILL_TOK transfer)
+  it("incoming-only row is enriched: proceeds_eur = qty * price, cost_eur null, gain_eur = proceeds_eur", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
+        return new Response(
+          JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }),
+          { status: 200 },
+        );
+      }
+      return new Response("{}", { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t5-row1", {
+        incoming_asset: "BACKFILL_TOK",
+        incoming_quantity: "2",
+        outgoing_asset: null,
+        outgoing_quantity: null,
+        time_stamp: new Date(1770200000 * 1000).toISOString(),
+      }),
+    );
+
+    const result = await enrichTaxTransactionsEurValues(
+      configWithPricing({ BACKFILL_TOK: "backfill-token" }),
+    );
+
+    expect(result.enriched).toBe(1);
+    expect(result.skipped).toBe(0);
+
+    const row = getTaxTransaction("backfill-t5-row1");
+    expect(row!.proceeds_eur).toBe("20");
+    expect(row!.cost_eur).toBeNull();
+    expect(row!.gain_eur).toBe("20");
+  });
+
+  // Test 6 — partial failure: one row succeeds, one fails CoinGecko lookup
+  it("partial failure: enriched === 1, skipped === 1 when one CoinGecko lookup fails", async () => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
+        return new Response(
+          JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("coingecko.com")) {
+        return new Response("{}", { status: 404 });
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t6-known", {
+        incoming_asset: "BACKFILL_TOK",
+        incoming_quantity: "1",
+        time_stamp: new Date(1770300000 * 1000).toISOString(),
+      }),
+    );
+    upsertSyncedTaxTransaction(
+      makeRow("backfill-t6-unknown", {
+        incoming_asset: "UNKNOWN_BACKFILL",
+        incoming_quantity: "1",
+        time_stamp: new Date(1770300000 * 1000).toISOString(),
+      }),
+    );
+
+    const result = await enrichTaxTransactionsEurValues(
+      configWithPricing({ BACKFILL_TOK: "backfill-token" }),
+    );
+
+    expect(result.enriched).toBe(1);
+    expect(result.skipped).toBe(1);
   });
 });

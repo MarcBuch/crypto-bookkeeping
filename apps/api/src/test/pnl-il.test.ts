@@ -124,6 +124,7 @@ mock.module("@lp-tracker/core", () => ({
   listTaxTransactions: () => [],
   syncTaxTransactions: async () => ({}),
   updateTaxTransaction: () => null,
+  enrichTaxTransactionsEurValues: async () => ({ enriched: 0, skipped: 0 }),
   NotFoundError: MockNotFoundError,
   RpcError: MockRpcError,
   ValidationError: MockValidationError,

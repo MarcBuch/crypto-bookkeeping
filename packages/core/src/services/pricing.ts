@@ -12,8 +12,10 @@ export type PricingToken =
 export type UsdPriceMap = Record<string, number | null>;
 
 const COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price";
+const COINGECKO_HISTORY_URL = "https://api.coingecko.com/api/v3/coins";
 const PRICE_CACHE_TTL_MS = 60_000;
 const NEGATIVE_CACHE_TTL_MS = 5_000;
+const HISTORICAL_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 type PriceCacheEntry = {
   price: number | null;
@@ -21,6 +23,7 @@ type PriceCacheEntry = {
 };
 
 const priceCache = new Map<string, PriceCacheEntry>();
+const historicalPriceCache = new Map<string, PriceCacheEntry>();
 
 export async function getUsdPrices(
   config: Pick<Config, "pricing">,
@@ -136,5 +139,83 @@ function cachePrice(coinGeckoId: string, price: number | null, ttlMs: number): v
 function cacheUnavailable(coinGeckoIds: string[]): void {
   for (const coinGeckoId of coinGeckoIds) {
     cachePrice(coinGeckoId, null, NEGATIVE_CACHE_TTL_MS);
+  }
+}
+
+function getCachedHistoricalPrice(cacheKey: string): number | null | undefined {
+  const cached = historicalPriceCache.get(cacheKey);
+  if (!cached) return undefined;
+  if (cached.expiresAt <= Date.now()) {
+    historicalPriceCache.delete(cacheKey);
+    return undefined;
+  }
+  return cached.price;
+}
+
+function isoToddmmyyyy(isoTimestamp: string): string {
+  const d = new Date(isoTimestamp);
+  if (isNaN(d.getTime())) throw new Error("Invalid timestamp");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const year = String(d.getUTCFullYear());
+  return `${day}-${month}-${year}`;
+}
+
+export async function getHistoricalEurPrice(
+  config: Pick<Config, "pricing">,
+  symbol: string,
+  isoTimestamp: string,
+): Promise<number | null> {
+  const coinGeckoId = resolveCoinGeckoId(config, symbol);
+  if (!coinGeckoId) return null;
+
+  let dateStr: string;
+  try {
+    dateStr = isoToddmmyyyy(isoTimestamp);
+  } catch {
+    return null;
+  }
+
+  const cacheKey = `${coinGeckoId}:${dateStr}`;
+  const cached = getCachedHistoricalPrice(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const url = `${COINGECKO_HISTORY_URL}/${coinGeckoId}/history?date=${dateStr}&localization=false`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const data = await response.json();
+    const marketData = (data as Record<string, unknown>)?.["market_data"] as
+      | Record<string, unknown>
+      | undefined;
+    const currentPrice = marketData?.["current_price"] as Record<string, unknown> | undefined;
+    const price = currentPrice?.["eur"];
+
+    if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    historicalPriceCache.set(cacheKey, {
+      price,
+      expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
+    });
+    return price;
+  } catch {
+    historicalPriceCache.set(cacheKey, {
+      price: null,
+      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+    });
+    return null;
   }
 }

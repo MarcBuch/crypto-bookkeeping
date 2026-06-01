@@ -526,6 +526,48 @@ export function upsertTaxSyncState(syncState: StoredTaxSyncState): void {
   );
 }
 
+export function getTaxTransactionsNeedingEurEnrichment(): Array<{
+  id: string;
+  asset_in: string | null;
+  qty_in: string | null;
+  asset_out: string | null;
+  qty_out: string | null;
+  timestamp: string | null;
+}> {
+  const db = getDb();
+  return db
+    .query(
+      `SELECT id,
+              incoming_asset  AS asset_in,
+              incoming_quantity AS qty_in,
+              outgoing_asset  AS asset_out,
+              outgoing_quantity AS qty_out,
+              time_stamp      AS timestamp
+       FROM tax_transactions
+       WHERE cost_eur IS NULL AND proceeds_eur IS NULL
+       ORDER BY time_stamp ASC NULLS LAST, id ASC`,
+    )
+    .all() as Array<{
+    id: string;
+    asset_in: string | null;
+    qty_in: string | null;
+    asset_out: string | null;
+    qty_out: string | null;
+    timestamp: string | null;
+  }>;
+}
+
+export function updateTaxTransactionEurValues(
+  id: string,
+  values: { cost_eur: string | null; proceeds_eur: string | null; gain_eur: string | null },
+): void {
+  const db = getDb();
+  db.run(
+    `UPDATE tax_transactions SET cost_eur = ?, proceeds_eur = ?, gain_eur = ?, updated_at = datetime('now') WHERE id = ?`,
+    [values.cost_eur, values.proceeds_eur, values.gain_eur, id],
+  );
+}
+
 export function getTaxSyncState(wallet: string): StoredTaxSyncState | null {
   const db = getDb();
   return db

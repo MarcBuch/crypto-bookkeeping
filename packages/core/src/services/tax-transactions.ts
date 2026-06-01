@@ -1,10 +1,13 @@
 import type { Config } from "../config.js";
 import {
   getTaxSyncState,
+  getTaxTransactionsNeedingEurEnrichment,
+  updateTaxTransactionEurValues,
   upsertSyncedTaxTransaction,
   upsertTaxSyncState,
   type SyncedTaxTransaction,
 } from "../db/store.js";
+import { getHistoricalEurPrice } from "./pricing.js";
 
 const DEFAULT_EXPLORER_API_URL = "https://www.hyperscan.com/api";
 const DEFAULT_EXPLORER_CHAIN_ID = 999;
@@ -49,7 +52,7 @@ interface ExplorerEnvelope {
 type ExplorerTransaction = Record<string, unknown>;
 
 export async function syncTaxTransactions(
-  config: Pick<Config, "wallet" | "tax">,
+  config: Pick<Config, "wallet" | "tax" | "pricing">,
   options: SyncTaxTransactionsOptions = {},
 ): Promise<SyncTaxTransactionsSummary> {
   const wallet = config.wallet;
@@ -89,18 +92,18 @@ export async function syncTaxTransactions(
 
       if (response.length === 0) break;
 
+      // Build rows for this page
+      const pageRows: SyncedTaxTransaction[] = [];
       for (const item of response) {
-        const row = toSyncedTaxTransaction({
-          action,
-          item,
-          wallet,
-          source,
-          syncedAt,
-        });
-        if (!row) {
-          continue;
-        }
+        const row = toSyncedTaxTransaction({ action, item, wallet, source, syncedAt });
+        if (row) pageRows.push(row);
+      }
 
+      // Batch-enrich with historical EUR values
+      const enrichedRows = await enrichTaxTransactionsWithEurValues(pageRows, config);
+
+      // Upsert each enriched row
+      for (const row of enrichedRows) {
         upsertSyncedTaxTransaction(row);
         synced += 1;
         if (row.block_number !== null) {
@@ -129,6 +132,122 @@ export async function syncTaxTransactions(
     wallet,
     latestBlockNumber,
   };
+}
+
+export async function enrichTaxTransactionsEurValues(
+  config: Pick<Config, "tax" | "pricing">,
+): Promise<{ enriched: number; skipped: number }> {
+  let rows: ReturnType<typeof getTaxTransactionsNeedingEurEnrichment> = [];
+  let enriched = 0;
+  let skipped = 0;
+
+  try {
+    rows = getTaxTransactionsNeedingEurEnrichment();
+
+    for (const row of rows) {
+      const asset = row.asset_in ?? row.asset_out;
+
+      if (!asset || !row.timestamp) {
+        skipped += 1;
+        continue;
+      }
+
+      const price = await getHistoricalEurPrice(config, asset, row.timestamp);
+
+      if (price === null) {
+        skipped += 1;
+        continue;
+      }
+
+      const cost_eur =
+        row.asset_out && row.qty_out ? String(Number(row.qty_out) * price) : null;
+      const proceeds_eur =
+        row.asset_in && row.qty_in ? String(Number(row.qty_in) * price) : null;
+
+      let gain_eur: string | null;
+      if (proceeds_eur !== null && cost_eur !== null) {
+        gain_eur = String(Number(proceeds_eur) - Number(cost_eur));
+      } else if (proceeds_eur !== null) {
+        gain_eur = proceeds_eur;
+      } else if (cost_eur !== null) {
+        gain_eur = String(-Number(cost_eur));
+      } else {
+        gain_eur = null;
+      }
+
+      updateTaxTransactionEurValues(row.id, { cost_eur, proceeds_eur, gain_eur });
+      enriched += 1;
+    }
+  } catch (err) {
+    console.error("[enrichTaxTransactionsEurValues] unexpected error:", err);
+    return { enriched, skipped: skipped + (rows.length - enriched - skipped) };
+  }
+
+  return { enriched, skipped };
+}
+
+async function enrichTaxTransactionsWithEurValues(
+  rows: SyncedTaxTransaction[],
+  config: Pick<Config, "pricing">,
+): Promise<SyncedTaxTransaction[]> {
+  const lookupKeys = new Set<string>();
+  for (const row of rows) {
+    if (!row.time_stamp) continue;
+    if (row.incoming_asset) lookupKeys.add(`${row.incoming_asset}\0${row.time_stamp}`);
+    if (row.outgoing_asset) lookupKeys.add(`${row.outgoing_asset}\0${row.time_stamp}`);
+  }
+
+  const priceMap = new Map<string, number | null>();
+  await Promise.all(
+    [...lookupKeys].map(async (key) => {
+      const sep = key.indexOf("\0");
+      const asset = key.slice(0, sep);
+      const timestamp = key.slice(sep + 1);
+      const price = await getHistoricalEurPrice(config, asset, timestamp);
+      priceMap.set(key, price);
+    }),
+  );
+
+  return rows.map((row) => {
+    if (!row.time_stamp) return row;
+
+    const incomingKey = row.incoming_asset ? `${row.incoming_asset}\0${row.time_stamp}` : null;
+    const outgoingKey = row.outgoing_asset ? `${row.outgoing_asset}\0${row.time_stamp}` : null;
+
+    const incomingPrice = incomingKey !== null ? (priceMap.get(incomingKey) ?? null) : null;
+    const outgoingPrice = outgoingKey !== null ? (priceMap.get(outgoingKey) ?? null) : null;
+
+    const incomingQty =
+      row.incoming_quantity !== null ? Number(row.incoming_quantity) : null;
+    const outgoingQty =
+      row.outgoing_quantity !== null ? Number(row.outgoing_quantity) : null;
+
+    const proceedsValue =
+      incomingPrice !== null && incomingQty !== null && Number.isFinite(incomingQty)
+        ? incomingQty * incomingPrice
+        : null;
+    const costValue =
+      outgoingPrice !== null && outgoingQty !== null && Number.isFinite(outgoingQty)
+        ? outgoingQty * outgoingPrice
+        : null;
+
+    // gain_eur treats the missing side as 0:
+    //   incoming-only transfer: gain = proceeds - 0 = proceeds (acquisition value)
+    //   outgoing-only transfer: gain = 0 - cost = -cost (disposal value)
+    //   trade with both sides: gain = proceeds - cost (realised P&L)
+    // null only when neither side has a EUR price (no data at all).
+    const gainValue =
+      proceedsValue !== null || costValue !== null
+        ? (proceedsValue ?? 0) - (costValue ?? 0)
+        : null;
+
+    return {
+      ...row,
+      cost_eur: costValue !== null ? String(costValue) : null,
+      proceeds_eur: proceedsValue !== null ? String(proceedsValue) : null,
+      gain_eur: gainValue !== null ? String(gainValue) : null,
+    };
+  });
 }
 
 async function fetchExplorerPage(args: {
@@ -292,10 +411,7 @@ function formatTaxQuantity(value: string | null, decimals: number | null): strin
     const divisor = 10n ** BigInt(decimals);
     const whole = parsed / divisor;
     const remainder = parsed % divisor;
-    const decimal = remainder
-      .toString()
-      .padStart(decimals, "0")
-      .replace(/0+$/, "");
+    const decimal = remainder.toString().padStart(decimals, "0").replace(/0+$/, "");
     return `${whole.toString()}${decimal ? `.${decimal}` : ""}`;
   } catch {
     return value;

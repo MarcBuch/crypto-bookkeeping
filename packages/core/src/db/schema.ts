@@ -227,7 +227,9 @@ function initSchema(database: Database): void {
     ["gain_eur", "TEXT"],
     ["holding_duration_days", "INTEGER"],
   ] as const;
-  const migratedTaxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
+  const migratedTaxTransactionCols = database
+    .prepare("PRAGMA table_info(tax_transactions)")
+    .all() as {
     name: string;
   }[];
   for (const [name, type] of taxLedgerColumns) {

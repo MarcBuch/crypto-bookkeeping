@@ -1,5 +1,6 @@
 import {
   createManualTaxTransaction,
+  enrichTaxTransactionsEurValues,
   listTaxTransactions,
   syncTaxTransactions,
   updateTaxTransaction,
@@ -323,6 +324,11 @@ async function handleTaxTransactionUpdate(
 }
 
 export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.post("/tax/transactions/enrich", async (_request, reply) => {
+    const result = await enrichTaxTransactionsEurValues(fastify.lpConfig);
+    reply.send(result);
+  });
+
   fastify.post("/tax/transactions/sync", async (_request, reply) => {
     try {
       const summary = await syncTaxTransactions(fastify.lpConfig);

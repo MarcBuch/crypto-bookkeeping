@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { getUsdPrices } from "../services/pricing.js";
+import { getHistoricalEurPrice, getUsdPrices } from "../services/pricing.js";
 
 const originalFetch = globalThis.fetch;
 const originalDateNow = Date.now;
@@ -226,5 +226,263 @@ describe("getUsdPrices", () => {
       ]),
     ).resolves.toEqual({});
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("getHistoricalEurPrice — unknown assets and invalid inputs", () => {
+  it("returns null and avoids fetch when symbol is not in coingeckoIds config", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
+    const config = { pricing: { coingeckoIds: { OTHER: "other-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_UNKNOWN_ASSET", "2024-01-15T00:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("returns null and avoids fetch for empty string symbol", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
+    const config = { pricing: { coingeckoIds: { HYPE: "hyperliquid" } } };
+    const result = await getHistoricalEurPrice(config, "", "2024-01-15T00:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("returns null and avoids fetch when config has no pricing key", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
+    const result = await getHistoricalEurPrice({} as any, "H_NO_PRICING_KEY", "2024-01-15T00:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("returns null and avoids fetch when coingeckoIds is empty", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
+    const config = { pricing: { coingeckoIds: {} } };
+    const result = await getHistoricalEurPrice(config, "H_EMPTY_IDS", "2024-01-15T00:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("returns null and avoids fetch for malformed ISO timestamp", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
+    const config = { pricing: { coingeckoIds: { H_BAD_TS: "h-bad-ts-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_BAD_TS", "not-a-date");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("returns null and avoids fetch for empty string timestamp", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
+    const config = { pricing: { coingeckoIds: { H_EMPTY_TS: "h-empty-ts-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_EMPTY_TS", "");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("resolves case-insensitively: config has HYPE_CASE_TEST, call uses hype_case_test", async () => {
+
+    const calls: FetchCall[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push({ url: String(input) });
+      return {
+        ok: true,
+        json: async () => ({ market_data: { current_price: { eur: 42.5 } } }),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const config = { pricing: { coingeckoIds: { HYPE_CASE_TEST: "hyperliquid-case-test" } } };
+    const result = await getHistoricalEurPrice(config, "hype_case_test", "2024-01-15T00:00:00.000Z");
+    expect(result).toBe(42.5);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("getHistoricalEurPrice — API failures", () => {
+  it("returns null for HTTP 429 without throwing", async () => {
+    const calls = mockFetchJson({ error: "rate limited" }, { status: 429 });
+    const config = { pricing: { coingeckoIds: { H_429_TOKEN: "h-429-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_429_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null for HTTP 404 without throwing", async () => {
+    const calls = mockFetchJson({ error: "not found" }, { status: 404 });
+    const config = { pricing: { coingeckoIds: { H_404_TOKEN: "h-404-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_404_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null for HTTP 500 without throwing", async () => {
+    const calls = mockFetchJson({ error: "server error" }, { status: 500 });
+    const config = { pricing: { coingeckoIds: { H_500_TOKEN: "h-500-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_500_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when market_data exists but current_price key is missing", async () => {
+    const calls = mockFetchJson({ market_data: {} });
+    const config = { pricing: { coingeckoIds: { H_NO_CP_TOKEN: "h-no-cp-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_NO_CP_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when current_price exists but eur key is missing", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { usd: 50 } } });
+    const config = { pricing: { coingeckoIds: { H_NO_EUR_TOKEN: "h-no-eur-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_NO_EUR_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when current_price.eur is null", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: null } } });
+    const config = { pricing: { coingeckoIds: { H_NULL_EUR_TOKEN: "h-null-eur-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_NULL_EUR_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when current_price.eur is a string", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: "37.5" } } });
+    const config = { pricing: { coingeckoIds: { H_STR_EUR_TOKEN: "h-str-eur-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_STR_EUR_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when current_price.eur is Infinity", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: Infinity } } });
+    const config = { pricing: { coingeckoIds: { H_INF_EUR_TOKEN: "h-inf-eur-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_INF_EUR_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when current_price.eur is negative", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: -5 } } });
+    const config = { pricing: { coingeckoIds: { H_NEG_EUR_TOKEN: "h-neg-eur-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_NEG_EUR_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null when fetch throws a network error", async () => {
+    const calls = mockFetchReject(new Error("network down"));
+    const config = { pricing: { coingeckoIds: { H_NET_ERR_TOKEN: "h-net-err-id" } } };
+    const result = await getHistoricalEurPrice(config, "H_NET_ERR_TOKEN", "2024-03-10T12:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("getHistoricalEurPrice — caching", () => {
+  it("deduplication — same (asset, date) called twice fetches only once", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 55 } } });
+    const config = { pricing: { coingeckoIds: { H_CACHE_DEDUP: "h-cache-dedup-id" } } };
+    const ts = "2024-06-01T10:00:00.000Z";
+
+    const r1 = await getHistoricalEurPrice(config, "H_CACHE_DEDUP", ts);
+    const r2 = await getHistoricalEurPrice(config, "H_CACHE_DEDUP", ts);
+
+    expect(r1).toBe(55);
+    expect(r2).toBe(55);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("deduplication — different dates for the same asset each trigger their own fetch", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 66 } } });
+    const config = { pricing: { coingeckoIds: { H_CACHE_DATES_A: "h-cache-dates-a-id" } } };
+
+    await getHistoricalEurPrice(config, "H_CACHE_DATES_A", "2024-06-01T10:00:00.000Z");
+    await getHistoricalEurPrice(config, "H_CACHE_DATES_A", "2024-06-02T10:00:00.000Z");
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("deduplication — different assets on the same date each trigger their own fetch", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 77 } } });
+    const config = {
+      pricing: {
+        coingeckoIds: {
+          H_CACHE_ASSETS_A: "h-cache-assets-a-id",
+          H_CACHE_ASSETS_B: "h-cache-assets-b-id",
+        },
+      },
+    };
+    const ts = "2024-06-03T10:00:00.000Z";
+
+    await getHistoricalEurPrice(config, "H_CACHE_ASSETS_A", ts);
+    await getHistoricalEurPrice(config, "H_CACHE_ASSETS_B", ts);
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("positive cache lasts 24 hours (HISTORICAL_PRICE_CACHE_TTL_MS)", async () => {
+    const TTL = 24 * 60 * 60 * 1000;
+    setNow(0);
+
+    let price = 100;
+    const calls: FetchCall[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push({ url: String(input) });
+      return {
+        ok: true,
+        json: async () => ({ market_data: { current_price: { eur: price } } }),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const config = { pricing: { coingeckoIds: { H_CACHE_TTL_POS: "h-cache-ttl-pos-id" } } };
+    const ts = "2024-06-04T12:00:00.000Z";
+
+    const r1 = await getHistoricalEurPrice(config, "H_CACHE_TTL_POS", ts);
+    expect(r1).toBe(100);
+    expect(calls).toHaveLength(1);
+
+    price = 200;
+    setNow(TTL - 1);
+    const r2 = await getHistoricalEurPrice(config, "H_CACHE_TTL_POS", ts);
+    expect(r2).toBe(100);
+    expect(calls).toHaveLength(1);
+
+    setNow(TTL);
+    const r3 = await getHistoricalEurPrice(config, "H_CACHE_TTL_POS", ts);
+    expect(r3).toBe(200);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("negative cache (null response) lasts 5 seconds", async () => {
+    setNow(0);
+
+    let responseOk = false;
+    let responseData: unknown = { error: "not found" };
+    const calls: FetchCall[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push({ url: String(input) });
+      return {
+        ok: responseOk,
+        json: async () => responseData,
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const config = { pricing: { coingeckoIds: { H_CACHE_TTL_NEG: "h-cache-ttl-neg-id" } } };
+    const ts = "2024-06-05T12:00:00.000Z";
+
+    const r1 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
+    expect(r1).toBeNull();
+    expect(calls).toHaveLength(1);
+
+    setNow(4999);
+    const r2 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
+    expect(r2).toBeNull();
+    expect(calls).toHaveLength(1);
+
+    responseOk = true;
+    responseData = { market_data: { current_price: { eur: 42 } } };
+    setNow(5000);
+    const r3 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
+    expect(r3).toBe(42);
+    expect(calls).toHaveLength(2);
   });
 });

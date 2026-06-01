@@ -41,6 +41,10 @@ let mockUpdateTaxTransaction: (...args: unknown[]) => unknown = () => ({
   comment: "Updated comment",
 });
 let mockCreateManualTaxTransaction: (...args: unknown[]) => unknown = () => fakeTransaction;
+let mockEnrichTaxTransactionsEurValues: (...args: unknown[]) => unknown = () => ({
+  enriched: 0,
+  skipped: 0,
+});
 
 mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
@@ -68,6 +72,9 @@ mock.module("@lp-tracker/core", () => ({
     lastCreateArgs = args;
     allCreateArgs.push(args);
     return mockCreateManualTaxTransaction(...args);
+  },
+  enrichTaxTransactionsEurValues: (...args: unknown[]) => {
+    return mockEnrichTaxTransactionsEurValues(...args);
   },
   NotFoundError: class NotFoundError extends Error {},
   RpcError: class RpcError extends Error {
@@ -108,6 +115,7 @@ beforeEach(() => {
     comment: "Updated comment",
   });
   mockCreateManualTaxTransaction = () => fakeTransaction;
+  mockEnrichTaxTransactionsEurValues = () => ({ enriched: 0, skipped: 0 });
 });
 
 describe("GET /tax/transactions", () => {
@@ -915,5 +923,79 @@ describe("PATCH /tax/transactions/:id", () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "Failed to update tax transaction" });
     expect(allUpdateArgs).toEqual([["tx-1:external", { comment: "Valid comment" }]]);
+  });
+});
+
+describe("POST /tax/transactions/enrich", () => {
+  it("returns { enriched: 0, skipped: 0 } when mock returns empty result (no unenriched rows)", async () => {
+    mockEnrichTaxTransactionsEurValues = () => ({ enriched: 0, skipped: 0 });
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ enriched: 0, skipped: 0 });
+  });
+
+  it("response body has exactly enriched (number) and skipped (number) fields", async () => {
+    mockEnrichTaxTransactionsEurValues = () => ({ enriched: 3, skipped: 1 });
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(typeof body.enriched).toBe("number");
+    expect(typeof body.skipped).toBe("number");
+    expect(Object.keys(body).sort()).toEqual(["enriched", "skipped"]);
+  });
+
+  it("returns enriched > 0 when unenriched rows exist and service enriches them", async () => {
+    mockEnrichTaxTransactionsEurValues = () => ({ enriched: 5, skipped: 2 });
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ enriched: 5, skipped: 2 });
+  });
+
+  it("returns skipped > 0 when service cannot fetch prices (simulated fetch failure)", async () => {
+    mockEnrichTaxTransactionsEurValues = () => ({ enriched: 0, skipped: 4 });
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.skipped).toBeGreaterThan(0);
+    expect(body.enriched).toBe(0);
+  });
+
+  it("passes lpConfig to enrichTaxTransactionsEurValues", async () => {
+    let capturedArgs: unknown[] = [];
+    mockEnrichTaxTransactionsEurValues = (...args: unknown[]) => {
+      capturedArgs = args;
+      return { enriched: 0, skipped: 0 };
+    };
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(200);
+    expect(capturedArgs).toEqual([fakeConfig]);
+  });
+
+  it("returns 404 for GET /tax/transactions/enrich (route is POST-only)", async () => {
+    const res = await server.inject({ method: "GET", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("does not affect GET /tax/transactions after a successful enrich", async () => {
+    mockEnrichTaxTransactionsEurValues = () => ({ enriched: 2, skipped: 0 });
+    mockListTaxTransactions = () => [fakeTransaction];
+
+    const enrichRes = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+    expect(enrichRes.statusCode).toBe(200);
+
+    const getRes = await server.inject({ method: "GET", url: "/tax/transactions" });
+    expect(getRes.statusCode).toBe(200);
+    expect(getRes.json()).toEqual({ transactions: [fakeTransaction] });
   });
 });

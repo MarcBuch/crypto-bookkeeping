@@ -31,6 +31,8 @@ export {
   updateTaxTransaction,
   upsertTaxSyncState,
   getTaxSyncState,
+  getTaxTransactionsNeedingEurEnrichment,
+  updateTaxTransactionEurValues,
 } from "./db/store.js";
 export { getAllPositions as getAllStoredPositions } from "./db/store.js";
 export type {
@@ -60,4 +62,11 @@ export * from "./services/il.js";
 export * from "./services/snapshot.js";
 export * from "./services/history.js";
 export * from "./services/pricing.js";
-export * from "./services/tax-transactions.js";
+export {
+  syncTaxTransactions,
+  enrichTaxTransactionsEurValues,
+} from "./services/tax-transactions.js";
+export type {
+  SyncTaxTransactionsOptions,
+  SyncTaxTransactionsSummary,
+} from "./services/tax-transactions.js";

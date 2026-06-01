@@ -1,4 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  type ExpandedState,
+  type SortingState,
+  type VisibilityState,
+  flexRender,
+  getCoreRowModel,
+  getExpandedRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import { type TableMeta, taxTableColumns } from "./TaxTableColumns";
 
 import type {
   ManualTaxTransactionCreateInput,
@@ -35,6 +47,35 @@ export interface TaxTransactionGroup {
   hash: string;
   primary: TaxTransaction;
   transactions: TaxTransaction[];
+}
+
+export type TaxTableRow = TaxTransaction & {
+  /**
+   * Set only on group header rows (groups with 2+ transactions sharing a hash).
+   * Provides the full TaxTransactionGroup context for group-specific cell rendering
+   * (e.g. "N parts" badge, "Applies to all parts" hint, mixed-value display).
+   */
+  _groupData?: TaxTransactionGroup;
+  /**
+   * Set only on group header rows. Contains the individual child transactions
+   * as TaxTableRow entries (without their own _subRows or _groupData).
+   * Used by TanStack Table's getSubRows to produce expandable sub-rows.
+   */
+  _subRows?: TaxTableRow[];
+};
+
+export function buildTableRows(transactions: TaxTransaction[]): TaxTableRow[] {
+  const groups = groupTaxTransactions(transactions);
+  return groups.map((group) => {
+    if (group.transactions.length === 1) {
+      return { ...group.primary };
+    }
+    return {
+      ...group.primary,
+      _groupData: group,
+      _subRows: group.transactions.map((tx) => ({ ...tx })),
+    };
+  });
 }
 
 type UpdateTaxTransaction = (id: string, update: TaxTransactionUpdate) => void;
@@ -334,11 +375,11 @@ function addTrimmedField(
   }
 }
 
-function isManualTaxTransaction(transaction: TaxTransaction): boolean {
+export function isManualTaxTransaction(transaction: TaxTransaction): boolean {
   return transaction.source === "manual";
 }
 
-type TaxTransactionControlTarget = Pick<TaxTransaction, "id" | "hash" | "comment"> & {
+export type TaxTransactionControlTarget = Pick<TaxTransaction, "id" | "hash" | "comment"> & {
   label: TaxTransactionLabel | "mixed";
 };
 
@@ -475,6 +516,8 @@ export function TaxTransactionLedger({
   updateError,
   isUpdating,
   defaultExpandedGroups = [],
+  defaultSorting,
+  defaultColumnVisibility,
 }: {
   transactions: TaxTransaction[];
   createTransaction?: CreateManualTaxTransaction;
@@ -494,21 +537,60 @@ export function TaxTransactionLedger({
   updateError?: unknown;
   isUpdating?: boolean;
   defaultExpandedGroups?: string[];
+  defaultSorting?: SortingState;
+  defaultColumnVisibility?: VisibilityState;
 }) {
   const groups = groupTaxTransactions(transactions);
-  const [expandedGroups, setExpandedGroups] = useState(() => new Set(defaultExpandedGroups));
+  const [expandedGroups, setExpandedGroups] = useState<ExpandedState>(() => {
+    const state: Record<string, boolean> = {};
+    for (const groupId of defaultExpandedGroups) {
+      state[groupId] = true;
+    }
+    return state;
+  });
 
-  function toggleGroup(groupId: string) {
-    setExpandedGroups((current) => {
-      const next = new Set(current);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
+  const tableData = useMemo(() => buildTableRows(transactions), [transactions]);
+  const [sorting, setSorting] = useState<SortingState>(() => defaultSorting ?? []);
+
+  const STORAGE_KEY = "tax-ledger-column-visibility";
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          return { ...(defaultColumnVisibility ?? {}), ...JSON.parse(stored) };
+        }
+      } catch {
+        // ignore
       }
-      return next;
-    });
-  }
+    }
+    return defaultColumnVisibility ?? {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(columnVisibility));
+    } catch {
+      // ignore
+    }
+  }, [columnVisibility]);
+
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+
+  const table = useReactTable<TaxTableRow>({
+    data: tableData,
+    columns: taxTableColumns,
+    state: { sorting, columnVisibility, expanded: expandedGroups },
+    onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
+    onExpandedChange: setExpandedGroups,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getSubRows: (row) => row._subRows,
+    getRowId: (row) => (row._groupData ? `hash:${row.hash}` : row.id),
+    meta: { updateTransaction, isUpdating } satisfies TableMeta,
+  });
 
   return (
     <section className="overflow-x-clip rounded-3xl border border-neutral-200 bg-white shadow-sm">
@@ -548,77 +630,125 @@ export function TaxTransactionLedger({
       {transactions.length === 0 ? <TaxEmptyState /> : null}
       {transactions.length > 0 ? (
         <>
+          <div className="relative mb-2 flex justify-end px-5 pt-3">
+            <button
+              type="button"
+              onClick={() => setShowColumnMenu((v) => !v)}
+              className="rounded border border-neutral-300 bg-white px-3 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-800"
+            >
+              Columns
+            </button>
+            {showColumnMenu && (
+              <div className="absolute right-5 top-10 z-10 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+                {table.getAllLeafColumns().map((column) => (
+                  <label
+                    key={column.id}
+                    className="flex cursor-pointer items-center gap-2 py-1 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={column.getIsVisible()}
+                      onChange={column.getToggleVisibilityHandler()}
+                    />
+                    {typeof column.columnDef.header === "string"
+                      ? column.columnDef.header
+                      : column.id}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="hidden lg:block">
             <table className="w-full table-fixed divide-y divide-neutral-200 text-sm">
               <colgroup>
-                <col className="w-[11%]" />
-                <col className="w-[10%]" />
-                <col className="w-[9%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[6%]" />
-                <col className="w-[6%]" />
-                <col className="w-[8%]" />
+                {table.getVisibleLeafColumns().map((column) => (
+                  <col key={column.id} style={{ width: `${column.getSize()}%` }} />
+                ))}
               </colgroup>
               <thead className="text-left text-[0.68rem] tracking-[0.18em] text-neutral-500 uppercase">
-                <tr>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Hash</th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Time / Block
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Label</th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Incoming Qty
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Incoming Asset
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Outgoing Qty
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Outgoing Asset
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Fee</th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Cost EUR</th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Proceeds EUR
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Gain EUR</th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">
-                    Holding Days
-                  </th>
-                  <th className="sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm">Note</th>
-                </tr>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <tr key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <th
+                        key={header.id}
+                        className={`sticky top-0 z-10 bg-neutral-50 px-2 py-3 shadow-sm${header.column.getCanSort() ? " cursor-pointer select-none" : ""}`}
+                        aria-sort={
+                          header.column.getCanSort()
+                            ? header.column.getIsSorted() === "asc"
+                              ? "ascending"
+                              : header.column.getIsSorted() === "desc"
+                                ? "descending"
+                                : "none"
+                            : undefined
+                        }
+                        onClick={header.column.getToggleSortingHandler()}
+                      >
+                        {header.isPlaceholder ? null : (
+                          <>
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {header.column.getCanSort() && (
+                              <span aria-hidden="true" className="ml-1 inline-block text-xs">
+                                {header.column.getIsSorted() === "asc"
+                                  ? "▲"
+                                  : header.column.getIsSorted() === "desc"
+                                    ? "▼"
+                                    : "⇅"}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </th>
+                    ))}
+                  </tr>
+                ))}
               </thead>
               <tbody className="divide-y divide-neutral-200">
-                {groups.map((group) => {
-                  if (group.transactions.length === 1) {
-                    return (
-                      <TaxTransactionRow
-                        key={group.primary.id}
-                        transaction={group.primary}
-                        updateTransaction={updateTransaction}
-                        isUpdating={isUpdating}
-                      />
-                    );
-                  }
+                {table.getRowModel().rows.map((row) => {
+                  const isGroupChild = row.depth > 0;
+                  const isLastGroupChild =
+                    isGroupChild &&
+                    row.index === (row.getParentRow()?.subRows.length ?? 1) - 1;
 
-                  const isExpanded = expandedGroups.has(group.id);
+                  const firstCellConnectorClass = isGroupChild
+                    ? isLastGroupChild
+                      ? "before:absolute before:top-0 before:left-5 before:h-7 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-5 after:h-px after:w-4 after:bg-neutral-300"
+                      : "before:absolute before:top-0 before:bottom-0 before:left-5 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-5 after:h-px after:w-4 after:bg-neutral-300"
+                    : "";
+
                   return (
-                    <TaxTransactionGroupRows
-                      key={group.id}
-                      group={group}
-                      isExpanded={isExpanded}
-                      isUpdating={isUpdating}
-                      updateTransaction={updateTransaction}
-                      toggleGroup={() => toggleGroup(group.id)}
-                    />
+                    <tr
+                      key={row.id}
+                      className={`align-top text-neutral-700 transition hover:bg-neutral-50 ${isGroupChild ? "bg-neutral-50/60" : ""}`}
+                    >
+                      {row.getVisibleCells().map((cell, cellIndex) => {
+                        const isFirstCell = cellIndex === 0;
+
+                        if (isFirstCell && isGroupChild) {
+                          return (
+                            <td
+                              key={cell.id}
+                              className={`relative py-4 pr-2 pl-2 font-mono text-xs font-bold text-neutral-950 ${firstCellConnectorClass}`}
+                            >
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          );
+                        }
+
+                        if (isFirstCell) {
+                          return (
+                            <td key={cell.id} className="py-4 pr-2 pl-2 font-mono text-xs font-bold text-neutral-950">
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          );
+                        }
+
+                        return (
+                          <td key={cell.id} className="px-2 py-4">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        );
+                      })}
+                    </tr>
                   );
                 })}
               </tbody>
@@ -637,7 +767,8 @@ export function TaxTransactionLedger({
                 );
               }
 
-              const isExpanded = expandedGroups.has(group.id);
+              const tanstackRow = table.getRow(group.id);
+              const isExpanded = tanstackRow?.getIsExpanded() ?? false;
               return (
                 <TaxTransactionGroupCard
                   key={group.id}
@@ -645,7 +776,7 @@ export function TaxTransactionLedger({
                   isExpanded={isExpanded}
                   isUpdating={isUpdating}
                   updateTransaction={updateTransaction}
-                  toggleGroup={() => toggleGroup(group.id)}
+                  toggleGroup={() => tanstackRow?.toggleExpanded()}
                 />
               );
             })}
@@ -924,116 +1055,6 @@ function ManualTextInput({
   );
 }
 
-function TaxTransactionGroupRows({
-  group,
-  updateTransaction,
-  isUpdating,
-  isExpanded,
-  toggleGroup,
-}: {
-  group: TaxTransactionGroup;
-  updateTransaction: UpdateTaxTransaction;
-  isUpdating?: boolean;
-  isExpanded: boolean;
-  toggleGroup: () => void;
-}) {
-  const parentControlTarget = groupControlTarget(group);
-  const updateGroup = (update: TaxTransactionUpdate) =>
-    updateTaxTransactionGroup(group, update, updateTransaction);
-
-  return (
-    <>
-      <tr className="align-top text-neutral-700 transition hover:bg-neutral-50">
-        <td className="px-2 py-4 font-mono text-xs font-bold text-neutral-950">
-          <TransactionHashLink hash={group.hash} />
-          <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
-            grouped trade
-          </span>
-        </td>
-        <td className="px-2 py-4 font-mono text-xs text-neutral-600">
-          <p className="font-bold text-neutral-950">{formatTimestamp(group.primary.time_stamp)}</p>
-          <p className="mt-1">Block {group.primary.block_number ?? "n/a"}</p>
-        </td>
-        <td className="px-2 py-4">
-          <LabelSelect
-            transaction={parentControlTarget}
-            updateTransaction={(_id, update) => updateGroup(update)}
-            disabled={isUpdating}
-          />
-          <p className="mt-2 text-xs font-semibold text-neutral-500">Applies to all parts</p>
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "incoming_quantity")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "incoming_asset")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "outgoing_quantity")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "outgoing_asset")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {formatGroupFee(group)}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "cost_eur")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "proceeds_eur")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "gain_eur")}
-        </td>
-        <td className="truncate px-2 py-4 font-mono text-xs text-neutral-600">
-          {mixedTaxField(group, "holding_duration_days")}
-        </td>
-        <td className="px-2 py-4">
-          <CommentEditor
-            transaction={parentControlTarget}
-            updateTransaction={(_id, update) => updateGroup(update)}
-            disabled={isUpdating}
-            mixedComment={hasMixedGroupComments(group)}
-          />
-        </td>
-      </tr>
-      <tr className="bg-neutral-50/70 text-neutral-600">
-        <td className="px-2 py-3" colSpan={13}>
-          <p className="font-semibold text-neutral-950">
-            {group.transactions.length} transaction parts
-          </p>
-          <p className="font-mono text-sm font-bold text-neutral-950">
-            {formatGroupValueSummary(group)}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-neutral-500">Same transaction hash</p>
-          <button
-            aria-expanded={isExpanded}
-            aria-label={`${isExpanded ? "Hide" : "Show"} transaction parts for ${group.hash}`}
-            className="mt-3 rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
-            type="button"
-            onClick={toggleGroup}
-          >
-            {isExpanded ? "Hide parts" : "Show parts"}
-          </button>
-        </td>
-      </tr>
-      {isExpanded
-        ? group.transactions.map((transaction, index) => (
-            <TaxTransactionRow
-              key={transaction.id}
-              transaction={transaction}
-              updateTransaction={updateTransaction}
-              isUpdating={isUpdating}
-              isGroupedChild
-              isLastGroupedChild={index === group.transactions.length - 1}
-            />
-          ))
-        : null}
-    </>
-  );
-}
-
 function TaxTransactionGroupCard({
   group,
   updateTransaction,
@@ -1123,76 +1144,6 @@ function TaxTransactionGroupCard({
   );
 }
 
-function TaxTransactionRow({
-  transaction,
-  updateTransaction,
-  isUpdating,
-  isGroupedChild = false,
-  isLastGroupedChild = false,
-}: {
-  transaction: TaxTransaction;
-  updateTransaction: UpdateTaxTransaction;
-  isUpdating?: boolean;
-  isGroupedChild?: boolean;
-  isLastGroupedChild?: boolean;
-}) {
-  const groupedChildConnectorClass = isLastGroupedChild
-    ? "before:absolute before:top-0 before:left-5 before:h-7 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-5 after:h-px after:w-4 after:bg-neutral-300"
-    : "before:absolute before:top-0 before:bottom-0 before:left-5 before:w-px before:bg-neutral-300 after:absolute after:top-7 after:left-5 after:h-px after:w-4 after:bg-neutral-300";
-
-  return (
-    <tr
-      className={`align-top text-neutral-700 transition hover:bg-neutral-50 ${isGroupedChild ? "bg-neutral-50/60" : ""}`}
-    >
-      <td
-        className={`relative py-4 pr-2 pl-2 font-mono text-xs font-bold text-neutral-950 ${isGroupedChild ? groupedChildConnectorClass : ""}`}
-      >
-        <div className={isGroupedChild ? "translate-x-7" : undefined}>
-          <TransactionHashLink hash={transaction.hash} />
-          <span className="mt-1 block font-sans text-[0.68rem] font-semibold text-neutral-500 uppercase">
-            {transaction.transaction_type ?? transaction.source}
-          </span>
-        </div>
-      </td>
-      <td className="px-2 py-4 font-mono text-xs text-neutral-600">
-        <p className="font-bold text-neutral-950">{formatTimestamp(transaction.time_stamp)}</p>
-        <p className="mt-1">Block {transaction.block_number ?? "n/a"}</p>
-      </td>
-      <td className="px-2 py-4">
-        {isManualTaxTransaction(transaction) ? (
-          <ManualTransactionEditor
-            transaction={transaction}
-            updateTransaction={updateTransaction}
-            disabled={isUpdating}
-          />
-        ) : (
-          <LabelSelect
-            transaction={transaction}
-            updateTransaction={updateTransaction}
-            disabled={isUpdating}
-          />
-        )}
-      </td>
-      <TaxValueCell value={transaction.incoming_quantity} />
-      <TaxValueCell value={transaction.incoming_asset} />
-      <TaxValueCell value={transaction.outgoing_quantity} />
-      <TaxValueCell value={transaction.outgoing_asset} />
-      <TaxValueCell value={isGroupedChild ? null : formatFee(transaction.fee)} />
-      <TaxValueCell value={transaction.cost_eur} />
-      <TaxValueCell value={transaction.proceeds_eur} />
-      <TaxValueCell value={transaction.gain_eur} />
-      <TaxValueCell value={transaction.holding_duration_days} />
-      <td className="px-2 py-4">
-        <CommentEditor
-          transaction={transaction}
-          updateTransaction={updateTransaction}
-          disabled={isUpdating}
-        />
-      </td>
-    </tr>
-  );
-}
-
 function TaxTransactionCard({
   transaction,
   updateTransaction,
@@ -1265,7 +1216,7 @@ function TaxTransactionCard({
   );
 }
 
-function LabelSelect({
+export function LabelSelect({
   transaction,
   updateTransaction,
   disabled,
@@ -1623,7 +1574,7 @@ function ManualEditInput({
   );
 }
 
-function CommentEditor({
+export function CommentEditor({
   transaction,
   updateTransaction,
   disabled,
@@ -1666,16 +1617,6 @@ function CommentEditor({
   );
 }
 
-function TaxValueCell({ value }: { value: string | number | null | undefined }) {
-  return (
-    <td
-      className="truncate px-2 py-4 font-mono text-xs text-neutral-600"
-      title={formatTaxLedgerValue(value)}
-    >
-      {formatTaxLedgerValue(value)}
-    </td>
-  );
-}
 
 function TaxDetail({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
@@ -1769,7 +1710,7 @@ function AddressLine({ label, value }: { label: string; value: string | null }) 
   );
 }
 
-function TransactionHashLink({ hash }: { hash: string }) {
+export function TransactionHashLink({ hash }: { hash: string }) {
   return (
     <a
       className="block truncate transition hover:text-blue-700 hover:underline"
@@ -1792,7 +1733,7 @@ function shortHash(value: string): string {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
-function formatTimestamp(value: string | null): string {
+export function formatTimestamp(value: string | null): string {
   if (!value) return "Time n/a";
 
   const numeric = Number(value);
@@ -1829,7 +1770,7 @@ function formatTransactionValue(transaction: TaxTransaction): string {
   }
 }
 
-function formatFee(fee: string | null): string | null {
+export function formatFee(fee: string | null): string | null {
   if (!fee) return null;
   return `${formatBaseUnitAmount(fee, 18)} HYPE`;
 }
@@ -1847,16 +1788,16 @@ function formatBaseUnitAmount(value: string, decimals: number): string {
   }
 }
 
-function formatGroupFee(group: TaxTransactionGroup): string {
+export function formatGroupFee(group: TaxTransactionGroup): string {
   return formatTaxLedgerValue(formatFee(group.primary.fee));
 }
 
-function formatTaxLedgerValue(value: string | number | null | undefined): string {
+export function formatTaxLedgerValue(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
 }
 
-type TaxLedgerField =
+export type TaxLedgerField =
   | "incoming_quantity"
   | "incoming_asset"
   | "outgoing_quantity"
@@ -1866,7 +1807,7 @@ type TaxLedgerField =
   | "gain_eur"
   | "holding_duration_days";
 
-function mixedTaxField(group: TaxTransactionGroup, field: TaxLedgerField): string {
+export function mixedTaxField(group: TaxTransactionGroup, field: TaxLedgerField): string {
   const values = new Set(group.transactions.map((transaction) => transaction[field] ?? ""));
   return values.size === 1 ? formatTaxLedgerValue([...values][0]) : "Mixed";
 }
@@ -1927,7 +1868,7 @@ function groupLabel(group: TaxTransactionGroup): string {
   return labels.size === 1 ? [...labels][0] : "Mixed labels";
 }
 
-function groupControlTarget(group: TaxTransactionGroup): TaxTransactionControlTarget {
+export function groupControlTarget(group: TaxTransactionGroup): TaxTransactionControlTarget {
   return {
     id: group.id,
     hash: group.hash,
@@ -1947,7 +1888,7 @@ function groupControlComment(group: TaxTransactionGroup): string | null {
   return [...comments][0] || null;
 }
 
-function hasMixedGroupComments(group: TaxTransactionGroup): boolean {
+export function hasMixedGroupComments(group: TaxTransactionGroup): boolean {
   return new Set(group.transactions.map((transaction) => transaction.comment ?? "")).size > 1;
 }
 

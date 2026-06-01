@@ -2,7 +2,9 @@ import { createClient } from "../chain/client.js";
 import { getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
+import { replaceLpCaches, upsertLpSyncState } from "../db/store.js";
 import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
+import { getPnLView } from "./pnl.js";
 
 export interface PositionView {
   tokenId: string;
@@ -91,4 +93,34 @@ export async function getPositionsView(config: Config): Promise<PositionView[]> 
   }
 
   return result;
+}
+
+export interface SyncLpDataSummary {
+  wallet: string;
+  syncedAt: string;
+  positionCount: number;
+}
+
+export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
+  // Fetch sequentially to reduce simultaneous RPC/rate-limit pressure
+  const positions = await getPositionsView(config);
+  const pnlViews = await getPnLView(config);
+
+  const syncedAt = new Date().toISOString();
+
+  // Atomically replace both caches in a single transaction
+  replaceLpCaches(
+    positions as unknown as Record<string, unknown>[],
+    pnlViews as unknown as Record<string, unknown>[],
+    syncedAt,
+  );
+
+  // Update sync state
+  upsertLpSyncState({ wallet: config.wallet, last_synced_at: syncedAt });
+
+  return {
+    wallet: config.wallet,
+    syncedAt,
+    positionCount: positions.length,
+  };
 }

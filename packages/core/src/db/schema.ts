@@ -142,6 +142,26 @@ function initSchema(database: Database): void {
       last_block_number INTEGER,
       source TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS positions_view_cache (
+      token_id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS pnl_view_cache (
+      token_id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS lp_sync_state (
+      wallet TEXT PRIMARY KEY,
+      last_synced_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_positions_view_cache_synced_at ON positions_view_cache(synced_at);
+    CREATE INDEX IF NOT EXISTS idx_pnl_view_cache_synced_at ON pnl_view_cache(synced_at);
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist

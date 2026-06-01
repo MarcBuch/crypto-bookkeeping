@@ -33,6 +33,14 @@ export {
   getTaxSyncState,
   getTaxTransactionsNeedingEurEnrichment,
   updateTaxTransactionEurValues,
+  listCachedPositionViews,
+  listCachedPnLViews,
+  getPositionsCacheSyncedAt,
+  replaceCachedPositionViews,
+  replaceCachedPnLViews,
+  replaceLpCaches,
+  getLpSyncState,
+  upsertLpSyncState,
 } from "./db/store.js";
 export { getAllPositions as getAllStoredPositions } from "./db/store.js";
 export type {
@@ -45,6 +53,7 @@ export type {
   ManualTaxTransactionInput,
   TaxTransactionUpdate,
   StoredTaxSyncState,
+  StoredLpSyncState,
 } from "./db/store.js";
 export * from "./db/schema.js";
 

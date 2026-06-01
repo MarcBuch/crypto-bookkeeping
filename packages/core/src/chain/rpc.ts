@@ -6,6 +6,8 @@
  * is kept low but non-zero to avoid hammering the endpoint.
  */
 
+import { RpcError } from "../services/errors.js";
+
 const MIN_DELAY_MS = 50; // HyperRPC is far more permissive than the public RPC
 let lastRequestTime = 0;
 // Mutex flag to prevent the race condition where concurrent callers all read
@@ -36,8 +38,9 @@ export function sleep(ms: number): Promise<void> {
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  maxRetries = 3,
+  maxRetries = 8,
   baseDelay = 1000,
+  maxDelay = 30_000,
 ): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -51,12 +54,18 @@ export async function withRetry<T>(
         error?.cause?.code === -32005;
 
       if (isRateLimit && attempt < maxRetries) {
-        const delay = baseDelay * 2 ** attempt;
+        const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
         console.warn(
           `  Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`,
         );
+        lastRequestTime = Date.now() + delay;
         await sleep(delay);
         continue;
+      }
+      // Normalize viem rate-limit errors to our RpcError so callers can
+      // reliably detect them with instanceof + code checks.
+      if (isRateLimit) {
+        throw new RpcError("RPC rate limited", -32005);
       }
       throw error;
     }

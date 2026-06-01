@@ -15,6 +15,10 @@ const COLLECT_TOPIC = "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab176563273
 // be raised to 100_000. Set via config or override here.
 const LOGS_CHUNK_SIZE = 999n;
 
+// HyperEVM produces ~1 block/sec. 30 days ≈ 2,592,000 blocks.
+// Used as the default getLogs scan window when no explicit fromBlock is provided.
+const DEFAULT_LOGS_WINDOW_BLOCKS = 2_592_000n;
+
 const eventAbi = [
   parseAbiItem(
     "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
@@ -62,6 +66,7 @@ export async function findOpenEvent(
   wallet: Address,
   knownOpenTx?: string,
   fromBlock?: bigint,
+  windowBlocks?: bigint,
 ): Promise<PositionOpenEvent | null> {
   try {
     // Fast path: use known transaction hash
@@ -78,7 +83,16 @@ export async function findOpenEvent(
     // Slow path: paginated getLogs scan
     console.log(`    Scanning logs for open event of token #${tokenId}...`);
     const latestBlock = await withRetry(() => client.getBlockNumber());
-    const startBlock = fromBlock ?? 0n;
+
+    let startBlock: bigint;
+    if (fromBlock !== undefined) {
+      // Explicit fromBlock always wins (e.g. close-event scan from entry block)
+      startBlock = fromBlock;
+    } else {
+      const window = windowBlocks ?? DEFAULT_LOGS_WINDOW_BLOCKS;
+      // Clamp to >= 1n (block 0 is invalid on HyperEVM)
+      startBlock = latestBlock > window ? latestBlock - window : 1n;
+    }
 
     for (let lo = startBlock; lo <= latestBlock; lo += LOGS_CHUNK_SIZE) {
       const hi = lo + LOGS_CHUNK_SIZE - 1n < latestBlock ? lo + LOGS_CHUNK_SIZE - 1n : latestBlock;
@@ -131,6 +145,7 @@ export async function findCloseEvent(
   wallet: Address,
   knownCloseTx?: string,
   fromBlock?: bigint,
+  windowBlocks?: bigint,
 ): Promise<PositionCloseEvent | null> {
   try {
     // Fast path: use known transaction hash
@@ -147,7 +162,16 @@ export async function findCloseEvent(
     // Slow path: paginated getLogs scan
     console.log(`    Scanning logs for close event of token #${tokenId}...`);
     const latestBlock = await withRetry(() => client.getBlockNumber());
-    const startBlock = fromBlock ?? 0n;
+
+    let startBlock: bigint;
+    if (fromBlock !== undefined) {
+      // Explicit fromBlock always wins (e.g. close-event scan from entry block)
+      startBlock = fromBlock;
+    } else {
+      const window = windowBlocks ?? DEFAULT_LOGS_WINDOW_BLOCKS;
+      // Clamp to >= 1n (block 0 is invalid on HyperEVM)
+      startBlock = latestBlock > window ? latestBlock - window : 1n;
+    }
 
     for (let lo = startBlock; lo <= latestBlock; lo += LOGS_CHUNK_SIZE) {
       const hi = lo + LOGS_CHUNK_SIZE - 1n < latestBlock ? lo + LOGS_CHUNK_SIZE - 1n : latestBlock;

@@ -35,6 +35,10 @@ export interface Config {
   pricing?: PricingConfig;
   /** Optional tax transaction sync configuration */
   tax?: TaxConfig;
+  /** Optional: number of blocks to scan back from the chain head when discovering
+   *  position open/close events via getLogs. Defaults to ~30 days (2,592,000 blocks
+   *  at ~1 block/sec on HyperEVM) if omitted. Must be a positive integer. */
+  logsFromBlock?: number;
 }
 
 /**
@@ -107,6 +111,15 @@ function validateConfig(raw: unknown, path: string): void {
   for (const key of requiredContracts) {
     if (!contracts[key]) {
       throw new Error(`Config at ${path} is missing required contract address: "contracts.${key}"`);
+    }
+  }
+
+  if (cfg.logsFromBlock !== undefined && cfg.logsFromBlock !== null) {
+    const v = cfg.logsFromBlock;
+    if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+      throw new Error(
+        `Config at ${path}: "logsFromBlock" must be a positive integer (got ${JSON.stringify(v)})`,
+      );
     }
   }
 }

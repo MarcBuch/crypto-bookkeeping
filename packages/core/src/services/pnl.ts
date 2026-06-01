@@ -102,6 +102,13 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
 
   const result: PnLView[] = [];
 
+  // logsFromBlock is the number of blocks to scan back (window size), matching
+  // the events.ts windowBlocks parameter. undefined → events.ts uses its default.
+  const logsWindowBlocks =
+    config.logsFromBlock !== undefined && config.logsFromBlock !== null
+      ? BigInt(config.logsFromBlock)
+      : undefined;
+
   for (const pos of filteredPositions) {
     const [token0Info, token1Info] = await Promise.all([
       getTokenInfo(client, pos.token0),
@@ -141,6 +148,8 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         pos.tokenId,
         config.wallet,
         posConfig?.openTx,
+        undefined, // fromBlock — let the window default apply
+        logsWindowBlocks, // windowBlocks from config
       );
 
       if (openEvent) {
@@ -242,7 +251,8 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         pos.tokenId,
         config.wallet,
         posConfig?.closeTx,
-        entryBlock,
+        entryBlock, // explicit fromBlock when known — wins over window
+        logsWindowBlocks, // windowBlocks fallback when entryBlock undefined
       );
 
       if (closeEvent) {

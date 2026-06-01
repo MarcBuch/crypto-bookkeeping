@@ -29,6 +29,13 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
 
   const results: SnapshotResult[] = [];
 
+  // Number of blocks to scan back when discovering events (window size).
+  // undefined → findOpenEvent uses its 30-day default.
+  const logsWindowBlocks =
+    config.logsFromBlock !== undefined && config.logsFromBlock !== null
+      ? BigInt(config.logsFromBlock)
+      : undefined;
+
   for (const pos of positions) {
     // Skip positions with 0 liquidity (closed)
     if (pos.liquidity === 0n) {
@@ -73,6 +80,8 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         pos.tokenId,
         config.wallet,
         posConfigSnap?.openTx,
+        undefined,
+        logsWindowBlocks,
       );
 
       if (openEvent) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { encodeAbiParameters, type TransactionReceipt } from "viem";
 
-import { findCloseEventFromTx } from "../chain/events.js";
+import { findCloseEvent, findCloseEventFromTx, findOpenEvent } from "../chain/events.js";
 
 type Hex = `0x${string}`;
 type CloseClient = Parameters<typeof findCloseEventFromTx>[0];
@@ -126,5 +126,152 @@ describe("findCloseEventFromTx", () => {
     expect(event?.amount1).toBe(2000n);
     expect(event?.collectedFees0).toBe(1n);
     expect(event?.collectedFees1).toBe(2n);
+  });
+});
+
+// === Scan window computation (slow-path getLogs startBlock) ===
+
+const POSITION_MANAGER = "0x3333333333333333333333333333333333333333" as Hex;
+const WALLET = "0x4444444444444444444444444444444444444444" as Hex;
+
+type OpenClient = Parameters<typeof findOpenEvent>[0];
+
+/**
+ * Mock client that exposes a controllable latestBlock and captures every
+ * getLogs call's fromBlock/toBlock. getLogs always returns [] so the scan
+ * completes (returns null) without finding an event.
+ */
+function windowProbeClient(latestBlock: bigint) {
+  const calls: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+  const client = {
+    getBlockNumber: async () => latestBlock,
+    getLogs: async (args: { fromBlock: bigint; toBlock: bigint }) => {
+      calls.push({ fromBlock: args.fromBlock, toBlock: args.toBlock });
+      return [];
+    },
+  } as unknown as OpenClient;
+  return { client, calls };
+}
+
+describe("findOpenEvent scan window computation", () => {
+  it("default window: chain younger than window clamps startBlock to 1n", async () => {
+    const { client, calls } = windowProbeClient(500n);
+
+    const result = await findOpenEvent(client, POSITION_MANAGER, 1n, WALLET);
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].fromBlock).toBe(1n);
+    expect(result).toBeNull();
+  });
+
+  it("custom windowBlocks: startBlock = latestBlock - window", async () => {
+    const { client, calls } = windowProbeClient(10_000n);
+
+    const result = await findOpenEvent(
+      client,
+      POSITION_MANAGER,
+      1n,
+      WALLET,
+      undefined,
+      undefined,
+      1_000n,
+    );
+
+    expect(calls[0].fromBlock).toBe(9_000n);
+    expect(result).toBeNull();
+  });
+
+  it("custom window larger than latestBlock clamps startBlock to 1n", async () => {
+    const { client, calls } = windowProbeClient(100n);
+
+    const result = await findOpenEvent(
+      client,
+      POSITION_MANAGER,
+      1n,
+      WALLET,
+      undefined,
+      undefined,
+      1_000_000n,
+    );
+
+    expect(calls[0].fromBlock).toBe(1n);
+    expect(result).toBeNull();
+  });
+
+  it("window === latestBlock exactly clamps startBlock to 1n (boundary)", async () => {
+    const { client, calls } = windowProbeClient(5_000n);
+
+    const result = await findOpenEvent(
+      client,
+      POSITION_MANAGER,
+      1n,
+      WALLET,
+      undefined,
+      undefined,
+      5_000n,
+    );
+
+    expect(calls[0].fromBlock).toBe(1n);
+    expect(result).toBeNull();
+  });
+
+  it("explicit fromBlock wins over windowBlocks", async () => {
+    const { client, calls } = windowProbeClient(10_000n);
+
+    const result = await findOpenEvent(
+      client,
+      POSITION_MANAGER,
+      1n,
+      WALLET,
+      undefined,
+      9_500n,
+      1_000n,
+    );
+
+    expect(calls[0].fromBlock).toBe(9_500n);
+    expect(result).toBeNull();
+  });
+
+  it("returns null (does not throw) when no events found in window", async () => {
+    const { client } = windowProbeClient(500n);
+
+    const result = await findOpenEvent(client, POSITION_MANAGER, 1n, WALLET);
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("findCloseEvent scan window computation", () => {
+  it("explicit fromBlock wins over windowBlocks", async () => {
+    const { client, calls } = windowProbeClient(10_000n);
+
+    const result = await findCloseEvent(
+      client,
+      POSITION_MANAGER,
+      1n,
+      WALLET,
+      undefined,
+      9_500n,
+      1_000n,
+    );
+
+    // findCloseEvent issues two getLogs (DecreaseLiquidity + Collect) per chunk.
+    // Both calls in the first chunk must share the computed startBlock.
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].fromBlock).toBe(9_500n);
+    const firstChunk = calls.filter((c) => c.toBlock === calls[0].toBlock);
+    for (const c of firstChunk) {
+      expect(c.fromBlock).toBe(9_500n);
+    }
+    expect(result).toBeNull();
+  });
+
+  it("default window clamps startBlock to 1n for a young chain", async () => {
+    const { client, calls } = windowProbeClient(500n);
+
+    const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET);
+
+    expect(calls[0].fromBlock).toBe(1n);
+    expect(result).toBeNull();
   });
 });

@@ -29,5 +29,7 @@
   "tax": {
     "explorerApiUrl": "https://www.hyperscan.com/api",
     "explorerChainId": 999
-  }
+  },
+  "_comment_logsFromBlock": "Optional. Number of blocks to scan back from the chain head when discovering position open/close events via getLogs (slow path, only used when openTx/closeTx are not set in 'positions'). HyperEVM produces ~1 block/sec, so 2592000 = ~30 days. Defaults to 2592000 if omitted. Must be a positive integer.",
+  "logsFromBlock": 2592000
 }

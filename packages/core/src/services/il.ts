@@ -53,6 +53,13 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
 
   const result: ILView[] = [];
 
+  // Number of blocks to scan back when discovering events (window size).
+  // undefined → findOpenEvent/findCloseEvent use their 30-day default.
+  const logsWindowBlocks =
+    config.logsFromBlock !== undefined && config.logsFromBlock !== null
+      ? BigInt(config.logsFromBlock)
+      : undefined;
+
   for (const pos of filteredPositions) {
     const [token0Info, token1Info] = await Promise.all([
       getTokenInfo(client, pos.token0),
@@ -89,6 +96,8 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         pos.tokenId,
         config.wallet,
         posConfigIL?.openTx,
+        undefined,
+        logsWindowBlocks,
       );
 
       if (openEvent) {
@@ -151,6 +160,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         config.wallet,
         posConfigIL?.closeTx,
         entryBlockIL,
+        logsWindowBlocks,
       );
       if (closeEvent) {
         exitAmount0 = closeEvent.amount0;

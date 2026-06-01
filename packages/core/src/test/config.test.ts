@@ -148,6 +148,56 @@ describe("loadConfig — adversarial tests", () => {
     const path = writeConfig("bad-contracts.json", JSON.stringify(cfg));
     expect(() => loadConfig(path)).toThrow(/"contracts" must be an object/);
   });
+
+  // ── logsFromBlock validation ──────────────────────────────────────────────
+  describe("logsFromBlock validation", () => {
+    function withLogsFromBlock(value: unknown): string {
+      // Build the JSON manually so we can inject raw values (including a JSON
+      // string in the number's place) that survive the round-trip through JSON.
+      return JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        logsFromBlock: value,
+      });
+    }
+
+    it("throws when logsFromBlock is negative (-1)", () => {
+      const path = writeConfig("lfb-negative.json", withLogsFromBlock(-1));
+      expect(() => loadConfig(path)).toThrow(/"logsFromBlock" must be a positive integer/);
+    });
+
+    it("throws when logsFromBlock is zero", () => {
+      const path = writeConfig("lfb-zero.json", withLogsFromBlock(0));
+      expect(() => loadConfig(path)).toThrow(/"logsFromBlock" must be a positive integer/);
+    });
+
+    it("throws when logsFromBlock is a non-integer (1.5)", () => {
+      const path = writeConfig("lfb-float.json", withLogsFromBlock(1.5));
+      expect(() => loadConfig(path)).toThrow(/"logsFromBlock" must be a positive integer/);
+    });
+
+    it("throws when logsFromBlock is a string", () => {
+      const path = writeConfig("lfb-string.json", withLogsFromBlock("1000000"));
+      expect(() => loadConfig(path)).toThrow(/"logsFromBlock" must be a positive integer/);
+    });
+
+    it("does NOT throw when logsFromBlock is null (treated as omitted)", () => {
+      const path = writeConfig("lfb-null.json", withLogsFromBlock(null));
+      const cfg = loadConfig(path);
+      expect(cfg.logsFromBlock).toBeNull();
+    });
+
+    it("does NOT throw when logsFromBlock is omitted entirely", () => {
+      const path = writeConfig("lfb-omitted.json", validConfigJson());
+      const cfg = loadConfig(path);
+      expect(cfg.logsFromBlock).toBeUndefined();
+    });
+
+    it("loads a valid positive integer and preserves it (2592000)", () => {
+      const path = writeConfig("lfb-valid.json", withLogsFromBlock(2592000));
+      const cfg = loadConfig(path);
+      expect(cfg.logsFromBlock).toBe(2592000);
+    });
+  });
 });
 
 describe("resolveConfigPath — env override", () => {

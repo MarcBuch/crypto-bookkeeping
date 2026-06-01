@@ -1,15 +1,17 @@
-import { getPnLView, NotFoundError, RpcError } from "@lp-tracker/core";
+import { listCachedPnLViews, getPositionsCacheSyncedAt } from "@lp-tracker/core";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 
 import { isNumericString } from "../utils/validation.js";
 
 export async function pnlRoutes(fastify: FastifyInstance): Promise<void> {
+  // GET /pnl — read from cache (no live RPC)
   fastify.get("/pnl", async (_request: FastifyRequest, _reply: FastifyReply) => {
-    const config = fastify.lpConfig;
-    const positions = await getPnLView(config);
-    return { positions };
+    const positions = listCachedPnLViews();
+    const syncedAt = getPositionsCacheSyncedAt();
+    return { positions, syncedAt };
   });
 
+  // GET /positions/:tokenId/pnl — filter from cache
   fastify.get<{ Params: { tokenId: string } }>(
     "/positions/:tokenId/pnl",
     async (request: FastifyRequest<{ Params: { tokenId: string } }>, reply: FastifyReply) => {
@@ -19,21 +21,14 @@ export async function pnlRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
-      const config = fastify.lpConfig;
+      const positions = listCachedPnLViews();
+      const position = positions.find((p) => (p as { tokenId: string }).tokenId === tokenId);
 
-      try {
-        const positions = await getPnLView(config, tokenId);
-        const position = positions[0];
-        return { position };
-      } catch (err) {
-        if (err instanceof NotFoundError) {
-          return reply.status(404).send({ error: "Position not found", tokenId });
-        }
-        if (err instanceof RpcError && err.code === -32005) {
-          return reply.status(503).send({ error: "RPC rate limited, try again later" });
-        }
-        throw err;
+      if (!position) {
+        return reply.status(404).send({ error: "Position not found", tokenId });
       }
+
+      return { position };
     },
   );
 }

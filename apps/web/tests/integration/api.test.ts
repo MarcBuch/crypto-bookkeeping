@@ -136,7 +136,7 @@ describe("API client", () => {
   it("returns an empty positions list as valid data", async () => {
     mockFetch(() => jsonResponse({ positions: [] }));
 
-    await expect(getPositions()).resolves.toEqual([]);
+    await expect(getPositions()).resolves.toEqual({ positions: [], syncedAt: null });
   });
 
   it("throws API errors from non-2xx JSON responses", async () => {
@@ -180,7 +180,7 @@ describe("API client", () => {
       return jsonResponse({ positions: [pnl] });
     });
 
-    const dashboardPositions = await getDashboardPositions();
+    const { positions: dashboardPositions } = await getDashboardPositions();
     expect(dashboardPositions).toEqual([{ ...position, pnl }]);
     expect(dashboardPositions[0]?.pnl?.feesValueUsd).toBe(0.05);
     expect(dashboardPositions[0]?.pnl?.usdPriceSource).toBe("coingecko");
@@ -195,7 +195,7 @@ describe("API client", () => {
       return jsonResponse({ positions: [pnl] });
     });
 
-    const dashboardPositions = await getDashboardPositions();
+    const { positions: dashboardPositions } = await getDashboardPositions();
 
     expect(dashboardPositions[0]?.pnl).toMatchObject({
       feesCollected0Usd: 0.03,
@@ -226,7 +226,7 @@ describe("API client", () => {
       return jsonResponse({ positions: [nullUsdPnl] });
     });
 
-    const dashboardPositions = await getDashboardPositions();
+    const { positions: dashboardPositions } = await getDashboardPositions();
 
     expect(dashboardPositions[0]?.pnl).toMatchObject({
       feesCollected0Usd: null,
@@ -257,7 +257,7 @@ describe("API client", () => {
       return jsonResponse({ positions: [legacyPnl] });
     });
 
-    const dashboardPositions = await getDashboardPositions();
+    const { positions: dashboardPositions } = await getDashboardPositions();
 
     expect(dashboardPositions).toEqual([{ ...position, pnl: legacyPnl }]);
     expect(dashboardPositions[0]?.pnl?.feesValueUsd).toBeUndefined();
@@ -273,7 +273,7 @@ describe("API client", () => {
       return jsonResponse({ positions: [] });
     });
 
-    await expect(getDashboardPositions()).resolves.toEqual([{ ...position, pnl: undefined }]);
+    await expect(getDashboardPositions()).resolves.toMatchObject({ positions: [{ ...position, pnl: undefined }] });
   });
 
   it("fetches tax transactions with pagination and label filters", async () => {

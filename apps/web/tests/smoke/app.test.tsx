@@ -30,7 +30,7 @@ describe("app smoke", () => {
 
   it("renders the dashboard shell from cached app data", () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(queryKeys.dashboardPositions, []);
+    queryClient.setQueryData(queryKeys.dashboardPositions, { positions: [], syncedAt: null });
 
     const html = renderAppWithQueryClient(queryClient);
 

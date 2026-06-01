@@ -228,34 +228,61 @@ async function readErrorMessage(response: Response): Promise<string> {
   return `API request failed with status ${response.status}`;
 }
 
-export async function getPositions(): Promise<PositionView[]> {
-  const data = await fetchJson<{ positions?: PositionView[] }>("/positions");
+export type SyncStatus = {
+  status: "idle" | "running" | "completed" | "failed";
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  positionCount: number | null;
+};
+
+export async function getPositions(): Promise<{ positions: PositionView[]; syncedAt: string | null }> {
+  const data = await fetchJson<{ positions?: PositionView[]; syncedAt?: string | null }>("/positions");
 
   if (!Array.isArray(data.positions)) {
     throw new ApiError("API response did not include positions.");
   }
 
-  return data.positions;
+  return { positions: data.positions, syncedAt: data.syncedAt ?? null };
 }
 
-export async function getPnL(): Promise<PnLView[]> {
-  const data = await fetchJson<{ positions?: PnLView[] }>("/pnl");
+export async function getPnL(): Promise<{ positions: PnLView[]; syncedAt: string | null }> {
+  const data = await fetchJson<{ positions?: PnLView[]; syncedAt?: string | null }>("/pnl");
 
   if (!Array.isArray(data.positions)) {
     throw new ApiError("API response did not include P&L positions.");
   }
 
-  return data.positions;
+  return { positions: data.positions, syncedAt: data.syncedAt ?? null };
 }
 
-export async function getDashboardPositions(): Promise<DashboardPosition[]> {
-  const [positions, pnlPositions] = await Promise.all([getPositions(), getPnL()]);
+export async function syncPositions(): Promise<{ message: string }> {
+  const data = await fetchJson<{ message: string }>("/positions/sync", { method: "POST" });
+  return data;
+}
+
+export async function getSyncStatus(): Promise<SyncStatus> {
+  const data = await fetchJson<SyncStatus>("/positions/sync/status");
+  return data;
+}
+
+export async function getDashboardPositions(): Promise<{
+  positions: DashboardPosition[];
+  syncedAt: string | null;
+}> {
+  const [{ positions, syncedAt }, { positions: pnlPositions }] = await Promise.all([
+    getPositions(),
+    getPnL(),
+  ]);
   const pnlByTokenId = new Map(pnlPositions.map((pnl) => [pnl.tokenId, pnl]));
 
-  return positions.map((position) => ({
-    ...position,
-    pnl: pnlByTokenId.get(position.tokenId),
-  }));
+  return {
+    positions: positions.map((position) => ({
+      ...position,
+      pnl: pnlByTokenId.get(position.tokenId),
+    })),
+    syncedAt,
+  };
 }
 
 export async function getTaxTransactions(

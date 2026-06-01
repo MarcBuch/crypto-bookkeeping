@@ -110,7 +110,8 @@ const fakeILView = {
 };
 
 // --- Mutable mock function references ---
-let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
+let mockListCachedPnLViews: (...args: unknown[]) => unknown = () => [];
+let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
 let mockGetILView: (...args: unknown[]) => unknown = async () => [];
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
@@ -118,7 +119,11 @@ mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
-  getPnLView: (...args: unknown[]) => mockGetPnLView(...args),
+  listCachedPositionViews: () => [],
+  listCachedPnLViews: (...args: unknown[]) => mockListCachedPnLViews(...args),
+  getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
+  syncLpData: async () => ({ synced: 0 }),
+  getPnLView: async () => [],
   getILView: (...args: unknown[]) => mockGetILView(...args),
   getHistoryView: async () => [],
   listTaxTransactions: () => [],
@@ -143,7 +148,7 @@ beforeAll(async () => {
 // ---------------------------------------------------------------------------
 describe("GET /pnl", () => {
   it("returns 200 with positions array", async () => {
-    mockGetPnLView = async () => [fakePnLView];
+    mockListCachedPnLViews = () => [fakePnLView];
 
     const res = await server.inject({ method: "GET", url: "/pnl" });
     expect(res.statusCode).toBe(200);
@@ -161,13 +166,32 @@ describe("GET /pnl", () => {
   });
 
   it("preserves nullable USD fields as null", async () => {
-    mockGetPnLView = async () => [fakePnLViewWithNullUsd];
+    mockListCachedPnLViews = () => [fakePnLViewWithNullUsd];
 
     const res = await server.inject({ method: "GET", url: "/pnl" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.positions).toHaveLength(1);
     expect(body.positions[0]).toMatchObject(nullableUsdFields);
+  });
+
+  it("includes syncedAt field in response", async () => {
+    mockListCachedPnLViews = () => [];
+
+    const res = await server.inject({ method: "GET", url: "/pnl" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveProperty("syncedAt");
+  });
+
+  it("returns 200 with empty positions and null syncedAt when cache is empty", async () => {
+    mockListCachedPnLViews = () => [];
+    mockGetPositionsCacheSyncedAt = () => null;
+
+    const res = await server.inject({ method: "GET", url: "/pnl" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.positions).toEqual([]);
+    expect(body.syncedAt).toBeNull();
   });
 });
 
@@ -181,37 +205,24 @@ describe("GET /positions/:tokenId/pnl", () => {
     expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
   });
 
-  it("returns 404 when service throws NotFoundError", async () => {
-    mockGetPnLView = async () => {
-      throw new MockNotFoundError("Position #999 not found.");
-    };
+  it("returns 404 when tokenId is not in cache", async () => {
+    mockListCachedPnLViews = () => [];
 
     const res = await server.inject({ method: "GET", url: "/positions/999/pnl" });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ error: "Position not found", tokenId: "999" });
   });
 
-  it("returns 503 when service throws RpcError with code -32005", async () => {
-    mockGetPnLView = async () => {
-      throw new MockRpcError("Rate limited", -32005);
-    };
+  it("returns 404 when cache has other positions but not the requested one", async () => {
+    mockListCachedPnLViews = () => [fakePnLView]; // has tokenId "123", not "456"
 
-    const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
-    expect(res.statusCode).toBe(503);
-    expect(res.json()).toMatchObject({ error: "RPC rate limited, try again later" });
+    const res = await server.inject({ method: "GET", url: "/positions/456/pnl" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: "Position not found", tokenId: "456" });
   });
 
-  it("returns 500 when service throws generic Error", async () => {
-    mockGetPnLView = async () => {
-      throw new Error("Unexpected failure");
-    };
-
-    const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
-    expect(res.statusCode).toBe(500);
-  });
-
-  it("returns 200 with PnL result when service succeeds", async () => {
-    mockGetPnLView = async () => [fakePnLView];
+  it("returns 200 with PnL result when found in cache", async () => {
+    mockListCachedPnLViews = () => [fakePnLView];
 
     const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
     expect(res.statusCode).toBe(200);
@@ -230,7 +241,7 @@ describe("GET /positions/:tokenId/pnl", () => {
   });
 
   it("preserves nullable USD fields as null without returning a route-level 500", async () => {
-    mockGetPnLView = async () => [fakePnLViewWithNullUsd];
+    mockListCachedPnLViews = () => [fakePnLViewWithNullUsd];
 
     const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
     expect(res.statusCode).toBe(200);

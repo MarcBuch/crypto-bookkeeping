@@ -1,8 +1,11 @@
 import type { DashboardPosition } from "./api";
-import { useDashboardPositions } from "./hooks/useDashboardPositions";
+import { useDashboardPositions, useSyncPositions } from "./hooks/useDashboardPositions";
 
 export function App() {
-  const { data: positions, error, isLoading, isFetching } = useDashboardPositions();
+  const { data, error, isLoading, isFetching } = useDashboardPositions();
+  const { trigger: syncPositions, isPolling: isSyncing, syncStatus, error: syncError } = useSyncPositions();
+  const positions = data?.positions;
+  const syncedAt = data?.syncedAt ?? null;
 
   return (
     <main className="min-h-screen bg-white text-neutral-950">
@@ -15,6 +18,14 @@ export function App() {
                 <a className="transition hover:text-neutral-950" href="/tax">
                   Tax Ledger
                 </a>
+                <span className="h-3 w-px bg-neutral-300" />
+                <button
+                  onClick={() => syncPositions()}
+                  disabled={isSyncing}
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-700 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-50"
+                >
+                  {isSyncing ? "Syncing…" : "Sync"}
+                </button>
                 <span className="h-3 w-px bg-neutral-300" />
                 <span className="h-2 w-2 rounded-full bg-neutral-950" />
                 {isFetching && !isLoading ? "Reconciling On-Chain Data" : "Live Execution View"}
@@ -49,6 +60,30 @@ export function App() {
 
         {isLoading ? <LoadingState /> : null}
         {error ? <ErrorState error={error} /> : null}
+        {isSyncing ? (
+          <div className="rounded-3xl border border-neutral-200 bg-white px-5 py-3 shadow-sm">
+            <div className="flex items-center gap-3 text-sm font-medium text-neutral-700">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-neutral-950" />
+              Sync in progress…
+            </div>
+          </div>
+        ) : null}
+        {!isSyncing && syncStatus?.status === "completed" ? (
+          <div className="rounded-3xl border border-neutral-200 bg-white px-5 py-3 text-sm font-medium text-neutral-600 shadow-sm">
+            Sync complete
+          </div>
+        ) : null}
+        {syncError ? (
+          <div className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-medium text-rose-700">
+            Sync failed: {errorMessage(syncError)}
+          </div>
+        ) : null}
+        {!isLoading && !error && syncedAt !== undefined ? (
+          <p className="text-xs font-semibold text-neutral-400">
+            Last synced:{" "}
+            {syncedAt ? new Date(syncedAt).toLocaleString() : "Never synced"}
+          </p>
+        ) : null}
         {!isLoading && !error && positions ? <Dashboard positions={positions} /> : null}
       </section>
     </main>

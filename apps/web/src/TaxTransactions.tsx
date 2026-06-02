@@ -1725,9 +1725,7 @@ export function SyncStatus({
   }
 
   return (
-    <p className="mt-3 text-xs font-semibold text-neutral-500">
-      Press to fetch latest wallet activity.
-    </p>
+    null
   );
 }
 

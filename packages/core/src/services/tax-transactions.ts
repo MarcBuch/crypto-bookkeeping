@@ -159,10 +159,8 @@ export async function enrichTaxTransactionsEurValues(
         continue;
       }
 
-      const cost_eur =
-        row.asset_out && row.qty_out ? String(Number(row.qty_out) * price) : null;
-      const proceeds_eur =
-        row.asset_in && row.qty_in ? String(Number(row.qty_in) * price) : null;
+      const cost_eur = row.asset_out && row.qty_out ? String(Number(row.qty_out) * price) : null;
+      const proceeds_eur = row.asset_in && row.qty_in ? String(Number(row.qty_in) * price) : null;
 
       let gain_eur: string | null;
       if (proceeds_eur !== null && cost_eur !== null) {
@@ -217,10 +215,8 @@ async function enrichTaxTransactionsWithEurValues(
     const incomingPrice = incomingKey !== null ? (priceMap.get(incomingKey) ?? null) : null;
     const outgoingPrice = outgoingKey !== null ? (priceMap.get(outgoingKey) ?? null) : null;
 
-    const incomingQty =
-      row.incoming_quantity !== null ? Number(row.incoming_quantity) : null;
-    const outgoingQty =
-      row.outgoing_quantity !== null ? Number(row.outgoing_quantity) : null;
+    const incomingQty = row.incoming_quantity !== null ? Number(row.incoming_quantity) : null;
+    const outgoingQty = row.outgoing_quantity !== null ? Number(row.outgoing_quantity) : null;
 
     const proceedsValue =
       incomingPrice !== null && incomingQty !== null && Number.isFinite(incomingQty)
@@ -237,9 +233,7 @@ async function enrichTaxTransactionsWithEurValues(
     //   trade with both sides: gain = proceeds - cost (realised P&L)
     // null only when neither side has a EUR price (no data at all).
     const gainValue =
-      proceedsValue !== null || costValue !== null
-        ? (proceedsValue ?? 0) - (costValue ?? 0)
-        : null;
+      proceedsValue !== null || costValue !== null ? (proceedsValue ?? 0) - (costValue ?? 0) : null;
 
     return {
       ...row,

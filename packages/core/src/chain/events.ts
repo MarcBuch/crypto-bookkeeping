@@ -67,6 +67,7 @@ export async function findOpenEvent(
   knownOpenTx?: string,
   fromBlock?: bigint,
   windowBlocks?: bigint,
+  latestBlock?: bigint,
 ): Promise<PositionOpenEvent | null> {
   try {
     // Fast path: use known transaction hash
@@ -81,8 +82,8 @@ export async function findOpenEvent(
     }
 
     // Slow path: paginated getLogs scan
-    console.log(`    Scanning logs for open event of token #${tokenId}...`);
-    const latestBlock = await withRetry(() => client.getBlockNumber());
+    console.log(`    Scanning logs for close event of token #${tokenId}...`);
+    const resolvedLatestBlock = latestBlock ?? (await withRetry(() => client.getBlockNumber()));
 
     let startBlock: bigint;
     if (fromBlock !== undefined) {
@@ -91,11 +92,14 @@ export async function findOpenEvent(
     } else {
       const window = windowBlocks ?? DEFAULT_LOGS_WINDOW_BLOCKS;
       // Clamp to >= 1n (block 0 is invalid on HyperEVM)
-      startBlock = latestBlock > window ? latestBlock - window : 1n;
+      startBlock = resolvedLatestBlock > window ? resolvedLatestBlock - window : 1n;
     }
 
-    for (let lo = startBlock; lo <= latestBlock; lo += LOGS_CHUNK_SIZE) {
-      const hi = lo + LOGS_CHUNK_SIZE - 1n < latestBlock ? lo + LOGS_CHUNK_SIZE - 1n : latestBlock;
+    for (let lo = startBlock; lo <= resolvedLatestBlock; lo += LOGS_CHUNK_SIZE) {
+      const hi =
+        lo + LOGS_CHUNK_SIZE - 1n < resolvedLatestBlock
+          ? lo + LOGS_CHUNK_SIZE - 1n
+          : resolvedLatestBlock;
 
       const logs = await withRetry(() =>
         client.getLogs({
@@ -146,6 +150,7 @@ export async function findCloseEvent(
   knownCloseTx?: string,
   fromBlock?: bigint,
   windowBlocks?: bigint,
+  latestBlock?: bigint,
 ): Promise<PositionCloseEvent | null> {
   try {
     // Fast path: use known transaction hash
@@ -160,8 +165,8 @@ export async function findCloseEvent(
     }
 
     // Slow path: paginated getLogs scan
-    console.log(`    Scanning logs for close event of token #${tokenId}...`);
-    const latestBlock = await withRetry(() => client.getBlockNumber());
+    console.log(`    Scanning logs for open event of token #${tokenId}...`);
+    const resolvedLatestBlock = latestBlock ?? (await withRetry(() => client.getBlockNumber()));
 
     let startBlock: bigint;
     if (fromBlock !== undefined) {
@@ -170,11 +175,14 @@ export async function findCloseEvent(
     } else {
       const window = windowBlocks ?? DEFAULT_LOGS_WINDOW_BLOCKS;
       // Clamp to >= 1n (block 0 is invalid on HyperEVM)
-      startBlock = latestBlock > window ? latestBlock - window : 1n;
+      startBlock = resolvedLatestBlock > window ? resolvedLatestBlock - window : 1n;
     }
 
-    for (let lo = startBlock; lo <= latestBlock; lo += LOGS_CHUNK_SIZE) {
-      const hi = lo + LOGS_CHUNK_SIZE - 1n < latestBlock ? lo + LOGS_CHUNK_SIZE - 1n : latestBlock;
+    for (let lo = startBlock; lo <= resolvedLatestBlock; lo += LOGS_CHUNK_SIZE) {
+      const hi =
+        lo + LOGS_CHUNK_SIZE - 1n < resolvedLatestBlock
+          ? lo + LOGS_CHUNK_SIZE - 1n
+          : resolvedLatestBlock;
 
       // Fetch DecreaseLiquidity and Collect logs for this tokenId in one pass each
       const [decreaseLogs, collectLogs] = await Promise.all([

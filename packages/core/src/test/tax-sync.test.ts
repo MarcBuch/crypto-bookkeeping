@@ -13,7 +13,10 @@ import {
   upsertSyncedTaxTransaction,
   upsertTaxSyncState,
 } from "../db/store.js";
-import { enrichTaxTransactionsEurValues, syncTaxTransactions } from "../services/tax-transactions.js";
+import {
+  enrichTaxTransactionsEurValues,
+  syncTaxTransactions,
+} from "../services/tax-transactions.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-tax-sync-tests";
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
@@ -512,13 +515,21 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       if (String(url).includes("coingecko.com")) {
         cgCallCount++;
       }
-      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), { status: 200 });
+      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
+        status: 200,
+      });
     }) as unknown as typeof globalThis.fetch;
 
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xnullts1", timeStamp: "", from: "0xsender", to: WALLET, value: "1000000000000000000" }),
+          tx({
+            hash: "0xnullts1",
+            timeStamp: "",
+            from: "0xsender",
+            to: WALLET,
+            value: "1000000000000000000",
+          }),
         ]);
       }
       return envelope([]);
@@ -540,7 +551,9 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       if (String(url).includes("coingecko.com")) {
         cgCallCount++;
       }
-      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), { status: 200 });
+      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
+        status: 200,
+      });
     }) as unknown as typeof globalThis.fetch;
 
     // txlistinternal where neither from nor to matches the wallet
@@ -580,7 +593,9 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), { status: 200 });
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), {
+          status: 200,
+        });
       }
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
@@ -588,7 +603,13 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xincoming1", timeStamp: "1770002000", from: "0xsender", to: WALLET, value: "2000000000000000000" }),
+          tx({
+            hash: "0xincoming1",
+            timeStamp: "1770002000",
+            from: "0xsender",
+            to: WALLET,
+            value: "2000000000000000000",
+          }),
         ]);
       }
       return envelope([]);
@@ -609,7 +630,9 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), { status: 200 });
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), {
+          status: 200,
+        });
       }
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
@@ -617,7 +640,13 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xoutgoing1", timeStamp: "1770003000", from: WALLET, to: "0xrecipient", value: "3000000000000000000" }),
+          tx({
+            hash: "0xoutgoing1",
+            timeStamp: "1770003000",
+            from: WALLET,
+            to: "0xrecipient",
+            value: "3000000000000000000",
+          }),
         ]);
       }
       return envelope([]);
@@ -640,7 +669,9 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       if (String(url).includes("coingecko.com")) {
         cgCallCount++;
       }
-      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), { status: 200 });
+      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
+        status: 200,
+      });
     }) as unknown as typeof globalThis.fetch;
 
     const fetcher = makeFetcher((params) => {
@@ -675,7 +706,9 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("usd-coin")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 0.92 } } }), { status: 200 });
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 0.92 } } }), {
+          status: 200,
+        });
       }
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
@@ -740,14 +773,23 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xresil1", timeStamp: "1770010000", from: "0xsender", to: WALLET, value: "1000000000000000000" }),
+          tx({
+            hash: "0xresil1",
+            timeStamp: "1770010000",
+            from: "0xsender",
+            to: WALLET,
+            value: "1000000000000000000",
+          }),
         ]);
       }
       return envelope([]);
     });
 
     await expect(
-      syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-1" }), { fetcher, source: "resil1" }),
+      syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-1" }), {
+        fetcher,
+        source: "resil1",
+      }),
     ).resolves.toBeDefined();
 
     const row = listTaxTransactions().find((r) => r.hash === "0xresil1");
@@ -763,7 +805,10 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       if (urlStr.includes("coingecko.com")) {
         if (urlStr.includes("resilience-hype")) throw new Error("network down");
         if (urlStr.includes("resilience-usdc")) {
-          return { ok: true, json: async () => ({ market_data: { current_price: { eur: 0.9 } } }) } as Response;
+          return {
+            ok: true,
+            json: async () => ({ market_data: { current_price: { eur: 0.9 } } }),
+          } as Response;
         }
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
@@ -772,7 +817,13 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xresil2hype", timeStamp: "1770011000", from: "0xsender", to: WALLET, value: "1000000000000000000" }),
+          tx({
+            hash: "0xresil2hype",
+            timeStamp: "1770011000",
+            from: "0xsender",
+            to: WALLET,
+            value: "1000000000000000000",
+          }),
         ]);
       }
       if (params.get("action") === "tokentx") {
@@ -813,7 +864,10 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com")) {
-        return { ok: true, json: async () => ({ market_data: { current_price: { eur: 10.0 } } }) } as Response;
+        return {
+          ok: true,
+          json: async () => ({ market_data: { current_price: { eur: 10.0 } } }),
+        } as Response;
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
@@ -821,13 +875,22 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     const fetcher1 = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xresil3", timeStamp: "1770012000", from: "0xsender", to: WALLET, value: "252451290000000000" }),
+          tx({
+            hash: "0xresil3",
+            timeStamp: "1770012000",
+            from: "0xsender",
+            to: WALLET,
+            value: "252451290000000000",
+          }),
         ]);
       }
       return envelope([]);
     });
 
-    await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), { fetcher: fetcher1, source: "resil3" });
+    await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), {
+      fetcher: fetcher1,
+      source: "resil3",
+    });
 
     const rowAfterFirst = listTaxTransactions().find((r) => r.hash === "0xresil3");
     expect(rowAfterFirst).toBeDefined();
@@ -838,7 +901,10 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com")) {
-        return { ok: true, json: async () => ({ market_data: { current_price: { eur: 99.0 } } }) } as Response;
+        return {
+          ok: true,
+          json: async () => ({ market_data: { current_price: { eur: 99.0 } } }),
+        } as Response;
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
@@ -846,13 +912,22 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     const fetcher2 = makeFetcher((params) => {
       if (params.get("action") === "txlist") {
         return envelope([
-          tx({ hash: "0xresil3", timeStamp: "1770012000", from: "0xsender", to: WALLET, value: "999999999999999999" }),
+          tx({
+            hash: "0xresil3",
+            timeStamp: "1770012000",
+            from: "0xsender",
+            to: WALLET,
+            value: "999999999999999999",
+          }),
         ]);
       }
       return envelope([]);
     });
 
-    await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), { fetcher: fetcher2, source: "resil3" });
+    await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), {
+      fetcher: fetcher2,
+      source: "resil3",
+    });
 
     const rowAfterSecond = listTaxTransactions().find((r) => r.hash === "0xresil3");
     expect(rowAfterSecond).toBeDefined();
@@ -876,11 +951,56 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "tokentx") {
         return envelope([
-          tokenTx({ hash: "0xdedup1", logIndex: "1", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
-          tokenTx({ hash: "0xdedup2", logIndex: "2", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
-          tokenTx({ hash: "0xdedup3", logIndex: "3", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
-          tokenTx({ hash: "0xdedup4", logIndex: "4", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
-          tokenTx({ hash: "0xdedup5", logIndex: "5", from: "0xsender", to: WALLET, tokenSymbol: "DEDUP_TOK", tokenDecimal: "18", value: "1000000000000000000", timeStamp: "1770100000" }),
+          tokenTx({
+            hash: "0xdedup1",
+            logIndex: "1",
+            from: "0xsender",
+            to: WALLET,
+            tokenSymbol: "DEDUP_TOK",
+            tokenDecimal: "18",
+            value: "1000000000000000000",
+            timeStamp: "1770100000",
+          }),
+          tokenTx({
+            hash: "0xdedup2",
+            logIndex: "2",
+            from: "0xsender",
+            to: WALLET,
+            tokenSymbol: "DEDUP_TOK",
+            tokenDecimal: "18",
+            value: "1000000000000000000",
+            timeStamp: "1770100000",
+          }),
+          tokenTx({
+            hash: "0xdedup3",
+            logIndex: "3",
+            from: "0xsender",
+            to: WALLET,
+            tokenSymbol: "DEDUP_TOK",
+            tokenDecimal: "18",
+            value: "1000000000000000000",
+            timeStamp: "1770100000",
+          }),
+          tokenTx({
+            hash: "0xdedup4",
+            logIndex: "4",
+            from: "0xsender",
+            to: WALLET,
+            tokenSymbol: "DEDUP_TOK",
+            tokenDecimal: "18",
+            value: "1000000000000000000",
+            timeStamp: "1770100000",
+          }),
+          tokenTx({
+            hash: "0xdedup5",
+            logIndex: "5",
+            from: "0xsender",
+            to: WALLET,
+            tokenSymbol: "DEDUP_TOK",
+            tokenDecimal: "18",
+            value: "1000000000000000000",
+            timeStamp: "1770100000",
+          }),
         ]);
       }
       return envelope([]);
@@ -905,9 +1025,13 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
 });
 
 describe("DB EUR update functions", () => {
-  const TMP_EUR = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-eur-tests";
+  const TMP_EUR =
+    "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-eur-tests";
 
-  function makeRow(id: string, overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {}): import("../db/store.js").SyncedTaxTransaction {
+  function makeRow(
+    id: string,
+    overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {},
+  ): import("../db/store.js").SyncedTaxTransaction {
     return {
       id,
       hash: id,
@@ -1221,10 +1345,9 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
-        return new Response(
-          JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }),
-          { status: 200 },
-        );
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
+          status: 200,
+        });
       }
       return new Response("{}", { status: 404 });
     }) as unknown as typeof globalThis.fetch;
@@ -1257,10 +1380,9 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
-        return new Response(
-          JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }),
-          { status: 200 },
-        );
+        return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
+          status: 200,
+        });
       }
       if (urlStr.includes("coingecko.com")) {
         return new Response("{}", { status: 404 });

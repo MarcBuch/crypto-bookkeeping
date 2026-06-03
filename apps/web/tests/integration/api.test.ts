@@ -273,7 +273,9 @@ describe("API client", () => {
       return jsonResponse({ positions: [] });
     });
 
-    await expect(getDashboardPositions()).resolves.toMatchObject({ positions: [{ ...position, pnl: undefined }] });
+    await expect(getDashboardPositions()).resolves.toMatchObject({
+      positions: [{ ...position, pnl: undefined }],
+    });
   });
 
   it("fetches tax transactions with pagination and label filters", async () => {

@@ -1724,9 +1724,7 @@ export function SyncStatus({
     );
   }
 
-  return (
-    null
-  );
+  return null;
 }
 
 export function TaxLoadingState() {

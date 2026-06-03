@@ -26,6 +26,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+
 import { QueryClient } from "@tanstack/react-query";
 
 import * as api from "../../src/api";
@@ -208,10 +209,7 @@ describe("useSyncPositions polling logic", () => {
   // -------------------------------------------------------------------------
   // 3. Unmount stops polling — SKIPPED (needs jsdom + @testing-library/react)
   // -------------------------------------------------------------------------
-  it.todo(
-    "stops polling on unmount (requires jsdom / @testing-library/react — not available in this project)",
-    () => {},
-  );
+  it.todo("stops polling on unmount (requires jsdom / @testing-library/react — not available in this project)", () => {});
 
   // -------------------------------------------------------------------------
   // 4a. Cache IS invalidated on completed
@@ -315,7 +313,7 @@ describe("useSyncPositions polling logic", () => {
     const syncMock = mock(async () => {
       throw new Error("RPC rate limited");
     });
-    const statusMock = mock(async () => ({ status: "idle" } as api.SyncStatus));
+    const statusMock = mock(async () => ({ status: "idle" }) as api.SyncStatus);
 
     const poller = buildPoller({
       queryClient,

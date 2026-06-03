@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+
 import { withRetry } from "../chain/rpc.js";
 import { RpcError } from "../services/errors.js";
 

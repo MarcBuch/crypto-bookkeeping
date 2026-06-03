@@ -582,17 +582,17 @@ export interface StoredLpSyncState {
 
 export function listCachedPositionViews(): Record<string, unknown>[] {
   const db = getDb();
-  const rows = db
-    .query("SELECT data FROM positions_view_cache ORDER BY token_id")
-    .all() as { data: string }[];
+  const rows = db.query("SELECT data FROM positions_view_cache ORDER BY token_id").all() as {
+    data: string;
+  }[];
   return rows.map((r) => JSON.parse(r.data) as Record<string, unknown>);
 }
 
 export function listCachedPnLViews(): Record<string, unknown>[] {
   const db = getDb();
-  const rows = db
-    .query("SELECT data FROM pnl_view_cache ORDER BY token_id")
-    .all() as { data: string }[];
+  const rows = db.query("SELECT data FROM pnl_view_cache ORDER BY token_id").all() as {
+    data: string;
+  }[];
   return rows.map((r) => JSON.parse(r.data) as Record<string, unknown>);
 }
 
@@ -613,27 +613,26 @@ export function replaceCachedPositionViews(
     db.run("DELETE FROM positions_view_cache");
     for (const row of rows) {
       const tokenId = String(row.tokenId);
-      db.run(
-        "INSERT INTO positions_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)",
-        [tokenId, JSON.stringify(row), syncedAt],
-      );
+      db.run("INSERT INTO positions_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
+        tokenId,
+        JSON.stringify(row),
+        syncedAt,
+      ]);
     }
   })();
 }
 
-export function replaceCachedPnLViews(
-  rows: Record<string, unknown>[],
-  syncedAt: string,
-): void {
+export function replaceCachedPnLViews(rows: Record<string, unknown>[], syncedAt: string): void {
   const db = getDb();
   db.transaction(() => {
     db.run("DELETE FROM pnl_view_cache");
     for (const row of rows) {
       const tokenId = String(row.tokenId);
-      db.run(
-        "INSERT INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)",
-        [tokenId, JSON.stringify(row), syncedAt],
-      );
+      db.run("INSERT INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
+        tokenId,
+        JSON.stringify(row),
+        syncedAt,
+      ]);
     }
   })();
 }
@@ -647,17 +646,19 @@ export function replaceLpCaches(
   db.transaction(() => {
     db.run("DELETE FROM positions_view_cache");
     for (const row of positionRows) {
-      db.run(
-        "INSERT INTO positions_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)",
-        [String(row.tokenId), JSON.stringify(row), syncedAt],
-      );
+      db.run("INSERT INTO positions_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
+        String(row.tokenId),
+        JSON.stringify(row),
+        syncedAt,
+      ]);
     }
     db.run("DELETE FROM pnl_view_cache");
     for (const row of pnlRows) {
-      db.run(
-        "INSERT INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)",
-        [String(row.tokenId), JSON.stringify(row), syncedAt],
-      );
+      db.run("INSERT INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
+        String(row.tokenId),
+        JSON.stringify(row),
+        syncedAt,
+      ]);
     }
   })();
 }

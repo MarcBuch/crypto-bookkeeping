@@ -3,7 +3,12 @@ import { useDashboardPositions, useSyncPositions } from "./hooks/useDashboardPos
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
-  const { trigger: syncPositions, isPolling: isSyncing, syncStatus, error: syncError } = useSyncPositions();
+  const {
+    trigger: syncPositions,
+    isPolling: isSyncing,
+    syncStatus,
+    error: syncError,
+  } = useSyncPositions();
   const positions = data?.positions;
   const syncedAt = data?.syncedAt ?? null;
 
@@ -80,8 +85,7 @@ export function App() {
         ) : null}
         {!isLoading && !error && syncedAt !== undefined ? (
           <p className="text-xs font-semibold text-neutral-400">
-            Last synced:{" "}
-            {syncedAt ? new Date(syncedAt).toLocaleString() : "Never synced"}
+            Last synced: {syncedAt ? new Date(syncedAt).toLocaleString() : "Never synced"}
           </p>
         ) : null}
         {!isLoading && !error && positions ? <Dashboard positions={positions} /> : null}

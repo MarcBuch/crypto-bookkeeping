@@ -236,8 +236,13 @@ export type SyncStatus = {
   positionCount: number | null;
 };
 
-export async function getPositions(): Promise<{ positions: PositionView[]; syncedAt: string | null }> {
-  const data = await fetchJson<{ positions?: PositionView[]; syncedAt?: string | null }>("/positions");
+export async function getPositions(): Promise<{
+  positions: PositionView[];
+  syncedAt: string | null;
+}> {
+  const data = await fetchJson<{ positions?: PositionView[]; syncedAt?: string | null }>(
+    "/positions",
+  );
 
   if (!Array.isArray(data.positions)) {
     throw new ApiError("API response did not include positions.");

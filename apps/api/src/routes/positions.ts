@@ -36,23 +36,25 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
     };
 
     // Fire and forget — do not await
-    syncLpData(config).then((summary) => {
-      syncState = {
-        status: "completed",
-        startedAt: syncState.startedAt,
-        finishedAt: new Date().toISOString(),
-        error: null,
-        positionCount: summary.positionCount,
-      };
-    }).catch((err: unknown) => {
-      syncState = {
-        status: "failed",
-        startedAt: syncState.startedAt,
-        finishedAt: new Date().toISOString(),
-        error: err instanceof Error ? err.message : String(err),
-        positionCount: null,
-      };
-    });
+    syncLpData(config)
+      .then((summary) => {
+        syncState = {
+          status: "completed",
+          startedAt: syncState.startedAt,
+          finishedAt: new Date().toISOString(),
+          error: null,
+          positionCount: summary.positionCount,
+        };
+      })
+      .catch((err: unknown) => {
+        syncState = {
+          status: "failed",
+          startedAt: syncState.startedAt,
+          finishedAt: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+          positionCount: null,
+        };
+      });
 
     return reply.status(202).send({ message: "Sync started" });
   });

@@ -223,7 +223,10 @@ describe("GET /positions/sync/status", () => {
 
   it("running shape: startedAt is ISO string, finishedAt/error/positionCount are null", async () => {
     let resolveSyncLpData: (v: unknown) => void;
-    mockSyncLpData = () => new Promise((resolve) => { resolveSyncLpData = resolve; });
+    mockSyncLpData = () =>
+      new Promise((resolve) => {
+        resolveSyncLpData = resolve;
+      });
 
     await server.inject({ method: "POST", url: "/positions/sync" });
 
@@ -259,7 +262,10 @@ describe("GET /positions/sync/status", () => {
 
   it("failed shape: startedAt + finishedAt are ISO strings, error is string, positionCount null", async () => {
     let rejectSyncLpData: (err: unknown) => void;
-    mockSyncLpData = () => new Promise((_resolve, reject) => { rejectSyncLpData = reject; });
+    mockSyncLpData = () =>
+      new Promise((_resolve, reject) => {
+        rejectSyncLpData = reject;
+      });
 
     await server.inject({ method: "POST", url: "/positions/sync" });
 
@@ -286,7 +292,10 @@ describe("GET /positions/sync/status", () => {
 describe("POST /positions/sync", () => {
   it("returns 202 with message on success (fire-and-forget)", async () => {
     let resolveSyncLpData: (v: unknown) => void;
-    mockSyncLpData = () => new Promise((resolve) => { resolveSyncLpData = resolve; });
+    mockSyncLpData = () =>
+      new Promise((resolve) => {
+        resolveSyncLpData = resolve;
+      });
 
     const res = await server.inject({ method: "POST", url: "/positions/sync" });
     expect(res.statusCode).toBe(202);
@@ -299,7 +308,10 @@ describe("POST /positions/sync", () => {
   it("returns 409 when sync is already running", async () => {
     // Keep the sync running
     let resolveSyncLpData: (v: unknown) => void;
-    mockSyncLpData = () => new Promise((resolve) => { resolveSyncLpData = resolve; });
+    mockSyncLpData = () =>
+      new Promise((resolve) => {
+        resolveSyncLpData = resolve;
+      });
 
     await server.inject({ method: "POST", url: "/positions/sync" });
     const res = await server.inject({ method: "POST", url: "/positions/sync" });
@@ -312,7 +324,10 @@ describe("POST /positions/sync", () => {
 
   it("captures RpcError(-32005) as failed state with error message", async () => {
     let rejectFn!: (e: unknown) => void;
-    mockSyncLpData = () => new Promise<never>((_, rej) => { rejectFn = rej; });
+    mockSyncLpData = () =>
+      new Promise<never>((_, rej) => {
+        rejectFn = rej;
+      });
 
     await server.inject({ method: "POST", url: "/positions/sync" });
     rejectFn(new MockRpcError("RPC rate limited", -32005));
@@ -328,7 +343,10 @@ describe("POST /positions/sync", () => {
   it("POST after failure resets state and returns 202", async () => {
     // First: cause a failure
     let rejectFn!: (e: unknown) => void;
-    mockSyncLpData = () => new Promise<never>((_, rej) => { rejectFn = rej; });
+    mockSyncLpData = () =>
+      new Promise<never>((_, rej) => {
+        rejectFn = rej;
+      });
 
     const firstRes = await server.inject({ method: "POST", url: "/positions/sync" });
     expect(firstRes.statusCode).toBe(202);
@@ -341,7 +359,10 @@ describe("POST /positions/sync", () => {
 
     // Now: second POST should succeed (not 409)
     let resolveFn!: (v: any) => void;
-    mockSyncLpData = () => new Promise((res) => { resolveFn = res; });
+    mockSyncLpData = () =>
+      new Promise((res) => {
+        resolveFn = res;
+      });
 
     const secondRes = await server.inject({ method: "POST", url: "/positions/sync" });
     expect(secondRes.statusCode).toBe(202);

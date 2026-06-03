@@ -142,33 +142,107 @@ export async function getPnLView(
     let entryLiquidity = pos.liquidity;
 
     const posConfig = config.positions?.[pos.tokenId.toString()];
+    if (!posConfig) {
+      console.warn(
+        `[lp-tracker] Position ${pos.tokenId.toString()} found on-chain but missing from config.positions — consider adding it`,
+      );
+    }
     const storedPos = getPosition(pos.tokenId.toString());
     const hasStoredEntry = storedPos?.entry_amount0 && storedPos.entry_amount0 !== "0";
     const hasStoredLiquidity = storedPos?.entry_liquidity && storedPos.entry_liquidity !== "0";
-    if (hasStoredEntry && (hasStoredLiquidity || isActive)) {
+
+    if (posConfig?.openTx) {
+      // Config fast path: resolve entry amounts from known tx hash
+      const openResult = await findOpenEvent(
+        client,
+        config.contracts.positionManager,
+        pos.tokenId,
+        config.wallet,
+        posConfig.openTx,
+        undefined, // fromBlock — let the window default apply
+        logsWindowBlocks, // windowBlocks from config
+        latestBlock,
+      );
+
+      if (openResult.status === "rpc_error") {
+        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        continue;
+      }
+      if (openResult.status === "found") {
+        const openEvent = openResult.event;
+        entryAmount0 = openEvent.amount0;
+        entryAmount1 = openEvent.amount1;
+        entryLiquidity = openEvent.liquidity;
+
+        // Persist entry data + open_tx if not already stored
+        if (!hasStoredEntry || !storedPos?.open_tx) {
+          const entrySqrtPrice = deriveEntryPriceFromAmounts(
+            entryAmount0,
+            entryAmount1,
+            entryLiquidity,
+            pos.tickLower,
+            pos.tickUpper,
+          );
+          upsertPosition({
+            token_id: pos.tokenId.toString(),
+            token0: pos.token0,
+            token1: pos.token1,
+            token0_symbol: token0Info.symbol,
+            token1_symbol: token1Info.symbol,
+            token0_decimals: token0Info.decimals,
+            token1_decimals: token1Info.decimals,
+            fee: pos.fee,
+            tick_lower: pos.tickLower,
+            tick_upper: pos.tickUpper,
+            entry_sqrt_price_x96: entrySqrtPrice.toString(),
+            entry_block: Number(openEvent.blockNumber),
+            entry_amount0: entryAmount0.toString(),
+            entry_amount1: entryAmount1.toString(),
+            entry_liquidity: entryLiquidity.toString(),
+            open_tx: openEvent.transactionHash,
+          });
+        }
+      } else {
+        // not_found — could not resolve entry from config tx — skip this position
+        continue;
+      }
+    } else if (storedPos?.open_tx) {
+      // DB fast path: open_tx already persisted, entry data is already in the DB
+      entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
+      entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
+      if (hasStoredLiquidity) {
+        entryLiquidity = BigInt(storedPos.entry_liquidity!);
+      }
+    } else if (hasStoredEntry && (hasStoredLiquidity || isActive)) {
       entryAmount0 = BigInt(storedPos!.entry_amount0!);
       entryAmount1 = BigInt(storedPos!.entry_amount1 || "0");
       if (hasStoredLiquidity) {
         entryLiquidity = BigInt(storedPos!.entry_liquidity!);
       }
     } else {
-      const openEvent = await findOpenEvent(
+      // Slow path: scan chain for open event
+      const openResult = await findOpenEvent(
         client,
         config.contracts.positionManager,
         pos.tokenId,
         config.wallet,
-        posConfig?.openTx,
+        undefined,
         undefined, // fromBlock — let the window default apply
         logsWindowBlocks, // windowBlocks from config
         latestBlock,
       );
 
-      if (openEvent) {
+      if (openResult.status === "rpc_error") {
+        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        continue;
+      }
+      if (openResult.status === "found") {
+        const openEvent = openResult.event;
         entryAmount0 = openEvent.amount0;
         entryAmount1 = openEvent.amount1;
         entryLiquidity = openEvent.liquidity;
 
-        // Store for future use
+        // Store entry data + open_tx for future use
         const entrySqrtPrice = deriveEntryPriceFromAmounts(
           entryAmount0,
           entryAmount1,
@@ -192,9 +266,10 @@ export async function getPnLView(
           entry_amount0: entryAmount0.toString(),
           entry_amount1: entryAmount1.toString(),
           entry_liquidity: entryLiquidity.toString(),
+          open_tx: openEvent.transactionHash,
         });
       } else {
-        // Could not find entry — skip this position
+        // not_found — could not find entry — skip this position
         continue;
       }
     }
@@ -254,32 +329,88 @@ export async function getPnLView(
         // Fees calculation may fail — leave as 0
       }
     } else {
-      // Closed position: find the close event
-      const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
-      const closeEvent = await findCloseEvent(
-        client,
-        config.contracts.positionManager,
-        pos.tokenId,
-        config.wallet,
-        posConfig?.closeTx,
-        entryBlock, // explicit fromBlock when known — wins over window
-        logsWindowBlocks, // windowBlocks fallback when entryBlock undefined
-        latestBlock,
-      );
+      // Closed position: use cached exit data if available (m2t5 fast path)
+      const hasCachedExit = storedPos?.close_tx && storedPos.exit_amount0 != null;
 
-      if (closeEvent) {
-        exitAmount0 = closeEvent.amount0;
-        exitAmount1 = closeEvent.amount1;
-        feesCollected0 = closeEvent.collectedFees0;
-        feesCollected1 = closeEvent.collectedFees1;
-
-        // Get pool price at close block for accurate exit price
-        const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
-        if (closePrice) {
-          exitSqrtPriceX96 = closePrice.sqrtPriceX96;
+      if (hasCachedExit) {
+        exitAmount0 = BigInt(storedPos!.exit_amount0!);
+        exitAmount1 = BigInt(storedPos!.exit_amount1 ?? "0");
+        feesCollected0 = BigInt(storedPos!.fees_collected0 ?? "0");
+        feesCollected1 = BigInt(storedPos!.fees_collected1 ?? "0");
+        // Use close_block price if available, otherwise fall back to current price
+        if (storedPos!.close_block) {
+          const closePrice = await getPoolPriceAtBlock(
+            client,
+            poolAddress,
+            BigInt(storedPos!.close_block),
+          );
+          if (closePrice) {
+            exitSqrtPriceX96 = closePrice.sqrtPriceX96;
+          }
         }
+      } else {
+        // Slow path: find the close event on chain
+        const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
+        const closeResult = await findCloseEvent(
+          client,
+          config.contracts.positionManager,
+          pos.tokenId,
+          config.wallet,
+          posConfig?.closeTx,
+          entryBlock, // explicit fromBlock when known — wins over window
+          logsWindowBlocks, // windowBlocks fallback when entryBlock undefined
+          latestBlock,
+        );
+
+        if (closeResult.status === "rpc_error") {
+          console.error(`[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`, closeResult.error);
+          continue;
+        }
+        if (closeResult.status === "found") {
+          const closeEvent = closeResult.event;
+          exitAmount0 = closeEvent.amount0;
+          exitAmount1 = closeEvent.amount1;
+          feesCollected0 = closeEvent.collectedFees0;
+          feesCollected1 = closeEvent.collectedFees1;
+
+          // Get pool price at close block for accurate exit price
+          const closePrice = await getPoolPriceAtBlock(
+            client,
+            poolAddress,
+            closeEvent.blockNumber,
+          );
+          if (closePrice) {
+            exitSqrtPriceX96 = closePrice.sqrtPriceX96;
+          }
+
+          // Persist close data for future fast-path use (m2t4)
+          upsertPosition({
+            token_id: pos.tokenId.toString(),
+            token0: pos.token0,
+            token1: pos.token1,
+            token0_symbol: token0Info.symbol,
+            token1_symbol: token1Info.symbol,
+            token0_decimals: token0Info.decimals,
+            token1_decimals: token1Info.decimals,
+            fee: pos.fee,
+            tick_lower: pos.tickLower,
+            tick_upper: pos.tickUpper,
+            entry_sqrt_price_x96: storedPos?.entry_sqrt_price_x96 ?? null,
+            entry_block: storedPos?.entry_block ?? null,
+            entry_amount0: entryAmount0.toString(),
+            entry_amount1: entryAmount1.toString(),
+            entry_liquidity: entryLiquidity.toString(),
+            open_tx: storedPos?.open_tx ?? null,
+            close_tx: closeEvent.transactionHash,
+            exit_amount0: closeEvent.amount0.toString(),
+            exit_amount1: closeEvent.amount1.toString(),
+            fees_collected0: closeEvent.collectedFees0.toString(),
+            fees_collected1: closeEvent.collectedFees1.toString(),
+            close_block: Number(closeEvent.blockNumber),
+          });
+        }
+        // If no close event found, continue with zeroed amounts and current price
       }
-      // If no close event found, continue with zeroed amounts and current price
     }
 
     // Calculate full P&L

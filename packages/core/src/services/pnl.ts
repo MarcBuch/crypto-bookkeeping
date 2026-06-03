@@ -1,7 +1,8 @@
 import { createClient } from "../chain/client.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
 import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
-import { getAllPositions } from "../chain/positions.js";
+import { getAllPositions, type PositionData } from "../chain/positions.js";
+import { withRetry } from "../chain/rpc.js";
 import type { Config } from "../config.js";
 import { upsertPosition, getPosition } from "../db/store.js";
 import {
@@ -83,10 +84,16 @@ export function calculateUsdFeeIncome(params: {
   return { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource };
 }
 
-export async function getPnLView(config: Config, tokenId?: string): Promise<PnLView[]> {
+export async function getPnLView(
+  config: Config,
+  tokenId?: string,
+  rawPositions?: PositionData[],
+): Promise<PnLView[]> {
   const client = createClient(config);
 
-  const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
+  const positions =
+    rawPositions ??
+    (await getAllPositions(client, config.contracts.positionManager, config.wallet));
 
   if (positions.length === 0) {
     return [];
@@ -108,6 +115,9 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
     config.logsFromBlock !== undefined && config.logsFromBlock !== null
       ? BigInt(config.logsFromBlock)
       : undefined;
+
+  // Fetch latestBlock once to share across all position lookups
+  const latestBlock = await withRetry(() => client.getBlockNumber());
 
   for (const pos of filteredPositions) {
     const [token0Info, token1Info] = await Promise.all([
@@ -150,6 +160,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         posConfig?.openTx,
         undefined, // fromBlock — let the window default apply
         logsWindowBlocks, // windowBlocks from config
+        latestBlock,
       );
 
       if (openEvent) {
@@ -253,6 +264,7 @@ export async function getPnLView(config: Config, tokenId?: string): Promise<PnLV
         posConfig?.closeTx,
         entryBlock, // explicit fromBlock when known — wins over window
         logsWindowBlocks, // windowBlocks fallback when entryBlock undefined
+        latestBlock,
       );
 
       if (closeEvent) {

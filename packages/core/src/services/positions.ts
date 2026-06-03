@@ -1,6 +1,6 @@
 import { createClient } from "../chain/client.js";
-import { getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
-import { getAllPositions } from "../chain/positions.js";
+import { getPoolAddress, getSlot0, getTokenInfo } from "../chain/pools.js";
+import { getAllPositions, type PositionData } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import { replaceLpCaches, upsertLpSyncState } from "../db/store.js";
 import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
@@ -24,10 +24,15 @@ export interface PositionView {
   currentAmount1: number;
 }
 
-export async function getPositionsView(config: Config): Promise<PositionView[]> {
+export async function getPositionsView(
+  config: Config,
+  rawPositions?: PositionData[],
+): Promise<PositionView[]> {
   const client = createClient(config);
 
-  const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
+  const positions =
+    rawPositions ??
+    (await getAllPositions(client, config.contracts.positionManager, config.wallet));
 
   if (positions.length === 0) {
     return [];
@@ -49,11 +54,11 @@ export async function getPositionsView(config: Config): Promise<PositionView[]> 
       pos.fee,
     );
 
-    const poolState = await getPoolState(client, poolAddress);
+    const poolSlot0 = await getSlot0(client, poolAddress);
 
     const currentAmounts = getTokenAmounts(
       pos.liquidity,
-      poolState.sqrtPriceX96,
+      poolSlot0.sqrtPriceX96,
       pos.tickLower,
       pos.tickUpper,
     );
@@ -62,12 +67,12 @@ export async function getPositionsView(config: Config): Promise<PositionView[]> 
     const priceUpper = 1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
 
     const currentPrice = sqrtPriceX96ToPrice(
-      poolState.sqrtPriceX96,
+      poolSlot0.sqrtPriceX96,
       token0Info.decimals,
       token1Info.decimals,
     );
 
-    const inRange = poolState.tick >= pos.tickLower && poolState.tick < pos.tickUpper;
+    const inRange = poolSlot0.tick >= pos.tickLower && poolSlot0.tick < pos.tickUpper;
     const isActive = pos.liquidity > 0n;
 
     const amount0Human = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;
@@ -103,8 +108,14 @@ export interface SyncLpDataSummary {
 
 export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
   // Fetch sequentially to reduce simultaneous RPC/rate-limit pressure
-  const positions = await getPositionsView(config);
-  const pnlViews = await getPnLView(config);
+  const client = createClient(config);
+  const rawPositions = await getAllPositions(
+    client,
+    config.contracts.positionManager,
+    config.wallet,
+  );
+  const positions = await getPositionsView(config, rawPositions);
+  const pnlViews = await getPnLView(config, undefined, rawPositions);
 
   const syncedAt = new Date().toISOString();
 

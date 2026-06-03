@@ -18,19 +18,25 @@ let mockGetAllPositions: () => unknown = async () => [];
 let mockGetPnLView: (config: unknown) => unknown = async () => [];
 
 mock.module("../chain/positions.js", () => ({
-  getAllPositions: (...args: unknown[]) => mockGetAllPositions(),
+  getAllPositions: (..._args: unknown[]) => mockGetAllPositions(),
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: async () => ({}),
 }));
 
 mock.module("../services/pnl.js", () => ({
-  getPnLView: (config: unknown) => mockGetPnLView(config),
+  getPnLView: (config: unknown, _tokenId?: unknown, _rawPositions?: unknown) =>
+    mockGetPnLView(config),
 }));
 
 mock.module("../chain/pools.js", () => ({
-  getTokenInfo: async () => ({ symbol: "TEST", decimals: 18, name: "Test Token" }),
+  getTokenInfo: async () => ({ symbol: "TEST", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099",
+  getSlot0: async () => ({
+    address: "0x0000000000000000000000000000000000000099",
+    sqrtPriceX96: 79228162514264337593543950336n,
+    tick: 0,
+  }),
   getPoolState: async () => ({
     sqrtPriceX96: 79228162514264337593543950336n,
     tick: 0,
@@ -51,7 +57,6 @@ mock.module("../chain/client.js", () => ({
 // Now import the module under test + DB helpers
 // ---------------------------------------------------------------------------
 
-import { syncLpData } from "../services/positions.js";
 import { resetDb } from "../db/schema.js";
 import {
   listCachedPositionViews,
@@ -60,6 +65,7 @@ import {
   replaceCachedPositionViews,
   replaceCachedPnLViews,
 } from "../db/store.js";
+import { syncLpData } from "../services/positions.js";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures

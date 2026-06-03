@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import type { DashboardPosition } from "./api";
 import { useDashboardPositions, useSyncPositions } from "./hooks/useDashboardPositions";
 
@@ -94,6 +95,41 @@ export function App() {
   );
 }
 
+function PnlHeaderTooltip() {
+  const [visible, setVisible] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const ref = useRef<HTMLSpanElement>(null);
+
+  function handleMouseEnter() {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+    }
+    setVisible(true);
+  }
+
+  return (
+    <span
+      ref={ref}
+      className="inline-flex items-center gap-1 cursor-help"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setVisible(false)}
+    >
+      P&L
+      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-neutral-200 text-neutral-500 text-[0.6rem] font-bold leading-none select-none">?</span>
+      {visible && (
+        <span
+          className="pointer-events-none fixed w-64 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal text-white shadow-lg z-[9999] normal-case tracking-normal"
+          style={{ left: coords.x, top: coords.y - 8, transform: "translate(-50%, -100%)" }}
+        >
+          Actual gain or loss vs your initial deposit, in the quote token. Positive = made money. Does not include what you would have earned by simply holding (see Divergence Loss for that).
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
   if (positions.length === 0) {
     return <EmptyState />;
@@ -167,7 +203,9 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3">Price</th>
                 <th className="px-5 py-3">Range</th>
-                <th className="px-5 py-3">P&L</th>
+                <th className="px-5 py-3">
+                  <PnlHeaderTooltip />
+                </th>
                 <th className="px-5 py-3">Fees</th>
               </tr>
             </thead>
@@ -370,6 +408,11 @@ function PositionRow({ position }: { position: DashboardPosition }) {
         className={`px-5 py-4 font-mono font-bold whitespace-nowrap ${toneClass(pnl?.absolutePnlInToken1)}`}
       >
         {pnl ? `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}` : "n/a"}
+        {pnl && pnl.token1UsdPrice != null && (
+          <div className="text-xs font-normal text-neutral-400 mt-0.5">
+            {formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)}
+          </div>
+        )}
       </td>
       <td className="px-5 py-4 font-mono whitespace-nowrap text-neutral-600">
         {pnl ? (

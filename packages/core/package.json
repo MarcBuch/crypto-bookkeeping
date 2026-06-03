@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "bun test src/test",
+    "test": "bun test --isolate src/test",
     "check": "bun run tsc --noEmit"
   },
   "dependencies": {

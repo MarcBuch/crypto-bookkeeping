@@ -232,12 +232,12 @@ describe("findOpenEvent scan window computation", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null (does not throw) when no events found in window", async () => {
+  it("returns not_found (does not throw) when no events found in window", async () => {
     const { client } = windowProbeClient(500n);
 
     const result = await findOpenEvent(client, POSITION_MANAGER, 1n, WALLET);
 
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 });
 

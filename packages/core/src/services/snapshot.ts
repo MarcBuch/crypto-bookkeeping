@@ -74,7 +74,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
       entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
       entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
     } else {
-      const openEvent = await findOpenEvent(
+      const openResult = await findOpenEvent(
         client,
         config.contracts.positionManager,
         pos.tokenId,
@@ -84,7 +84,12 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         logsWindowBlocks,
       );
 
-      if (openEvent) {
+      if (openResult.status === "rpc_error") {
+        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        continue;
+      }
+      if (openResult.status === "found") {
+        const openEvent = openResult.event;
         entryAmount0 = openEvent.amount0;
         entryAmount1 = openEvent.amount1;
         entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
@@ -113,7 +118,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
           entry_liquidity: openEvent.liquidity.toString(),
         });
       } else {
-        // Could not find entry — use current price as fallback (matching original behavior)
+        // not_found — use current price as fallback (matching original behavior)
         entrySqrtPriceX96 = poolState.sqrtPriceX96;
         const currentAmounts = getTokenAmounts(
           pos.liquidity,

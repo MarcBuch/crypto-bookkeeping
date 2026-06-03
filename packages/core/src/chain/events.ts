@@ -3,6 +3,12 @@ import { parseAbiItem, decodeEventLog, type Address, type TransactionReceipt } f
 import type { Client } from "./client";
 import { withRetry } from "./rpc";
 
+// Discriminated union for event lookup results
+export type EventResult<T> =
+  | { status: "found"; event: T }
+  | { status: "not_found" }
+  | { status: "rpc_error"; error: unknown };
+
 // Event topic hashes
 const INCREASE_LIQUIDITY_TOPIC =
   "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f";
@@ -68,7 +74,7 @@ export async function findOpenEvent(
   fromBlock?: bigint,
   windowBlocks?: bigint,
   latestBlock?: bigint,
-): Promise<PositionOpenEvent | null> {
+): Promise<EventResult<PositionOpenEvent>> {
   try {
     // Fast path: use known transaction hash
     if (knownOpenTx) {
@@ -77,12 +83,12 @@ export async function findOpenEvent(
         client.getTransactionReceipt({ hash: knownOpenTx as `0x${string}` }),
       );
       const event = extractIncreaseLiquidity(receipt, tokenId);
-      if (event) return event;
+      if (event) return { status: "found", event };
       console.warn(`    IncreaseLiquidity not found in known tx, falling back to log scan...`);
     }
 
     // Slow path: paginated getLogs scan
-    console.log(`    Scanning logs for close event of token #${tokenId}...`);
+    console.log(`    Scanning logs for open event of token #${tokenId}...`);
     const resolvedLatestBlock = latestBlock ?? (await withRetry(() => client.getBlockNumber()));
 
     let startBlock: bigint;
@@ -117,21 +123,24 @@ export async function findOpenEvent(
         const log = logs[0];
         console.log(`    Found open event at block ${log.blockNumber}`);
         return {
-          tokenId,
-          blockNumber: log.blockNumber!,
-          transactionHash: log.transactionHash!,
-          amount0: BigInt((log.args as any).amount0),
-          amount1: BigInt((log.args as any).amount1),
-          liquidity: BigInt((log.args as any).liquidity),
+          status: "found",
+          event: {
+            tokenId,
+            blockNumber: log.blockNumber!,
+            transactionHash: log.transactionHash!,
+            amount0: BigInt((log.args as any).amount0),
+            amount1: BigInt((log.args as any).amount1),
+            liquidity: BigInt((log.args as any).liquidity),
+          },
         };
       }
     }
 
     console.warn(`    Could not find open event for token #${tokenId}`);
-    return null;
+    return { status: "not_found" };
   } catch (error) {
     console.error(`    Error finding open event for token ${tokenId}:`, (error as Error).message);
-    return null;
+    return { status: "rpc_error", error };
   }
 }
 
@@ -151,7 +160,7 @@ export async function findCloseEvent(
   fromBlock?: bigint,
   windowBlocks?: bigint,
   latestBlock?: bigint,
-): Promise<PositionCloseEvent | null> {
+): Promise<EventResult<PositionCloseEvent>> {
   try {
     // Fast path: use known transaction hash
     if (knownCloseTx) {
@@ -160,12 +169,12 @@ export async function findCloseEvent(
         client.getTransactionReceipt({ hash: knownCloseTx as `0x${string}` }),
       );
       const event = extractDecreaseLiquidity(receipt, tokenId);
-      if (event) return event;
+      if (event) return { status: "found", event };
       console.warn(`    DecreaseLiquidity not found in known tx, falling back to log scan...`);
     }
 
     // Slow path: paginated getLogs scan
-    console.log(`    Scanning logs for open event of token #${tokenId}...`);
+    console.log(`    Scanning logs for close event of token #${tokenId}...`);
     const resolvedLatestBlock = latestBlock ?? (await withRetry(() => client.getBlockNumber()));
 
     let startBlock: bigint;
@@ -232,23 +241,26 @@ export async function findCloseEvent(
 
         console.log(`    Found close event at block ${dLog.blockNumber}`);
         return {
-          tokenId,
-          blockNumber: dLog.blockNumber!,
-          transactionHash: dLog.transactionHash!,
-          amount0: decreaseAmount0,
-          amount1: decreaseAmount1,
-          liquidity: BigInt(dArgs.liquidity),
-          collectedFees0,
-          collectedFees1,
+          status: "found",
+          event: {
+            tokenId,
+            blockNumber: dLog.blockNumber!,
+            transactionHash: dLog.transactionHash!,
+            amount0: decreaseAmount0,
+            amount1: decreaseAmount1,
+            liquidity: BigInt(dArgs.liquidity),
+            collectedFees0,
+            collectedFees1,
+          },
         };
       }
     }
 
     console.warn(`    Could not find close event for token #${tokenId}`);
-    return null;
+    return { status: "not_found" };
   } catch (error) {
     console.error(`    Error finding close event for token ${tokenId}:`, (error as Error).message);
-    return null;
+    return { status: "rpc_error", error };
   }
 }
 

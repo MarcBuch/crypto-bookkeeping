@@ -90,7 +90,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
       entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
     } else {
       // Need to find entry - run event scan
-      const openEvent = await findOpenEvent(
+      const openResult = await findOpenEvent(
         client,
         config.contracts.positionManager,
         pos.tokenId,
@@ -100,7 +100,12 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         logsWindowBlocks,
       );
 
-      if (openEvent) {
+      if (openResult.status === "rpc_error") {
+        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        continue;
+      }
+      if (openResult.status === "found") {
+        const openEvent = openResult.event;
         entryAmount0 = openEvent.amount0;
         entryAmount1 = openEvent.amount1;
         // Derive entry price from actual deposit amounts (most accurate)
@@ -131,7 +136,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
           entry_liquidity: openEvent.liquidity.toString(),
         });
       } else {
-        // Could not find entry — skip this position
+        // not_found — could not find entry — skip this position
         continue;
       }
     }
@@ -153,7 +158,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
     } else {
       // Closed: find close event — start from entry_block to avoid scanning from block 0
       const entryBlockIL = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
-      const closeEvent = await findCloseEvent(
+      const closeResult = await findCloseEvent(
         client,
         config.contracts.positionManager,
         pos.tokenId,
@@ -162,7 +167,12 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         entryBlockIL,
         logsWindowBlocks,
       );
-      if (closeEvent) {
+      if (closeResult.status === "rpc_error") {
+        console.error(`[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`, closeResult.error);
+        continue;
+      }
+      if (closeResult.status === "found") {
+        const closeEvent = closeResult.event;
         exitAmount0 = closeEvent.amount0;
         exitAmount1 = closeEvent.amount1;
         const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);

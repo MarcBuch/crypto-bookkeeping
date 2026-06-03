@@ -18,6 +18,13 @@ export interface StoredPosition {
   entry_amount0: string | null;
   entry_amount1: string | null;
   entry_liquidity: string | null;
+  open_tx?: string | null;
+  close_tx?: string | null;
+  exit_amount0?: string | null;
+  exit_amount1?: string | null;
+  fees_collected0?: string | null;
+  fees_collected1?: string | null;
+  close_block?: number | null;
   created_at: string;
 }
 
@@ -166,10 +173,33 @@ function assertValidTaxTransactionLabel(label: TaxTransactionLabel | undefined):
 export function upsertPosition(position: Omit<StoredPosition, "created_at">): void {
   const db = getDb();
   db.run(
-    `INSERT OR REPLACE INTO positions 
+    `INSERT INTO positions 
      (token_id, token0, token1, token0_symbol, token1_symbol, token0_decimals, token1_decimals, 
-      fee, tick_lower, tick_upper, entry_sqrt_price_x96, entry_block, entry_amount0, entry_amount1, entry_liquidity)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      fee, tick_lower, tick_upper, entry_sqrt_price_x96, entry_block, entry_amount0, entry_amount1, entry_liquidity,
+      open_tx, close_tx, exit_amount0, exit_amount1, fees_collected0, fees_collected1, close_block)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(token_id) DO UPDATE SET
+       token0 = excluded.token0,
+       token1 = excluded.token1,
+       token0_symbol = excluded.token0_symbol,
+       token1_symbol = excluded.token1_symbol,
+       token0_decimals = excluded.token0_decimals,
+       token1_decimals = excluded.token1_decimals,
+       fee = excluded.fee,
+       tick_lower = excluded.tick_lower,
+       tick_upper = excluded.tick_upper,
+       entry_sqrt_price_x96 = excluded.entry_sqrt_price_x96,
+       entry_block = excluded.entry_block,
+       entry_amount0 = excluded.entry_amount0,
+       entry_amount1 = excluded.entry_amount1,
+       entry_liquidity = excluded.entry_liquidity,
+       open_tx = COALESCE(excluded.open_tx, open_tx),
+       close_tx = COALESCE(excluded.close_tx, close_tx),
+       exit_amount0 = COALESCE(excluded.exit_amount0, exit_amount0),
+       exit_amount1 = COALESCE(excluded.exit_amount1, exit_amount1),
+       fees_collected0 = COALESCE(excluded.fees_collected0, fees_collected0),
+       fees_collected1 = COALESCE(excluded.fees_collected1, fees_collected1),
+       close_block = COALESCE(excluded.close_block, close_block)`,
     [
       position.token_id,
       position.token0,
@@ -186,6 +216,13 @@ export function upsertPosition(position: Omit<StoredPosition, "created_at">): vo
       position.entry_amount0,
       position.entry_amount1,
       position.entry_liquidity,
+      position.open_tx ?? null,
+      position.close_tx ?? null,
+      position.exit_amount0 ?? null,
+      position.exit_amount1 ?? null,
+      position.fees_collected0 ?? null,
+      position.fees_collected1 ?? null,
+      position.close_block ?? null,
     ],
   );
 }

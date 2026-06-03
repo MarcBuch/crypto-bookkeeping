@@ -172,6 +172,39 @@ function initSchema(database: Database): void {
     database.exec("ALTER TABLE positions ADD COLUMN entry_liquidity TEXT");
   }
 
+  // Migration: add transaction discovery columns (open_tx, close_tx, exit amounts, fees, close_block)
+  const positionCols = database.prepare("PRAGMA table_info(positions)").all() as {
+    name: string;
+  }[];
+
+  if (!positionCols.some((c) => c.name === "open_tx")) {
+    database.exec("ALTER TABLE positions ADD COLUMN open_tx TEXT");
+  }
+
+  if (!positionCols.some((c) => c.name === "close_tx")) {
+    database.exec("ALTER TABLE positions ADD COLUMN close_tx TEXT");
+  }
+
+  if (!positionCols.some((c) => c.name === "exit_amount0")) {
+    database.exec("ALTER TABLE positions ADD COLUMN exit_amount0 TEXT");
+  }
+
+  if (!positionCols.some((c) => c.name === "exit_amount1")) {
+    database.exec("ALTER TABLE positions ADD COLUMN exit_amount1 TEXT");
+  }
+
+  if (!positionCols.some((c) => c.name === "fees_collected0")) {
+    database.exec("ALTER TABLE positions ADD COLUMN fees_collected0 TEXT");
+  }
+
+  if (!positionCols.some((c) => c.name === "fees_collected1")) {
+    database.exec("ALTER TABLE positions ADD COLUMN fees_collected1 TEXT");
+  }
+
+  if (!positionCols.some((c) => c.name === "close_block")) {
+    database.exec("ALTER TABLE positions ADD COLUMN close_block INTEGER");
+  }
+
   const taxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
     name: string;
     pk: number;

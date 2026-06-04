@@ -318,14 +318,23 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
           <span>{formatPrice(position.priceUpper)}</span>
         </div>
         <div className="relative h-1.5 rounded-full bg-neutral-400/70">
+          {/* Left outer-third rerange zone */}
+          <div className="absolute inset-y-0 left-0 w-1/3 rounded-l-full bg-amber-400/20" />
+          {/* Right outer-third rerange zone */}
+          <div className="absolute inset-y-0 right-0 w-1/3 rounded-r-full bg-amber-400/20" />
+          {/* Gradient fill */}
           <div
             className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${rangeTone}`}
             style={{ width: `${marker}%` }}
           />
-          <span
-            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-700 shadow-[0_0_0_2px_rgba(0,0,0,0.08)]"
-            style={{ left: `${marker}%` }}
-          />
+          {/* Third-boundary dividers */}
+          <div className="absolute inset-y-0 w-px bg-white/70 z-10" style={{ left: '33.33%' }} />
+          <div className="absolute inset-y-0 w-px bg-white/70 z-10" style={{ left: '66.67%' }} />
+           {/* Current price marker dot */}
+           <span
+             className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-700 shadow-[0_0_0_2px_rgba(0,0,0,0.08)] z-20"
+             style={{ left: `${marker}%` }}
+           />
         </div>
         <div className="mt-2 flex justify-between gap-3">
           <span className={position.inRange ? "text-rose-600" : "text-neutral-500"}>

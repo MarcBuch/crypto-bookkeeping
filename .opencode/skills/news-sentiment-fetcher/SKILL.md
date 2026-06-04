@@ -15,17 +15,81 @@ Fetches recent news, token unlock schedules, and market catalysts for any token 
 - User wants sentiment context before reranging or closing a position
 - User asks "is this trend durable?"
 
-## Workflow
+## How to Run
 
-### Step 1: Fetch the CoinGecko token page
+```bash
+SKILL_DIR=$(git rev-parse --show-toplevel)/.opencode/skills/news-sentiment-fetcher
+
+# Human-readable output
+bun "$SKILL_DIR/fetch-news.ts" hyperliquid
+
+# Structured JSON (for programmatic use)
+bun "$SKILL_DIR/fetch-news.ts" hyperliquid --json 2>/dev/null
 ```
-https://www.coingecko.com/en/coins/{coin_id}
-```
+
+The script fetches in parallel:
+- **CoinGecko free API** — market data, sentiment votes, ATH, price changes
+- **CoinGecko trending** — whether the token is trending and its rank
+- **CoinGecko coin page** — news headlines, "why moving" summary, upcoming unlock
+
 Common coin IDs: `hyperliquid`, `bitcoin`, `ethereum`, `solana`.
 
-If unsure of the coin ID, search:
+## JSON Output Schema
+
+```json
+{
+  "coin": "hyperliquid",
+  "symbol": "HYPE",
+  "name": "Hyperliquid",
+  "fetchedAt": "2026-06-04T17:45:00.000Z",
+  "market": {
+    "price": 66.49,
+    "change24h": -9.85,
+    "change7d": 9.49,
+    "change14d": 13.65,
+    "change30d": 50.01,
+    "ath": 75.48,
+    "athDate": "2026-06-02",
+    "athChangePct": -11.91,
+    "volume24h": 1886252893,
+    "marketCap": 14807921396,
+    "circulatingSupply": 222445714,
+    "totalSupply": 955307079
+  },
+  "sentiment": {
+    "bullishPct": 55.2,
+    "bearishPct": 44.8,
+    "isTrending": true,
+    "trendingRank": 2
+  },
+  "topCatalyst": "Hyperliquid Drops 6.5% as Arthur Hayes Sells Entire HYPE Stake",
+  "recentlyHappened": [
+    { "headline": "Arthur Hayes Sells Entire Hyperliquid (HYPE) Position", "age": "about 5 hours ago" }
+  ],
+  "latestNews": [
+    { "headline": "Hyperliquid pulls back from record highs as Arthur Hayes exits position", "age": "about 4 hours ago" }
+  ],
+  "upcomingUnlock": {
+    "dateStr": "June 6",
+    "daysAway": 2,
+    "amountRaw": "$659.48M",
+    "recipient": "Core Contributors"
+  }
+}
 ```
-https://www.coingecko.com/en/search?query={token_symbol}
+
+## Workflow
+
+### Step 1: Run the script
+
+```bash
+bun "$SKILL_DIR/fetch-news.ts" <coin_id> --json 2>/dev/null
+```
+
+Parse the JSON output. If the script fails (rate limit, network), fall back to fetching the CoinGecko coin page manually:
+
+```
+https://www.coingecko.com/en/coins/{coin_id}
 ```
 
 Extract from the page:

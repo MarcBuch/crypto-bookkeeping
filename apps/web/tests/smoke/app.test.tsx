@@ -34,7 +34,7 @@ describe("app smoke", () => {
 
     const html = renderAppWithQueryClient(queryClient);
 
-    expect(html).toContain("Portfolio Risk &amp; Range Operations");
+    expect(html).toContain("HyperEVM ProjectX");
     expect(html).toContain("No LP positions found");
     expect(html).not.toContain("Loading LP positions");
   });
@@ -42,7 +42,7 @@ describe("app smoke", () => {
   it("renders loading state when route data is pending", () => {
     const html = renderAppWithQueryClient(new QueryClient());
 
-    expect(html).toContain("Portfolio Risk &amp; Range Operations");
+    expect(html).toContain("HyperEVM ProjectX");
     expect(html).toContain("Loading LP positions");
     expect(html).not.toContain("No LP positions found");
     expect(html).not.toContain("Could not load LP positions");

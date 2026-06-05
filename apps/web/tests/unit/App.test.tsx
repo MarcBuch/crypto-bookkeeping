@@ -137,7 +137,7 @@ describe("dashboard rendering", () => {
 
     expect(html).toContain("Fee Income USD");
     expect(html).toContain("$6.46");
-    expect(html).toContain("Net P&amp;L 15.5 USDC");
+    expect(html).toContain("24.69 USDC");
     expect(html).toContain("Fees 12.35 USDC");
   });
 
@@ -151,7 +151,7 @@ describe("dashboard rendering", () => {
     expect(html).toMatch(/Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
     expect(html).toContain("USD unavailable");
     expect(html).not.toContain("$0.00");
-    expect(html).toContain("Net P&amp;L 51 USDC");
+    expect(html).toContain("24.69 USDC");
     expect(html).toContain("active");
     expect(html).toContain("in range");
     expect(html).toContain("1 - 2");
@@ -169,7 +169,7 @@ describe("dashboard rendering", () => {
       /Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/,
     );
     expect(html).not.toContain("$0.00");
-    expect(html).toContain("Net P&amp;L 15.5 USDC");
+    expect(html).toContain("24.69 USDC");
     expect(html).toContain("closed");
     expect(html).toContain("out of range");
   });

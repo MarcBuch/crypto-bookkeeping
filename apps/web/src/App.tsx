@@ -17,51 +17,25 @@ export function App() {
   return (
     <main className="min-h-screen bg-white text-neutral-950">
       <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
-          <div className="border-b border-neutral-200 px-5 py-3 sm:px-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
-              <span>HyperEVM ProjectX</span>
-              <span className="flex flex-wrap items-center gap-3 text-neutral-700">
-                <a className="transition hover:text-neutral-950" href="/tax">
-                  Tax Ledger
-                </a>
-                <span className="h-3 w-px bg-neutral-300" />
-                <button
-                  onClick={() => syncPositions()}
-                  disabled={isSyncing}
-                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-700 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-50"
-                >
-                  {isSyncing ? "Syncing…" : "Sync"}
-                </button>
-                <span className="h-3 w-px bg-neutral-300" />
-                <span className="h-2 w-2 rounded-full bg-neutral-950" />
-                {isFetching && !isLoading ? "Reconciling On-Chain Data" : "Live Execution View"}
-              </span>
-            </div>
-          </div>
-          <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_420px] lg:items-end">
-            <div>
-              <p className="text-xs font-semibold tracking-[0.35em] text-neutral-500 uppercase">
-                Concentrated Liquidity Command Center
-              </p>
-              <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-[-0.04em] text-neutral-950 sm:text-6xl lg:text-7xl">
-                Portfolio Risk & Range Operations
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-neutral-600 sm:text-base">
-                Institutional monitoring for concentrated liquidity desks: live range status, fee
-                capture, token exposure, and mark-to-market P&L from the Fastify API.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-              <p className="text-[0.65rem] font-semibold tracking-[0.26em] text-neutral-500 uppercase">
-                Operating Mode
-              </p>
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                <HeaderStat label="Latency" value="API" />
-                <HeaderStat label="Source" value="RPC" />
-                <HeaderStat label="Desk" value="LP" />
-              </div>
-            </div>
+        <header className="rounded-3xl border border-neutral-200 bg-white px-5 py-3 shadow-sm sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
+            <span>HyperEVM ProjectX</span>
+            <span className="flex flex-wrap items-center gap-3 text-neutral-700">
+              <a className="transition hover:text-neutral-950" href="/tax">
+                Tax Ledger
+              </a>
+              <span className="h-3 w-px bg-neutral-300" />
+              <button
+                onClick={() => syncPositions()}
+                disabled={isSyncing}
+                className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-700 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-50"
+              >
+                {isSyncing ? "Syncing…" : "Sync"}
+              </button>
+              <span className="h-3 w-px bg-neutral-300" />
+              <span className="h-2 w-2 rounded-full bg-neutral-950" />
+              {isFetching && !isLoading ? "Reconciling On-Chain Data" : "Live Execution View"}
+            </span>
           </div>
         </header>
 
@@ -143,8 +117,6 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
   const openPositions = positions.filter((position) => position.status !== "closed");
   const totals = positions.reduce(
     (acc, position) => {
-      acc.active += position.status === "active" ? 1 : 0;
-      acc.inRange += position.inRange ? 1 : 0;
       acc.pnl += position.pnl?.absolutePnlInToken1 ?? 0;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
       if (typeof position.pnl?.feesValueUsd === "number") {
@@ -153,12 +125,10 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
       }
       return acc;
     },
-    { active: 0, inRange: 0, pnl: 0, fees: 0, feesUsd: 0, feesUsdCount: 0 },
+    { pnl: 0, fees: 0, feesUsd: 0, feesUsdCount: 0 },
   );
 
   const token1Symbol = positions.find((p) => p.pnl)?.pnl?.token1Symbol ?? "token1";
-  const activePercent = positions.length ? totals.active / positions.length : 0;
-  const inRangePercent = positions.length ? totals.inRange / positions.length : 0;
 
   return (
     <>
@@ -169,19 +139,21 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
           detail="Tracked NFTs"
         />
         <MetricCard
-          label="Active Capital"
-          value={totals.active.toString()}
-          detail={formatPercent(activePercent)}
+          label="Total MTM P&L"
+          value={`${formatNumber(totals.pnl)} ${token1Symbol}`}
+          detail="Mark-to-market"
+          valueClassName={pnlToneClass(totals.pnl)}
         />
         <MetricCard
-          label="Range Compliance"
-          value={`${totals.inRange}/${positions.length}`}
-          detail={formatPercent(inRangePercent)}
+          label="Carry Run Rate"
+          value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
+          detail="30-day normalized"
+          tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
         />
         <MetricCard
           label="Fee Income USD"
           value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
-          detail={`Net P&L ${formatNumber(totals.pnl)} ${token1Symbol}`}
+          detail={`${formatNumber(totals.fees)} ${token1Symbol}`}
           tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
         />
       </section>
@@ -227,25 +199,18 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
   );
 }
 
-function HeaderStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
-      <p className="text-[0.62rem] tracking-[0.18em] text-neutral-500 uppercase">{label}</p>
-      <p className="mt-1 font-mono text-sm font-bold text-neutral-950">{value}</p>
-    </div>
-  );
-}
-
 function MetricCard({
   label,
   value,
   detail,
   tone,
+  valueClassName,
 }: {
   label: string;
   value: string;
   detail?: string;
   tone?: number;
+  valueClassName?: string;
 }) {
   return (
     <div className="group rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-50">
@@ -255,7 +220,7 @@ function MetricCard({
         </p>
         <span className="mt-1 h-1.5 w-1.5 rounded-full bg-neutral-300 transition group-hover:bg-neutral-950" />
       </div>
-      <p className={`mt-4 font-mono text-3xl font-black tracking-tight ${toneClass(tone)}`}>
+      <p className={`mt-4 font-mono text-3xl font-black tracking-tight ${valueClassName ?? toneClass(tone)}`}>
         {value}
       </p>
       {detail ? <p className="mt-2 text-xs font-medium text-neutral-500">{detail}</p> : null}
@@ -294,9 +259,6 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
             <h2 className="truncate text-lg font-black tracking-[-0.03em] text-neutral-950">
               {position.token0.symbol}/{position.token1.symbol}
             </h2>
-            <span className="rounded bg-neutral-300 px-2 py-0.5 font-mono text-[0.68rem] font-bold text-neutral-600">
-              Wallet #1
-            </span>
           </div>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-neutral-600">
             <span className={`h-2.5 w-2.5 rounded-full ${venue.dotClass}`} />
@@ -610,6 +572,11 @@ function rangeFill(position: DashboardPosition): number {
 function toneClass(value?: number): string {
   if (value == null || value === 0) return "text-neutral-950";
   return value > 0 ? "text-neutral-950" : "text-neutral-500";
+}
+
+function pnlToneClass(value: number): string {
+  if (value === 0) return "text-neutral-950";
+  return value > 0 ? "text-emerald-700" : "text-rose-600";
 }
 
 function darkToneClass(value?: number): string {

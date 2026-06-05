@@ -466,6 +466,21 @@ export async function getPnLView(
         } catch {
           // Graceful degradation: leave prices as null
         }
+        // CoinGecko historical data can lag 1-2 days for recent closes. If both
+        // historical prices are still null, fall back to live prices so recently
+        // closed positions show USD fees instead of "USD unavailable".
+        if (token0UsdPrice === null && token1UsdPrice === null) {
+          try {
+            const usdPrices = await getUsdPrices(config, [
+              { symbol: t0sym, address: pos.token0 },
+              { symbol: t1sym, address: pos.token1 },
+            ]);
+            token0UsdPrice = usdPrices[token0PriceKey] ?? null;
+            token1UsdPrice = usdPrices[token1PriceKey] ?? null;
+          } catch {
+            // Live fallback is also optional.
+          }
+        }
       }
     } else {
       // Active position (or closed without a recorded close_block): use live prices

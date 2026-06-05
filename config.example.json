@@ -27,6 +27,8 @@
     }
   },
   "tax": {
+    "hyperSyncUrl": "https://hyperliquid.hypersync.xyz",
+    "hyperSyncApiToken": "YOUR_HYPERSYNC_API_TOKEN",
     "explorerApiUrl": "https://www.hyperscan.com/api",
     "explorerChainId": 999
   },

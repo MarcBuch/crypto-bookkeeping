@@ -198,6 +198,118 @@ describe("loadConfig — adversarial tests", () => {
       expect(cfg.logsFromBlock).toBe(2592000);
     });
   });
+
+  describe("tax.hyperSyncUrl and tax.hyperSyncApiToken validation", () => {
+    // ── Happy path ────────────────────────────────────────────────────────────
+
+    it("loads without error when no 'tax' field is present", () => {
+      const path = writeConfig("tax-absent.json", validConfigJson());
+      const cfg = loadConfig(path);
+      expect(cfg.tax).toBeUndefined();
+    });
+
+    it("loads without error when tax is an empty object", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: {},
+      });
+      const path = writeConfig("tax-empty.json", content);
+      const cfg = loadConfig(path);
+      expect(cfg.tax).toEqual({});
+    });
+
+    it("loads with valid hyperSyncUrl and makes it accessible", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncUrl: "https://hyperliquid.hypersync.xyz" },
+      });
+      const path = writeConfig("tax-hypersync-url.json", content);
+      const cfg = loadConfig(path);
+      expect(cfg.tax?.hyperSyncUrl).toBe("https://hyperliquid.hypersync.xyz");
+    });
+
+    it("loads with valid hyperSyncApiToken and makes it accessible", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncApiToken: "my-token" },
+      });
+      const path = writeConfig("tax-hypersync-token.json", content);
+      const cfg = loadConfig(path);
+      expect(cfg.tax?.hyperSyncApiToken).toBe("my-token");
+    });
+
+    it("loads without error when only old explorerApiUrl is present (backward compat)", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { explorerApiUrl: "https://explorer.example.com/api" },
+      });
+      const path = writeConfig("tax-explorer-only.json", content);
+      const cfg = loadConfig(path);
+      expect(cfg.tax?.explorerApiUrl).toBe("https://explorer.example.com/api");
+    });
+
+    it("loads without error when both hyperSyncUrl and explorerApiUrl are present", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: {
+          hyperSyncUrl: "https://hyperliquid.hypersync.xyz",
+          explorerApiUrl: "https://explorer.example.com/api",
+        },
+      });
+      const path = writeConfig("tax-both-urls.json", content);
+      const cfg = loadConfig(path);
+      expect(cfg.tax?.hyperSyncUrl).toBe("https://hyperliquid.hypersync.xyz");
+      expect(cfg.tax?.explorerApiUrl).toBe("https://explorer.example.com/api");
+    });
+
+    it("loads without error when hyperSyncApiToken is an empty string (treated as absent)", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncApiToken: "" },
+      });
+      const path = writeConfig("tax-empty-token.json", content);
+      const cfg = loadConfig(path);
+      expect(cfg.tax?.hyperSyncApiToken).toBe("");
+    });
+
+    // ── Validation errors ─────────────────────────────────────────────────────
+
+    it("throws when hyperSyncUrl is not a valid URL", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncUrl: "not-a-url" },
+      });
+      const path = writeConfig("tax-bad-url.json", content);
+      expect(() => loadConfig(path)).toThrow(/"tax.hyperSyncUrl" must be a valid URL/);
+    });
+
+    it("throws when hyperSyncUrl is an empty string", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncUrl: "" },
+      });
+      const path = writeConfig("tax-empty-url.json", content);
+      expect(() => loadConfig(path)).toThrow(/"tax.hyperSyncUrl" must be a non-empty string/);
+    });
+
+    it("throws when hyperSyncUrl is a number", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncUrl: 123 },
+      });
+      const path = writeConfig("tax-numeric-url.json", content);
+      expect(() => loadConfig(path)).toThrow(/"tax.hyperSyncUrl" must be a non-empty string/);
+    });
+
+    it("throws when hyperSyncApiToken is a number", () => {
+      const content = JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        tax: { hyperSyncApiToken: 42 },
+      });
+      const path = writeConfig("tax-numeric-token.json", content);
+      expect(() => loadConfig(path)).toThrow(/"tax.hyperSyncApiToken" must be a string/);
+    });
+  });
 });
 
 describe("resolveConfigPath — env override", () => {

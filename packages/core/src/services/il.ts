@@ -101,7 +101,10 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
       );
 
       if (openResult.status === "rpc_error") {
-        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        console.error(
+          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
+          openResult.error,
+        );
         continue;
       }
       if (openResult.status === "found") {
@@ -168,7 +171,10 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         logsWindowBlocks,
       );
       if (closeResult.status === "rpc_error") {
-        console.error(`[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`, closeResult.error);
+        console.error(
+          `[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`,
+          closeResult.error,
+        );
         continue;
       }
       if (closeResult.status === "found") {

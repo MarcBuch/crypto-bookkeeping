@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
+
 import type { DashboardPosition } from "./api";
-import { useDashboardPositions, useSyncPositions } from "./hooks/useDashboardPositions";
+import { useDashboardPositions, useSyncPositions, useSyncPosition } from "./hooks/useDashboardPositions";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -111,18 +112,22 @@ function PnlHeaderTooltip() {
   return (
     <span
       ref={ref}
-      className="inline-flex items-center gap-1 cursor-help"
+      className="inline-flex cursor-help items-center gap-1"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => setVisible(false)}
     >
       P&L
-      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-neutral-200 text-neutral-500 text-[0.6rem] font-bold leading-none select-none">?</span>
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neutral-200 text-[0.6rem] leading-none font-bold text-neutral-500 select-none">
+        ?
+      </span>
       {visible && (
         <span
-          className="pointer-events-none fixed w-64 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal text-white shadow-lg z-[9999] normal-case tracking-normal"
+          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal tracking-normal text-white normal-case shadow-lg"
           style={{ left: coords.x, top: coords.y - 8, transform: "translate(-50%, -100%)" }}
         >
-          Actual gain or loss vs your initial deposit, in the quote token. Positive = made money. Does not include what you would have earned by simply holding (see Divergence Loss for that).
+          Actual gain or loss vs your initial deposit, in the quote token. Positive = made money.
+          Does not include what you would have earned by simply holding (see Divergence Loss for
+          that).
           <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
         </span>
       )}
@@ -207,6 +212,7 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
                   <PnlHeaderTooltip />
                 </th>
                 <th className="px-5 py-3">Fees</th>
+                <th className="px-5 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
@@ -277,9 +283,10 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const leftDistance = (position.currentPrice - position.priceLower) / position.currentPrice;
   const rightDistance = (position.priceUpper - position.currentPrice) / position.currentPrice;
   const rangeTone = position.inRange ? "from-emerald-500 to-teal-300" : "from-rose-400 to-red-500";
+  const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
 
   return (
-    <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr] lg:items-center">
+    <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
       <div className="flex min-w-0 items-center gap-3">
         <TokenPairIcon token0={position.token0.symbol} token1={position.token1.symbol} />
         <div className="min-w-0">
@@ -328,13 +335,13 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
             style={{ width: `${marker}%` }}
           />
           {/* Third-boundary dividers */}
-          <div className="absolute inset-y-0 w-px bg-white/70 z-10" style={{ left: '33.33%' }} />
-          <div className="absolute inset-y-0 w-px bg-white/70 z-10" style={{ left: '66.67%' }} />
-           {/* Current price marker dot */}
-           <span
-             className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-700 shadow-[0_0_0_2px_rgba(0,0,0,0.08)] z-20"
-             style={{ left: `${marker}%` }}
-           />
+          <div className="absolute inset-y-0 z-10 w-px bg-white/70" style={{ left: "33.33%" }} />
+          <div className="absolute inset-y-0 z-10 w-px bg-white/70" style={{ left: "66.67%" }} />
+          {/* Current price marker dot */}
+          <span
+            className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-700 shadow-[0_0_0_2px_rgba(0,0,0,0.08)]"
+            style={{ left: `${marker}%` }}
+          />
         </div>
         <div className="mt-2 flex justify-between gap-3">
           <span className={position.inRange ? "text-rose-600" : "text-neutral-500"}>
@@ -344,6 +351,16 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
             {formatSignedPercent(rightDistance)}
           </span>
         </div>
+      </div>
+
+      <div className="flex items-center lg:justify-end">
+        <button
+          onClick={() => void syncPosition()}
+          disabled={isSyncingPosition}
+          className="rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-40"
+        >
+          {isSyncingPosition ? "Syncing…" : "Sync"}
+        </button>
       </div>
     </article>
   );
@@ -394,6 +411,7 @@ function DarkStat({
 
 function PositionRow({ position }: { position: DashboardPosition }) {
   const pnl = position.pnl;
+  const { trigger: syncPosition, isPolling: isSyncingPosition, error: syncPositionError } = useSyncPosition(position.tokenId);
 
   return (
     <tr className="text-neutral-700 transition hover:bg-neutral-50">
@@ -418,7 +436,7 @@ function PositionRow({ position }: { position: DashboardPosition }) {
       >
         {pnl ? `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}` : "n/a"}
         {pnl && pnl.token1UsdPrice != null && (
-          <div className="text-xs font-normal text-neutral-400 mt-0.5">
+          <div className="mt-0.5 text-xs font-normal text-neutral-400">
             {formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)}
           </div>
         )}
@@ -436,6 +454,18 @@ function PositionRow({ position }: { position: DashboardPosition }) {
         ) : (
           "n/a"
         )}
+      </td>
+      <td className="px-5 py-4 whitespace-nowrap">
+        <button
+          onClick={() => void syncPosition()}
+          disabled={isSyncingPosition}
+          className="rounded-full border border-neutral-300 bg-white px-2.5 py-0.5 text-[0.65rem] font-semibold tracking-[0.14em] text-neutral-600 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-40"
+        >
+          {isSyncingPosition ? "…" : "Sync"}
+        </button>
+        {syncPositionError ? (
+          <span className="ml-2 text-xs text-rose-600">!</span>
+        ) : null}
       </td>
     </tr>
   );

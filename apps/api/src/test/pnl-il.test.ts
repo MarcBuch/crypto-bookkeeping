@@ -123,6 +123,7 @@ mock.module("@lp-tracker/core", () => ({
   listCachedPnLViews: (...args: unknown[]) => mockListCachedPnLViews(...args),
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
   syncLpData: async () => ({ synced: 0 }),
+  syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
   getPnLView: async () => [],
   getILView: (...args: unknown[]) => mockGetILView(...args),
   getHistoryView: async () => [],

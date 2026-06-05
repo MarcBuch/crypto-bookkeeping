@@ -271,6 +271,16 @@ export async function getSyncStatus(): Promise<SyncStatus> {
   return data;
 }
 
+export async function syncSinglePosition(tokenId: string): Promise<{ message: string }> {
+  const data = await fetchJson<{ message: string }>(`/positions/${tokenId}/sync`, { method: "POST" });
+  return data;
+}
+
+export async function getSinglePositionSyncStatus(tokenId: string): Promise<SyncStatus> {
+  const data = await fetchJson<SyncStatus>(`/positions/${tokenId}/sync/status`);
+  return data;
+}
+
 export async function getDashboardPositions(): Promise<{
   positions: DashboardPosition[];
   syncedAt: string | null;

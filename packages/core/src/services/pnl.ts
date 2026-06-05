@@ -165,7 +165,10 @@ export async function getPnLView(
       );
 
       if (openResult.status === "rpc_error") {
-        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        console.error(
+          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
+          openResult.error,
+        );
         continue;
       }
       if (openResult.status === "found") {
@@ -233,7 +236,10 @@ export async function getPnLView(
       );
 
       if (openResult.status === "rpc_error") {
-        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        console.error(
+          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
+          openResult.error,
+        );
         continue;
       }
       if (openResult.status === "found") {
@@ -363,7 +369,10 @@ export async function getPnLView(
         );
 
         if (closeResult.status === "rpc_error") {
-          console.error(`[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`, closeResult.error);
+          console.error(
+            `[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`,
+            closeResult.error,
+          );
           continue;
         }
         if (closeResult.status === "found") {
@@ -374,11 +383,7 @@ export async function getPnLView(
           feesCollected1 = closeEvent.collectedFees1;
 
           // Get pool price at close block for accurate exit price
-          const closePrice = await getPoolPriceAtBlock(
-            client,
-            poolAddress,
-            closeEvent.blockNumber,
-          );
+          const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
           if (closePrice) {
             exitSqrtPriceX96 = closePrice.sqrtPriceX96;
           }

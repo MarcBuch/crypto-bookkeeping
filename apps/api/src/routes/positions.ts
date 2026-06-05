@@ -1,4 +1,4 @@
-import { syncLpData, listCachedPositionViews, getPositionsCacheSyncedAt } from "@lp-tracker/core";
+import { syncLpData, syncSinglePosition, listCachedPositionViews, getPositionsCacheSyncedAt } from "@lp-tracker/core";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 
 import { isNumericString } from "../utils/validation.js";
@@ -18,6 +18,9 @@ let syncState: SyncState = {
   error: null,
   positionCount: null,
 };
+
+// Per-position sync states, keyed by tokenId string
+const positionSyncStates = new Map<string, SyncState>();
 
 export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /positions/sync — fire-and-forget; returns 202 immediately
@@ -63,6 +66,77 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/positions/sync/status", async (_request: FastifyRequest, _reply: FastifyReply) => {
     return syncState;
   });
+
+  // POST /positions/:tokenId/sync — fire-and-forget per-position sync; returns 202 immediately
+  fastify.post<{ Params: { tokenId: string } }>(
+    "/positions/:tokenId/sync",
+    async (request, reply) => {
+      const { tokenId } = request.params;
+
+      if (!isNumericString(tokenId)) {
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
+      }
+
+      const existing = positionSyncStates.get(tokenId);
+      if (existing?.status === "running") {
+        return reply.status(409).send({ error: `Sync already in progress for position ${tokenId}` });
+      }
+
+      const config = fastify.lpConfig;
+      positionSyncStates.set(tokenId, {
+        status: "running",
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        error: null,
+        positionCount: null,
+      });
+
+      // Fire and forget
+      syncSinglePosition(config, tokenId)
+        .then(() => {
+          positionSyncStates.set(tokenId, {
+            status: "completed",
+            startedAt: positionSyncStates.get(tokenId)?.startedAt ?? null,
+            finishedAt: new Date().toISOString(),
+            error: null,
+            positionCount: 1,
+          });
+        })
+        .catch((err: unknown) => {
+          positionSyncStates.set(tokenId, {
+            status: "failed",
+            startedAt: positionSyncStates.get(tokenId)?.startedAt ?? null,
+            finishedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+            positionCount: null,
+          });
+        });
+
+      return reply.status(202).send({ message: "Sync started" });
+    },
+  );
+
+  // GET /positions/:tokenId/sync/status — return per-position sync status
+  fastify.get<{ Params: { tokenId: string } }>(
+    "/positions/:tokenId/sync/status",
+    async (request, reply) => {
+      const { tokenId } = request.params;
+
+      if (!isNumericString(tokenId)) {
+        return reply.status(400).send({ error: "tokenId must be a numeric string" });
+      }
+
+      const state = positionSyncStates.get(tokenId) ?? {
+        status: "idle" as const,
+        startedAt: null,
+        finishedAt: null,
+        error: null,
+        positionCount: null,
+      };
+
+      return state;
+    },
+  );
 
   // GET /positions — read from cache (no live RPC)
   fastify.get("/positions", async (_request: FastifyRequest, _reply: FastifyReply) => {

@@ -9,7 +9,8 @@ import { findCloseEvent, findOpenEvent } from "../chain/events.js";
 
 type OpenClient = Parameters<typeof findOpenEvent>[0];
 
-const TX_HASH = "0x1111111111111111111111111111111111111111111111111111111111111111" as `0x${string}`;
+const TX_HASH =
+  "0x1111111111111111111111111111111111111111111111111111111111111111" as `0x${string}`;
 const POSITION_MANAGER = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`;
 const WALLET = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" as `0x${string}`;
 

@@ -53,6 +53,10 @@ class MockRpcError extends Error {
 let mockListCachedPositionViews: (...args: unknown[]) => unknown = () => [];
 let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
 let mockSyncLpData: (...args: unknown[]) => unknown = async () => ({ synced: 0 });
+let mockSyncSinglePosition: (config: unknown, tokenId: string) => Promise<unknown> = async () => ({
+  tokenId: "42",
+  syncedAt: new Date().toISOString(),
+});
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
 mock.module("@lp-tracker/core", () => ({
@@ -63,6 +67,7 @@ mock.module("@lp-tracker/core", () => ({
   listCachedPnLViews: () => [],
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
   syncLpData: (...args: unknown[]) => mockSyncLpData(...args),
+  syncSinglePosition: (config: unknown, tokenId: string) => mockSyncSinglePosition(config, tokenId),
   getPnLView: async () => [],
   getILView: async () => [],
   getHistoryView: async () => [],
@@ -369,6 +374,374 @@ describe("POST /positions/sync", () => {
 
     // Clean up: resolve the background sync
     resolveFn({ positionCount: 0 });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /positions/:tokenId/sync
+// ---------------------------------------------------------------------------
+describe("POST /positions/:tokenId/sync", () => {
+  it("returns 202 with message for valid numeric tokenId", async () => {
+    mockSyncSinglePosition = async () => ({ tokenId: "42", syncedAt: new Date().toISOString() });
+
+    const res = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ message: "Sync started" });
+  });
+
+  it("returns 400 for non-numeric tokenId (letters only)", async () => {
+    const res = await server.inject({ method: "POST", url: "/positions/abc/sync" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("returns 400 for mixed alphanumeric tokenId", async () => {
+    const res = await server.inject({ method: "POST", url: "/positions/abc123/sync" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+   it("returns 409 when sync is already running for a position", async () => {
+     let resolveSyncSinglePosition: (v: unknown) => void;
+     mockSyncSinglePosition = () =>
+       new Promise((resolve) => {
+         resolveSyncSinglePosition = resolve;
+       });
+
+     await server.inject({ method: "POST", url: "/positions/42/sync" });
+     const res = await server.inject({ method: "POST", url: "/positions/42/sync" });
+     expect(res.statusCode).toBe(409);
+     expect(res.json()).toMatchObject({ error: "Sync already in progress for position 42" });
+
+     resolveSyncSinglePosition!({ tokenId: "42" });
+     await new Promise((r) => setTimeout(r, 20));
+   });
+});
+
+// ---------------------------------------------------------------------------
+// POST /positions/:tokenId/sync — invalid tokenId
+// ---------------------------------------------------------------------------
+describe("POST /positions/:tokenId/sync — invalid tokenId", () => {
+  it("returns 400 for non-numeric tokenId (letters only)", async () => {
+    const res = await server.inject({ method: "POST", url: "/positions/abc/sync" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("returns 400 for float tokenId (with decimal point)", async () => {
+    const res = await server.inject({ method: "POST", url: "/positions/1.5/sync" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("returns 400 for negative tokenId (starts with minus sign)", async () => {
+    const res = await server.inject({ method: "POST", url: "/positions/-1/sync" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("returns 400 for empty segment (empty string tokenId)", async () => {
+    const res = await server.inject({ method: "POST", url: "/positions//sync" });
+    // Fastify treats /positions//sync as tokenId="", which fails isNumericString
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("returns 202 for very large but valid numeric tokenId (position may not exist, but sync attempt is made)", async () => {
+    mockSyncSinglePosition = async () => ({ tokenId: "999999999", syncedAt: new Date().toISOString() });
+
+    const res = await server.inject({ method: "POST", url: "/positions/999999999/sync" });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ message: "Sync started" });
+  });
+
+  it("returns 202 for tokenId with leading zeros (accepted by isNumericString regex)", async () => {
+    mockSyncSinglePosition = async () => ({ tokenId: "007", syncedAt: new Date().toISOString() });
+
+    const res = await server.inject({ method: "POST", url: "/positions/007/sync" });
+    // /^\d+$/ accepts leading zeros since they are digits
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ message: "Sync started" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /positions/:tokenId/sync/status
+// ---------------------------------------------------------------------------
+describe("GET /positions/:tokenId/sync/status", () => {
+  it("returns 200 with idle status for position that has never synced", async () => {
+    const res = await server.inject({ method: "GET", url: "/positions/999/sync/status" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      status: "idle",
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      positionCount: null,
+    });
+  });
+
+  it("returns 400 for non-numeric tokenId (letters only)", async () => {
+    const res = await server.inject({ method: "GET", url: "/positions/abc/sync/status" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("returns 400 for mixed alphanumeric tokenId", async () => {
+    const res = await server.inject({ method: "GET", url: "/positions/abc123/sync/status" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("running shape: startedAt is ISO string, finishedAt/error/positionCount are null", async () => {
+    let resolveSyncSinglePosition: (v: unknown) => void;
+    mockSyncSinglePosition = () =>
+      new Promise((resolve) => {
+        resolveSyncSinglePosition = resolve;
+      });
+
+    await server.inject({ method: "POST", url: "/positions/888/sync" });
+
+    const res = await server.inject({ method: "GET", url: "/positions/888/sync/status" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("running");
+    expect(typeof body.startedAt).toBe("string");
+    expect(new Date(body.startedAt).toISOString()).toBe(body.startedAt);
+    expect(body.finishedAt).toBeNull();
+    expect(body.error).toBeNull();
+    expect(body.positionCount).toBeNull();
+
+    // Resolve to advance state to "completed" for the next test
+    resolveSyncSinglePosition!({ tokenId: "888" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("completed shape: startedAt + finishedAt are ISO strings, error null, positionCount is 1", async () => {
+    // State is "completed" from the running test above
+    const res = await server.inject({ method: "GET", url: "/positions/888/sync/status" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("completed");
+    expect(typeof body.startedAt).toBe("string");
+    expect(typeof body.finishedAt).toBe("string");
+    expect(new Date(body.startedAt).toISOString()).toBe(body.startedAt);
+    expect(new Date(body.finishedAt).toISOString()).toBe(body.finishedAt);
+    expect(body.error).toBeNull();
+    expect(body.positionCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /positions/:tokenId/sync/status — status contract and isolation
+// ---------------------------------------------------------------------------
+describe("GET /positions/:tokenId/sync/status — status contract and isolation", () => {
+  it("never-synced tokenId returns idle (not 404)", async () => {
+    const res = await server.inject({ method: "GET", url: "/positions/777/sync/status" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      status: "idle",
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      positionCount: null,
+    });
+  });
+
+  it("non-numeric tokenId returns 400", async () => {
+    const res = await server.inject({ method: "GET", url: "/positions/abc/sync/status" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
+  });
+
+  it("state isolation: A's status doesn't affect B", async () => {
+    // Set up tokenId "11" to be running
+    let resolveSyncSinglePosition: (v: unknown) => void;
+    mockSyncSinglePosition = () =>
+      new Promise((resolve) => {
+        resolveSyncSinglePosition = resolve;
+      });
+
+    // Start sync for tokenId "11"
+    await server.inject({ method: "POST", url: "/positions/11/sync" });
+
+    // Verify tokenId "11" is running
+    const status11 = await server.inject({ method: "GET", url: "/positions/11/sync/status" });
+    expect(status11.json().status).toBe("running");
+
+    // Check tokenId "22" (never synced) — should return idle, not "running"
+    const status22 = await server.inject({ method: "GET", url: "/positions/22/sync/status" });
+    expect(status22.statusCode).toBe(200);
+    expect(status22.json()).toEqual({
+      status: "idle",
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      positionCount: null,
+    });
+
+    // Clean up: resolve tokenId "11"
+    resolveSyncSinglePosition!({ tokenId: "11" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("completed state shape is correct", async () => {
+    // Set up tokenId "33" to complete successfully
+    mockSyncSinglePosition = async () => ({ tokenId: "33", syncedAt: new Date().toISOString() });
+
+    // Start sync for tokenId "33"
+    await server.inject({ method: "POST", url: "/positions/33/sync" });
+
+    // Wait for completion
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Check status
+    const res = await server.inject({ method: "GET", url: "/positions/33/sync/status" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("completed");
+    expect(typeof body.startedAt).toBe("string");
+    expect(new Date(body.startedAt).toISOString()).toBe(body.startedAt);
+    expect(typeof body.finishedAt).toBe("string");
+    expect(new Date(body.finishedAt).toISOString()).toBe(body.finishedAt);
+    expect(body.positionCount).toBe(1);
+    expect(body.error).toBeNull();
+  });
+
+  it("failed state is surfaced", async () => {
+    // Set up tokenId "44" to fail
+    let rejectFn: ((e: unknown) => void) | null = null;
+    mockSyncSinglePosition = () =>
+      new Promise<never>((_resolve, reject) => {
+        rejectFn = reject;
+      });
+
+    // Start sync for tokenId "44"
+    await server.inject({ method: "POST", url: "/positions/44/sync" });
+
+    // Reject the promise to simulate failure
+    if (rejectFn) {
+      rejectFn(new Error("Simulated sync failure"));
+    }
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Check status
+    const res = await server.inject({ method: "GET", url: "/positions/44/sync/status" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("failed");
+    expect(typeof body.startedAt).toBe("string");
+    expect(new Date(body.startedAt).toISOString()).toBe(body.startedAt);
+    expect(typeof body.finishedAt).toBe("string");
+    expect(new Date(body.finishedAt).toISOString()).toBe(body.finishedAt);
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toBe("Simulated sync failure");
+    expect(body.positionCount).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /positions/:tokenId/sync — concurrency and state isolation
+// ---------------------------------------------------------------------------
+describe("POST /positions/:tokenId/sync — concurrency and state isolation", () => {
+  it("second request for same tokenId while running → 409", async () => {
+    // Keep the sync running with unresolved Promise
+    let resolveSyncSinglePosition: (v: unknown) => void;
+    mockSyncSinglePosition = () =>
+      new Promise((resolve) => {
+        resolveSyncSinglePosition = resolve;
+      });
+
+    // First request to tokenId "42"
+    const res1 = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res1.statusCode).toBe(202);
+
+    // Second request to same tokenId "42" while first is running
+    const res2 = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res2.statusCode).toBe(409);
+    expect(res2.json()).toMatchObject({ error: "Sync already in progress for position 42" });
+
+    // Clean up: resolve to allow state to complete
+    resolveSyncSinglePosition!({ tokenId: "42" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("after completion, same tokenId can sync again → 202", async () => {
+    // Complete a sync for tokenId "42"
+    mockSyncSinglePosition = async () => ({ tokenId: "42", syncedAt: new Date().toISOString() });
+
+    const res1 = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res1.statusCode).toBe(202);
+
+    // Wait for completion
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Fire another POST to "42" — should succeed since state is no longer "running"
+    const res2 = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res2.statusCode).toBe(202);
+    expect(res2.json()).toMatchObject({ message: "Sync started" });
+
+    // Wait for second sync to complete
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("two different tokenIds can sync simultaneously → both 202", async () => {
+    // Keep both syncs running with unresolved Promises
+    let resolveSyncSinglePosition: (v: unknown) => void;
+    mockSyncSinglePosition = () =>
+      new Promise((resolve) => {
+        resolveSyncSinglePosition = resolve;
+      });
+
+    // Fire POST to tokenId "42" (keep running)
+    const res1 = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res1.statusCode).toBe(202);
+
+    // Fire POST to tokenId "99" (different tokenId, should also succeed)
+    const res2 = await server.inject({ method: "POST", url: "/positions/99/sync" });
+    expect(res2.statusCode).toBe(202);
+
+    // Both should have independent states
+    const status42 = await server.inject({ method: "GET", url: "/positions/42/sync/status" });
+    expect(status42.json().status).toBe("running");
+
+    const status99 = await server.inject({ method: "GET", url: "/positions/99/sync/status" });
+    expect(status99.json().status).toBe("running");
+
+    // Clean up: resolve both
+    resolveSyncSinglePosition!({ tokenId: "42" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("failed state for one tokenId doesn't block another → 202", async () => {
+    // Pre-configure tokenId "777" to have a "failed" status by triggering a failure
+    let rejectFn: ((e: unknown) => void) | null = null;
+    mockSyncSinglePosition = () =>
+      new Promise<never>((_resolve, reject) => {
+        rejectFn = reject;
+      });
+
+    // Fire POST to tokenId "777" and make it fail
+    const firstReq = await server.inject({ method: "POST", url: "/positions/777/sync" });
+    expect(firstReq.statusCode).toBe(202);
+
+    // Now reject the promise
+    if (rejectFn) {
+      rejectFn(new Error("Simulated failure"));
+    }
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Verify tokenId "777" is in failed state
+    const status777 = await server.inject({ method: "GET", url: "/positions/777/sync/status" });
+    expect(status777.json().status).toBe("failed");
+
+    // Fire POST to tokenId "888" (different tokenId) — should succeed
+    mockSyncSinglePosition = async () => ({ tokenId: "888", syncedAt: new Date().toISOString() });
+    const res = await server.inject({ method: "POST", url: "/positions/888/sync" });
+    expect(res.statusCode).toBe(202);
+
+    // Wait for completion
     await new Promise((r) => setTimeout(r, 20));
   });
 });

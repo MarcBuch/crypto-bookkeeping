@@ -54,6 +54,7 @@ mock.module("@lp-tracker/core", () => ({
   listCachedPnLViews: () => [],
   getPositionsCacheSyncedAt: () => null,
   syncLpData: async () => ({ synced: 0 }),
+  syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
   getPnLView: async () => [],
   getILView: async () => [],
   getHistoryView: async () => [],

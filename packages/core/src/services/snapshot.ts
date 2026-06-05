@@ -85,7 +85,10 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
       );
 
       if (openResult.status === "rpc_error") {
-        console.error(`[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`, openResult.error);
+        console.error(
+          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
+          openResult.error,
+        );
         continue;
       }
       if (openResult.status === "found") {

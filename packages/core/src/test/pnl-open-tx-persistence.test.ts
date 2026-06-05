@@ -186,7 +186,10 @@ afterAll(() => {
 
 describe("open_tx persistence and fast-path", () => {
   it("slow-path persists open_tx after findOpenEvent returns a result", async () => {
-    mockFindOpenEvent = async () => ({ status: "found", event: { ...fakeOpenEvent, transactionHash: "0xSLOW" } });
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xSLOW" },
+    });
 
     await getPnLView(baseConfig);
 
@@ -196,7 +199,10 @@ describe("open_tx persistence and fast-path", () => {
   });
 
   it("config fast-path persists open_tx when posConfig.openTx is set", async () => {
-    mockFindOpenEvent = async () => ({ status: "found", event: { ...fakeOpenEvent, transactionHash: "0xCONFIG" } });
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xCONFIG" },
+    });
 
     const config = {
       ...baseConfig,
@@ -243,7 +249,10 @@ describe("open_tx persistence and fast-path", () => {
 
   it("DB fast-path does not overwrite existing open_tx with null on second sync", async () => {
     // First sync — slow path discovers and stores open_tx
-    mockFindOpenEvent = async () => ({ status: "found", event: { ...fakeOpenEvent, transactionHash: "0xSTORED" } });
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xSTORED" },
+    });
     await getPnLView(baseConfig);
 
     let stored = getPosition(TOKEN_ID);

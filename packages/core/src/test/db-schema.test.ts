@@ -121,7 +121,10 @@ describe("store layer — new fields", () => {
   });
 
   // Helper to create a minimal StoredPosition stub
-  function minimalPosition(tokenId: string, overrides?: Partial<StoredPosition>): Omit<StoredPosition, "created_at"> {
+  function minimalPosition(
+    tokenId: string,
+    overrides?: Partial<StoredPosition>,
+  ): Omit<StoredPosition, "created_at"> {
     return {
       token_id: tokenId,
       token0: "0x" + "a".repeat(40),
@@ -247,4 +250,3 @@ describe("store layer — new fields", () => {
     expect(retrieved?.token_id).toBe(tokenId);
   });
 });
-

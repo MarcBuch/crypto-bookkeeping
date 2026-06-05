@@ -716,3 +716,28 @@ export function upsertLpSyncState(state: StoredLpSyncState): void {
     [state.wallet, state.last_synced_at],
   );
 }
+
+export function upsertPositionViewCache(
+  tokenId: string,
+  data: Record<string, unknown>,
+  syncedAt: string,
+): void {
+  const db = getDb();
+  db.run(
+    "INSERT OR REPLACE INTO positions_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)",
+    [tokenId, JSON.stringify(data), syncedAt],
+  );
+}
+
+export function upsertPnLViewCache(
+  tokenId: string,
+  data: Record<string, unknown>,
+  syncedAt: string,
+): void {
+  const db = getDb();
+  db.run("INSERT OR REPLACE INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
+    tokenId,
+    JSON.stringify(data),
+    syncedAt,
+  ]);
+}

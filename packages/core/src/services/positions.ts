@@ -1,8 +1,13 @@
 import { createClient } from "../chain/client.js";
 import { getPoolAddress, getSlot0, getTokenInfo } from "../chain/pools.js";
-import { getAllPositions, type PositionData } from "../chain/positions.js";
+import { getAllPositions, getPositionData, type PositionData } from "../chain/positions.js";
 import type { Config } from "../config.js";
-import { replaceLpCaches, upsertLpSyncState } from "../db/store.js";
+import {
+  replaceLpCaches,
+  upsertLpSyncState,
+  upsertPositionViewCache,
+  upsertPnLViewCache,
+} from "../db/store.js";
 import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 import { getPnLView } from "./pnl.js";
 
@@ -134,4 +139,49 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
     syncedAt,
     positionCount: positions.length,
   };
+}
+
+export interface SyncSinglePositionSummary {
+  tokenId: string;
+  syncedAt: string;
+}
+
+export async function syncSinglePosition(
+  config: Config,
+  tokenId: string,
+): Promise<SyncSinglePositionSummary> {
+  // 1. Validate: tokenId must be a non-empty numeric string
+  if (!tokenId || !/^\d+$/.test(tokenId)) {
+    throw new Error(`Invalid tokenId: "${tokenId}"`);
+  }
+
+  // 2. Create viem client
+  const client = createClient(config);
+
+  // 3. Fetch position data for this specific tokenId (bypasses wallet enumeration)
+  const rawPosition = await getPositionData(
+    client,
+    config.contracts.positionManager,
+    BigInt(tokenId),
+  );
+
+  // 4. Get position view for just this one position
+  const [positionView] = await getPositionsView(config, [rawPosition]);
+  if (positionView === undefined) {
+    throw new Error(`Position #${tokenId} not found or has no view data`);
+  }
+
+  // 5. Get PnL view for just this one position
+  const [pnlView] = await getPnLView(config, tokenId, [rawPosition]);
+  // pnlView may be undefined/null if no PnL data exists — that's OK, don't throw
+
+  // 6. Upsert only this position's cache rows (leave all other positions untouched)
+  const syncedAt = new Date().toISOString();
+  upsertPositionViewCache(tokenId, positionView as unknown as Record<string, unknown>, syncedAt);
+  if (pnlView) {
+    upsertPnLViewCache(tokenId, pnlView as unknown as Record<string, unknown>, syncedAt);
+  }
+
+  // 7. Return summary
+  return { tokenId, syncedAt };
 }

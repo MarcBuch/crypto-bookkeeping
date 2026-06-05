@@ -161,7 +161,7 @@ describe("findOpenEvent scan window computation", () => {
 
     expect(calls.length).toBeGreaterThan(0);
     expect(calls[0].fromBlock).toBe(1n);
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 
   it("custom windowBlocks: startBlock = latestBlock - window", async () => {
@@ -178,7 +178,7 @@ describe("findOpenEvent scan window computation", () => {
     );
 
     expect(calls[0].fromBlock).toBe(9_000n);
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 
   it("custom window larger than latestBlock clamps startBlock to 1n", async () => {
@@ -195,7 +195,7 @@ describe("findOpenEvent scan window computation", () => {
     );
 
     expect(calls[0].fromBlock).toBe(1n);
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 
   it("window === latestBlock exactly clamps startBlock to 1n (boundary)", async () => {
@@ -212,7 +212,7 @@ describe("findOpenEvent scan window computation", () => {
     );
 
     expect(calls[0].fromBlock).toBe(1n);
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 
   it("explicit fromBlock wins over windowBlocks", async () => {
@@ -229,7 +229,7 @@ describe("findOpenEvent scan window computation", () => {
     );
 
     expect(calls[0].fromBlock).toBe(9_500n);
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 
   it("returns not_found (does not throw) when no events found in window", async () => {
@@ -255,15 +255,14 @@ describe("findCloseEvent scan window computation", () => {
       1_000n,
     );
 
-    // findCloseEvent issues two getLogs (DecreaseLiquidity + Collect) per chunk.
-    // Both calls in the first chunk must share the computed startBlock.
+    // The close-event scan must use the explicit start block for each chunk.
     expect(calls.length).toBeGreaterThan(0);
     expect(calls[0].fromBlock).toBe(9_500n);
     const firstChunk = calls.filter((c) => c.toBlock === calls[0].toBlock);
     for (const c of firstChunk) {
       expect(c.fromBlock).toBe(9_500n);
     }
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
   });
 
   it("default window clamps startBlock to 1n for a young chain", async () => {
@@ -272,6 +271,49 @@ describe("findCloseEvent scan window computation", () => {
     const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET);
 
     expect(calls[0].fromBlock).toBe(1n);
-    expect(result).toBeNull();
+    expect(result.status).toBe("not_found");
+  });
+
+  it("includes Collect logs before the close transaction as fees", async () => {
+    let callCount = 0;
+    const client = {
+      getBlockNumber: async () => 1_000n,
+      getLogs: async (args: { event: { name?: string }; fromBlock: bigint; toBlock: bigint }) => {
+        callCount += 1;
+        if (callCount === 1) {
+          expect(args.fromBlock).toBe(100n);
+          return [
+            {
+              args: { tokenId: 1n, liquidity: 50n, amount0: 1_000n, amount1: 2_000n },
+              blockNumber: 300n,
+              transactionHash: TX_HASH,
+            },
+          ];
+        }
+        expect(args.fromBlock).toBe(100n);
+        expect(args.toBlock).toBe(300n);
+        return [
+          {
+            args: { tokenId: 1n, amount0Collect: 10n, amount1Collect: 20n },
+            blockNumber: 200n,
+            transactionHash:
+              "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+          },
+          {
+            args: { tokenId: 1n, amount0Collect: 1_005n, amount1Collect: 2_030n },
+            blockNumber: 300n,
+            transactionHash: TX_HASH,
+          },
+        ];
+      },
+    } as unknown as OpenClient;
+
+    const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 100n);
+
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect(result.event.collectedFees0).toBe(15n);
+      expect(result.event.collectedFees1).toBe(50n);
+    }
   });
 });

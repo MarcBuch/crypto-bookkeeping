@@ -336,7 +336,8 @@ export async function getPnLView(
       }
     } else {
       // Closed position: use cached exit data if available (m2t5 fast path)
-      const hasCachedExit = storedPos?.close_tx && storedPos.exit_amount0 != null;
+      const hasCachedExit =
+        storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
 
       if (hasCachedExit) {
         exitAmount0 = BigInt(storedPos!.exit_amount0!);

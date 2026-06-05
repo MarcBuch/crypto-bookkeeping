@@ -168,7 +168,17 @@ export async function findCloseEvent(
       const receipt = await withRetry(() =>
         client.getTransactionReceipt({ hash: knownCloseTx as `0x${string}` }),
       );
-      const event = extractDecreaseLiquidity(receipt, tokenId);
+      let event = extractDecreaseLiquidity(receipt, tokenId);
+      if (event && fromBlock !== undefined && canScanLogs(client)) {
+        const collectTotals = await sumCollectLogs(
+          client,
+          positionManager,
+          tokenId,
+          fromBlock,
+          receipt.blockNumber,
+        );
+        event = applyCollectTotals(event, collectTotals);
+      }
       if (event) return { status: "found", event };
       console.warn(`    DecreaseLiquidity not found in known tx, falling back to log scan...`);
     }
@@ -193,31 +203,17 @@ export async function findCloseEvent(
           ? lo + LOGS_CHUNK_SIZE - 1n
           : resolvedLatestBlock;
 
-      // Fetch DecreaseLiquidity and Collect logs for this tokenId in one pass each
-      const [decreaseLogs, collectLogs] = await Promise.all([
-        withRetry(() =>
-          client.getLogs({
-            address: positionManager,
-            event: parseAbiItem(
-              "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
-            ),
-            args: { tokenId },
-            fromBlock: lo,
-            toBlock: hi,
-          }),
-        ),
-        withRetry(() =>
-          client.getLogs({
-            address: positionManager,
-            event: parseAbiItem(
-              "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
-            ),
-            args: { tokenId },
-            fromBlock: lo,
-            toBlock: hi,
-          }),
-        ),
-      ]);
+      const decreaseLogs = await withRetry(() =>
+        client.getLogs({
+          address: positionManager,
+          event: parseAbiItem(
+            "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+          ),
+          args: { tokenId },
+          fromBlock: lo,
+          toBlock: hi,
+        }),
+      );
 
       if (decreaseLogs.length > 0) {
         const dLog = decreaseLogs[0];
@@ -225,33 +221,29 @@ export async function findCloseEvent(
         const decreaseAmount0 = BigInt(dArgs.amount0);
         const decreaseAmount1 = BigInt(dArgs.amount1);
 
-        // Find the Collect log in the same transaction
-        const cLog = collectLogs.find((l) => l.transactionHash === dLog.transactionHash);
-
-        let collectedFees0 = 0n;
-        let collectedFees1 = 0n;
-        if (cLog) {
-          const cArgs = cLog.args as any;
-          const collectAmount0 = BigInt(cArgs.amount0Collect);
-          const collectAmount1 = BigInt(cArgs.amount1Collect);
-          // Fees = Collect - DecreaseLiquidity principal
-          collectedFees0 = collectAmount0 > decreaseAmount0 ? collectAmount0 - decreaseAmount0 : 0n;
-          collectedFees1 = collectAmount1 > decreaseAmount1 ? collectAmount1 - decreaseAmount1 : 0n;
-        }
-
         console.log(`    Found close event at block ${dLog.blockNumber}`);
+        const collectTotals = await sumCollectLogs(
+          client,
+          positionManager,
+          tokenId,
+          startBlock,
+          dLog.blockNumber!,
+        );
         return {
           status: "found",
-          event: {
-            tokenId,
-            blockNumber: dLog.blockNumber!,
-            transactionHash: dLog.transactionHash!,
-            amount0: decreaseAmount0,
-            amount1: decreaseAmount1,
-            liquidity: BigInt(dArgs.liquidity),
-            collectedFees0,
-            collectedFees1,
-          },
+          event: applyCollectTotals(
+            {
+              tokenId,
+              blockNumber: dLog.blockNumber!,
+              transactionHash: dLog.transactionHash!,
+              amount0: decreaseAmount0,
+              amount1: decreaseAmount1,
+              liquidity: BigInt(dArgs.liquidity),
+              collectedFees0: 0n,
+              collectedFees1: 0n,
+            },
+            collectTotals,
+          ),
         };
       }
     }
@@ -290,6 +282,57 @@ export async function findCloseEventFromTx(
     client.getTransactionReceipt({ hash: txHash as `0x${string}` }),
   );
   return extractDecreaseLiquidity(receipt, tokenId);
+}
+
+function canScanLogs(client: Client): boolean {
+  return typeof (client as any).getLogs === "function";
+}
+
+async function sumCollectLogs(
+  client: Client,
+  positionManager: Address,
+  tokenId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<{ amount0: bigint; amount1: bigint }> {
+  let amount0 = 0n;
+  let amount1 = 0n;
+
+  for (let lo = fromBlock; lo <= toBlock; lo += LOGS_CHUNK_SIZE) {
+    const hi = lo + LOGS_CHUNK_SIZE - 1n < toBlock ? lo + LOGS_CHUNK_SIZE - 1n : toBlock;
+    const collectLogs = await withRetry(() =>
+      client.getLogs({
+        address: positionManager,
+        event: parseAbiItem(
+          "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
+        ),
+        args: { tokenId },
+        fromBlock: lo,
+        toBlock: hi,
+      }),
+    );
+
+    for (const log of collectLogs) {
+      const args = log.args as any;
+      amount0 += BigInt(args.amount0Collect);
+      amount1 += BigInt(args.amount1Collect);
+    }
+  }
+
+  return { amount0, amount1 };
+}
+
+function applyCollectTotals(
+  event: PositionCloseEvent,
+  collectTotals: { amount0: bigint; amount1: bigint },
+): PositionCloseEvent {
+  return {
+    ...event,
+    collectedFees0:
+      collectTotals.amount0 > event.amount0 ? collectTotals.amount0 - event.amount0 : 0n,
+    collectedFees1:
+      collectTotals.amount1 > event.amount1 ? collectTotals.amount1 - event.amount1 : 0n,
+  };
 }
 
 // === Internal helpers ===

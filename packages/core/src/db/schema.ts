@@ -205,6 +205,14 @@ function initSchema(database: Database): void {
     database.exec("ALTER TABLE positions ADD COLUMN close_block INTEGER");
   }
 
+  if (!positionCols.some((c) => c.name === "close_usd_price0")) {
+    database.exec("ALTER TABLE positions ADD COLUMN close_usd_price0 REAL");
+  }
+
+  if (!positionCols.some((c) => c.name === "close_usd_price1")) {
+    database.exec("ALTER TABLE positions ADD COLUMN close_usd_price1 REAL");
+  }
+
   const taxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
     name: string;
     pk: number;

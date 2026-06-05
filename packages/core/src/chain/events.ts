@@ -16,10 +16,10 @@ const DECREASE_LIQUIDITY_TOPIC =
   "0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4";
 const COLLECT_TOPIC = "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01";
 
-// The public Hyperliquid RPC enforces a 1000-block getLogs limit.
-// When using Envio HyperRPC (https://hyperliquid.rpc.hypersync.xyz) this can
-// be raised to 100_000. Set via config or override here.
-const LOGS_CHUNK_SIZE = 999n;
+// Envio HyperRPC (https://hyperliquid.rpc.hypersync.xyz) supports up to
+// 100_000 blocks per getLogs call. The public Hyperliquid RPC was limited to
+// 1_000, but we now use HyperRPC exclusively.
+const LOGS_CHUNK_SIZE = 100_000n;
 
 // HyperEVM produces ~1 block/sec. 30 days ≈ 2,592,000 blocks.
 // Used as the default getLogs scan window when no explicit fromBlock is provided.

@@ -8,7 +8,7 @@
 
 import { RpcError } from "../services/errors.js";
 
-const MIN_DELAY_MS = 50; // HyperRPC is far more permissive than the public RPC
+const MIN_DELAY_MS = 10; // HyperRPC is far more permissive than the public RPC
 let lastRequestTime = 0;
 // Mutex flag to prevent the race condition where concurrent callers all read
 // lastRequestTime before any of them update it.

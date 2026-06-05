@@ -20,7 +20,15 @@ export interface TaxConfig {
 }
 
 export interface Config {
+  /** Full-node RPC used for eth_call / readContract (e.g. public Hyperliquid RPC). */
   rpc: string;
+  /**
+   * Optional Envio HyperRPC endpoint used for eth_getLogs and
+   * eth_getTransactionReceipt. Supports 100k-block ranges and has relaxed
+   * rate limits. Falls back to `rpc` if not set.
+   * Format: https://hyperliquid.rpc.hypersync.xyz/<api-token>
+   */
+  logsRpc?: string;
   chainId: number;
   wallet: Address;
   contracts: {

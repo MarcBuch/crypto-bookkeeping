@@ -279,6 +279,10 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         label="ROI"
         value={pnl ? formatPercent(pnl.absolutePnlPercent) : "n/a"}
         valueClassName={pnl ? darkToneClass(pnl.absolutePnlPercent) : undefined}
+        tooltip={pnl ? [
+          `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`,
+          pnl.token1UsdPrice != null ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice) : null,
+        ].filter(Boolean).join("\n") : undefined}
       />
 
       <div className="min-w-0 font-mono text-xs font-bold">
@@ -349,24 +353,54 @@ function TokenIcon({ symbol, className }: { symbol: string; className: string })
   );
 }
 
-function DarkStat({
+export function DarkStat({
   label,
   value,
   detail,
   valueClassName = "text-neutral-950",
+  tooltip,
 }: {
   label: string;
   value: string;
   detail?: string;
   valueClassName?: string;
+  tooltip?: string;
 }) {
+  const [visible, setVisible] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  function handleMouseEnter() {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+    }
+    setVisible(true);
+  }
+
   return (
     <div>
       <p className="text-xs font-bold text-neutral-600">{label}</p>
-      <p className={`mt-2 font-mono text-base font-black ${valueClassName}`}>{value}</p>
+      <p
+        ref={ref}
+        className={`mt-2 font-mono text-base font-black ${tooltip ? "cursor-default" : ""} ${valueClassName}`}
+        onMouseEnter={tooltip ? handleMouseEnter : undefined}
+        onMouseLeave={tooltip ? () => setVisible(false) : undefined}
+      >
+        {value}
+      </p>
       {detail ? (
         <p className="mt-1 text-[0.68rem] font-semibold text-neutral-500">{detail}</p>
       ) : null}
+      {tooltip && visible && (
+        <span
+          className="pointer-events-none fixed z-[9999] w-48 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal tracking-normal text-white normal-case shadow-lg whitespace-pre-line"
+          style={{ left: coords.x, top: coords.y - 8, transform: "translate(-50%, -100%)" }}
+        >
+          {tooltip}
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
+        </span>
+      )}
     </div>
   );
 }
@@ -493,7 +527,7 @@ export function EmptyState() {
   );
 }
 
-function formatNumber(value: number): string {
+export function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: Math.abs(value) < 1 ? 6 : 2,
   }).format(value);
@@ -507,7 +541,7 @@ function formatUsdFeeValue(value: number | null | undefined): string {
   return typeof value === "number" ? formatUsd(value) : "USD unavailable";
 }
 
-function formatUsd(value: number): string {
+export function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",

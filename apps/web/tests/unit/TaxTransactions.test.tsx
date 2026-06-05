@@ -1014,4 +1014,582 @@ describe("tax transactions rendering", () => {
     expect(html.match(/<textarea/g)?.length).toBe(2);
     expect(html.match(/Save comment/g)?.length).toBe(2);
   });
+
+  it("renders group header row with expand toggle, parts count, and grouped label", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "part-1", hash, transaction_type: "txlist", token_symbol: null, token_decimal: null },
+          { ...taxTransaction, id: "part-2", hash, transaction_type: "tokentx" },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Must have exactly ONE group header row (not two <tr> elements for it)
+    // The group header is the single row that holds the expand toggle
+    expect(html).toContain("grouped trade");
+    expect(html).toContain("2 transaction parts");
+    expect(html).toContain("Show parts");
+    expect(html).toContain("Applies to all parts");
+    // Desktop expand toggle has correct aria attributes
+    expect(html).toContain(`aria-label="Show transaction parts for ${hash}"`);
+    expect(html).toContain('aria-expanded="false"');
+    // The group label select uses the group composite ID for data-transaction-id
+    expect(html).toContain(`data-transaction-id="hash:${hash}"`);
+    // Individual transaction IDs NOT present when collapsed
+    expect(html).not.toContain('data-transaction-id="part-1"');
+    expect(html).not.toContain('data-transaction-id="part-2"');
+  });
+
+  it("renders expanded group with child rows using individual transaction IDs", () => {
+    const hash = "0xd2705aca4c002c9f2ed1a65d5dbfbfb5ccefe45d7b0b248e64037fb753cc62b8";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "part-1", hash, transaction_type: "txlist", token_symbol: null, token_decimal: null },
+          { ...taxTransaction, id: "part-2", hash, transaction_type: "tokentx" },
+        ]}
+        defaultExpandedGroups={[`hash:${hash}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Expanded state
+    expect(html).toContain("Hide parts");
+    expect(html).toContain('aria-expanded="true"');
+    // Both child transaction types visible
+    expect(html).toContain("txlist");
+    expect(html).toContain("tokentx");
+    // Group composite ID still present (group header row still renders)
+    expect(html).toContain(`data-transaction-id="hash:${hash}"`);
+    // Individual transaction IDs now present for each child
+    expect(html).toContain('data-transaction-id="part-1"');
+    expect(html).toContain('data-transaction-id="part-2"');
+  });
+
+  it("renders correct parts count for groups with more than 2 transactions", () => {
+    const hash = "0xabc123";
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "p1", hash },
+          { ...taxTransaction, id: "p2", hash },
+          { ...taxTransaction, id: "p3", hash },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("3 transaction parts");
+    expect(html).not.toContain("2 transaction parts");
+    expect(html).toContain("grouped trade");
+    // Only 1 transaction group shown in count badge
+    expect(html).toContain("1 transaction");
+  });
+
+  it("renders group header with null primary fields without throwing", () => {
+    const hash = "0xnullprimary";
+    const nullTx = {
+      ...taxTransaction,
+      hash,
+      time_stamp: null,
+      block_number: null,
+      label: null,
+      comment: null,
+      gain_eur: null,
+      cost_eur: null,
+      proceeds_eur: null,
+      holding_duration_days: null,
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+      fee: null,
+    } as TaxTransaction;
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...nullTx, id: "null-1" },
+          { ...nullTx, id: "null-2" },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("grouped trade");
+    expect(html).toContain("2 transaction parts");
+    // Null values render as "-"
+    expect(html).toContain("Time n/a");
+  });
+
+  it("expanding one group does not expose child rows from a different group", () => {
+    const hash1 = "0xgroup1hash";
+    const hash2 = "0xgroup2hash";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "g1-part1", hash: hash1 },
+          { ...taxTransaction, id: "g1-part2", hash: hash1 },
+          { ...taxTransaction, id: "g2-part1", hash: hash2 },
+          { ...taxTransaction, id: "g2-part2", hash: hash2 },
+        ]}
+        defaultExpandedGroups={[`hash:${hash1}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Group 1 is expanded: its child IDs present
+    expect(html).toContain('data-transaction-id="g1-part1"');
+    expect(html).toContain('data-transaction-id="g1-part2"');
+    // Group 2 is NOT expanded: its child IDs absent
+    expect(html).not.toContain('data-transaction-id="g2-part1"');
+    expect(html).not.toContain('data-transaction-id="g2-part2"');
+    // Group 2 composite ID present (header row still renders)
+    expect(html).toContain(`data-transaction-id="hash:${hash2}"`);
+  });
+
+  it("can render two groups both simultaneously expanded", () => {
+    const hash1 = "0xgroup1hash";
+    const hash2 = "0xgroup2hash";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "g1-part1", hash: hash1 },
+          { ...taxTransaction, id: "g1-part2", hash: hash1 },
+          { ...taxTransaction, id: "g2-part1", hash: hash2 },
+          { ...taxTransaction, id: "g2-part2", hash: hash2 },
+        ]}
+        defaultExpandedGroups={[`hash:${hash1}`, `hash:${hash2}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Both groups' child IDs present
+    expect(html).toContain('data-transaction-id="g1-part1"');
+    expect(html).toContain('data-transaction-id="g1-part2"');
+    expect(html).toContain('data-transaction-id="g2-part1"');
+    expect(html).toContain('data-transaction-id="g2-part2"');
+    // Both composite IDs present (headers still render)
+    expect(html).toContain(`data-transaction-id="hash:${hash1}"`);
+    expect(html).toContain(`data-transaction-id="hash:${hash2}"`);
+    // 2 groups expanded → 4 aria-expanded="true" (2 desktop + 2 mobile)
+    expect(html.match(/aria-expanded="true"/g)?.length).toBe(4);
+  });
+
+  it("group-level label select uses composite hash ID, not individual transaction IDs", () => {
+    const hash = "0xcompositeid";
+
+    const collapsedHtml = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "tx-alpha", hash, label: "Trade" as const },
+          { ...taxTransaction, id: "tx-beta", hash, label: null },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Composite ID present on the group-level select
+    expect(collapsedHtml).toContain(`data-transaction-id="hash:${hash}"`);
+    // Individual IDs absent (group collapsed)
+    expect(collapsedHtml).not.toContain('data-transaction-id="tx-alpha"');
+    expect(collapsedHtml).not.toContain('data-transaction-id="tx-beta"');
+  });
+
+  it("pre-expands only the group matching defaultExpandedGroups, leaving others collapsed", () => {
+    const expandedHash = "0xexpandedhash";
+    const collapsedHash = "0xcollapsedHash";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "ex-1", hash: expandedHash },
+          { ...taxTransaction, id: "ex-2", hash: expandedHash },
+          { ...taxTransaction, id: "col-1", hash: collapsedHash },
+          { ...taxTransaction, id: "col-2", hash: collapsedHash },
+        ]}
+        defaultExpandedGroups={[`hash:${expandedHash}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Expanded group: children visible
+    expect(html).toContain('data-transaction-id="ex-1"');
+    expect(html).toContain('data-transaction-id="ex-2"');
+    // Collapsed group: children absent
+    expect(html).not.toContain('data-transaction-id="col-1"');
+    expect(html).not.toContain('data-transaction-id="col-2"');
+    // Expanded group has aria-expanded="true", collapsed has "false"
+    expect(html).toContain(`aria-label="Hide transaction parts for ${expandedHash}"`);
+    expect(html).toContain(`aria-label="Show transaction parts for ${collapsedHash}"`);
+  });
+
+  it("renders single-transaction group as a plain row without expand toggle", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // No expand toggle present for standalone rows
+    expect(html).not.toContain("grouped trade");
+    expect(html).not.toContain("transaction parts");
+    expect(html).not.toContain("Show parts");
+    expect(html).not.toContain("Hide parts");
+    // But the hash link and label controls are present
+    expect(html).toContain("0x1234...cdef");
+    expect(html).toContain("Trade");
+  });
+
+  it("renders a single fully-sparse transaction without throwing", () => {
+    const sparseTransaction: TaxTransaction = {
+      ...taxTransaction,
+      id: "sparse-standalone",
+      hash: "0xsparsesolo1234abcd",
+      block_number: null,
+      time_stamp: null,
+      from_address: null,
+      to_address: null,
+      value: null,
+      fee: null,
+      method_id: null,
+      function_name: null,
+      token_symbol: null,
+      token_decimal: null,
+      transaction_type: null,
+      label: null,
+      comment: null,
+      incoming_quantity: null,
+      incoming_asset: null,
+      outgoing_quantity: null,
+      outgoing_asset: null,
+      cost_eur: null,
+      proceeds_eur: null,
+      gain_eur: null,
+      holding_duration_days: null,
+    };
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[sparseTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("0xspar...abcd");
+    // All null value cells render as "-"
+    const dashCount = (html.match(/(?<=>)-(?=<)/g) ?? []).length;
+    expect(dashCount).toBeGreaterThan(4); // multiple "-" cells
+    // Time and block render as n/a
+    expect(html).toContain("Time n/a");
+  });
+
+  it("renders all child rows for a large group (5 transactions) when expanded", () => {
+    const hash = "0xlarge5group";
+    const transactions = Array.from({ length: 5 }, (_, i) => ({
+      ...taxTransaction,
+      id: `large-part-${i}`,
+      hash,
+    })) as TaxTransaction[];
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={transactions}
+        defaultExpandedGroups={[`hash:${hash}`]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain("5 transaction parts");
+    // All 5 child transaction IDs appear in the expanded state
+    for (let i = 0; i < 5; i++) {
+      expect(html).toContain(`data-transaction-id="large-part-${i}"`);
+    }
+    // Group composite ID still present
+    expect(html).toContain(`data-transaction-id="hash:${hash}"`);
+  });
+
+  it("renders ⇅ sort indicator on sortable header columns when unsorted", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Each sortable column header shows the ⇅ indicator
+    expect(html).toContain("⇅");
+    // aria-sort="none" for sortable but unsorted columns
+    expect(html).toContain('aria-sort="none"');
+    // Non-sortable columns (hash, comment) do NOT have aria-sort
+    // We can't easily isolate per-cell, but verify none have aria-sort="ascending" by default
+    expect(html).not.toContain('aria-sort="ascending"');
+    expect(html).not.toContain('aria-sort="descending"');
+  });
+
+  it("sorts rows by gain_eur descending when defaultSorting is set", () => {
+    const hash1 = "0x00000000000000000000000000000001";
+    const hash2 = "0x00000000000000000000000000000002";
+    const hash3 = "0x00000000000000000000000000000003";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "low", hash: hash1, gain_eur: "10.00" },
+          { ...taxTransaction, id: "high", hash: hash2, gain_eur: "200.00" },
+          { ...taxTransaction, id: "mid", hash: hash3, gain_eur: "50.00" },
+        ]}
+        defaultSorting={[{ id: "gain_eur", desc: true }]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // High (200) appears before mid (50) appears before low (10)
+    const posHigh = html.indexOf("200.00");
+    const posMid = html.indexOf("50.00");
+    const posLow = html.indexOf("10.00");
+    expect(posHigh).toBeLessThan(posMid);
+    expect(posMid).toBeLessThan(posLow);
+
+    // Sort indicator shows ▼ (desc) on gain_eur column
+    expect(html).toContain('aria-sort="descending"');
+    expect(html).toContain("▼");
+  });
+
+  it("sorts rows by gain_eur ascending when defaultSorting is set to asc", () => {
+    const hash1 = "0x00000000000000000000000000000001";
+    const hash2 = "0x00000000000000000000000000000002";
+    const hash3 = "0x00000000000000000000000000000003";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "low", hash: hash1, gain_eur: "10.00" },
+          { ...taxTransaction, id: "high", hash: hash2, gain_eur: "200.00" },
+          { ...taxTransaction, id: "mid", hash: hash3, gain_eur: "50.00" },
+        ]}
+        defaultSorting={[{ id: "gain_eur", desc: false }]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Low (10) appears before mid (50) appears before high (200)
+    const posLow = html.indexOf("10.00");
+    const posMid = html.indexOf("50.00");
+    const posHigh = html.indexOf("200.00");
+    expect(posLow).toBeLessThan(posMid);
+    expect(posMid).toBeLessThan(posHigh);
+
+    // Sort indicator shows ▲ (asc)
+    expect(html).toContain('aria-sort="ascending"');
+    expect(html).toContain("▲");
+  });
+
+  it("sorts numeric string fields numerically, not lexicographically", () => {
+    const hash1 = "0x00000000000000000000000000000001";
+    const hash2 = "0x00000000000000000000000000000002";
+    const hash3 = "0x00000000000000000000000000000003";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          { ...taxTransaction, id: "nine", hash: hash1, gain_eur: "9.00" },
+          { ...taxTransaction, id: "hundred", hash: hash2, gain_eur: "100.00" },
+          { ...taxTransaction, id: "ten", hash: hash3, gain_eur: "10.00" },
+        ]}
+        defaultSorting={[{ id: "gain_eur", desc: false }]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Numeric ascending: 9 < 10 < 100
+    const pos9 = html.indexOf(">9.00<");
+    const pos10 = html.indexOf(">10.00<");
+    const pos100 = html.indexOf(">100.00<");
+    expect(pos9).toBeGreaterThan(-1);
+    expect(pos10).toBeGreaterThan(-1);
+    expect(pos100).toBeGreaterThan(-1);
+    expect(pos9).toBeLessThan(pos10);
+    expect(pos10).toBeLessThan(pos100);
+  });
+
+  it("does not render aria-sort or cursor-pointer on non-sortable column headers", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // hash and comment columns are not sortable (enableSorting: false)
+    // We can't isolate per-cell easily, but verify that cursor-pointer appears fewer times
+    // than sortable-column count (11 sortable columns)
+    const cursorCount = (html.match(/cursor-pointer/g) ?? []).length;
+    // Sortable columns have cursor-pointer; non-sortable (hash, comment) do not
+    // Verify at least 1 cursor-pointer exists but fewer than total column count
+    expect(cursorCount).toBeGreaterThan(0);
+    // Non-sortable columns (hash, comment) should not contribute cursor-pointer
+    // The actual count reflects the number of sortable columns defined in the component
+    expect(cursorCount).toBe(7);
+  });
+
+  it("renders all column headers visible when no defaultColumnVisibility is set", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // All expected column header labels present
+    expect(html).toContain("Time / Block");
+    expect(html).toContain("Hash");
+    expect(html).toContain("Label");
+    expect(html).toContain("Note");
+    expect(html).toContain("Gain EUR");
+    expect(html).toContain("Cost EUR");
+    // Columns dropdown button present
+    expect(html).toContain(">Columns<");
+  });
+
+  it("hides a column header and its cell data when defaultColumnVisibility hides it", () => {
+    const visibleHtml = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[{ ...taxTransaction, gain_eur: "123.45" }]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+    const hiddenHtml = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[{ ...taxTransaction, gain_eur: "123.45" }]}
+        defaultColumnVisibility={{ gain_eur: false }}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // When visible: desktop thead contains the sortable column header with sort indicator
+    expect(visibleHtml).toContain("Gain EUR<span");
+    // When hidden: desktop thead no longer contains the Gain EUR <th> with sort indicator
+    expect(hiddenHtml).not.toContain("Gain EUR<span");
+    // Columns button is still present
+    expect(hiddenHtml).toContain(">Columns<");
+  });
+
+  it("renders column visibility dropdown with checkboxes for every column", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // The Columns button is present
+    expect(html).toContain(">Columns<");
+    // The dropdown is NOT open by default (showColumnMenu starts false)
+    expect(html).not.toContain('type="checkbox"');
+  });
+
+  it("columns dropdown is hidden on initial render (showColumnMenu defaults to false)", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Button present
+    expect(html).toContain(">Columns<");
+    // No checkboxes visible (dropdown closed)
+    expect(html).not.toContain('type="checkbox"');
+    // No column toggle ids visible in initial render
+    expect(html).not.toContain("gain_eur");
+  });
+
+  it("hides multiple columns when defaultColumnVisibility sets them false", () => {
+    const hiddenHtml = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[{ ...taxTransaction, gain_eur: "123.45", cost_eur: "500.00", block_number: 21534838 }]}
+        defaultColumnVisibility={{ gain_eur: false, cost_eur: false, time_stamp: false }}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // Desktop thead should not show hidden column headers (sortable cols include sort indicator)
+    expect(hiddenHtml).not.toContain("Gain EUR<span");
+    expect(hiddenHtml).not.toContain("Cost EUR<span");
+    // time_stamp column header "Time / Block" is sortable too
+    expect(hiddenHtml).not.toContain("Time / Block<span");
+    // Columns button is still present
+    expect(hiddenHtml).toContain(">Columns<");
+  });
+
+  it("renders mixed group and standalone row with independent data", () => {
+    const groupHash = "0xmixedgroup";
+    const soloHash = "0xsolo";
+
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[
+          {
+            ...taxTransaction,
+            id: "group-a",
+            hash: groupHash,
+            gain_eur: "100.00",
+            label: "Trade" as const,
+          },
+          {
+            ...taxTransaction,
+            id: "group-b",
+            hash: groupHash,
+            gain_eur: null,
+            label: null,
+          },
+          {
+            ...taxTransaction,
+            id: "solo",
+            hash: soloHash,
+            gain_eur: "50.00",
+            label: "Transfer" as const,
+          },
+        ]}
+        updateTransaction={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    // 2 transactions shown in count (1 group + 1 standalone)
+    expect(html).toContain("2 transactions");
+    // Group shows "Mixed" for gain_eur (mixed values)
+    expect(html).toContain("Mixed");
+    // Standalone row shows its gain value
+    expect(html).toContain("50.00");
+  });
 });

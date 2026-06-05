@@ -747,3 +747,28 @@ export function upsertPnLViewCache(
     syncedAt,
   ]);
 }
+
+export interface StoredTokenMetadata {
+  contract_address: string;
+  symbol: string | null;
+  name: string | null;
+  decimals: number | null;
+  fetched_at: string;
+}
+
+export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {
+  const db = getDb();
+  const address = metadata.contract_address.toLowerCase();
+  db.run(
+    `INSERT OR REPLACE INTO token_metadata (contract_address, symbol, name, decimals, fetched_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [address, metadata.symbol, metadata.name, metadata.decimals, metadata.fetched_at],
+  );
+}
+
+export function getTokenMetadata(contractAddress: string): StoredTokenMetadata | null {
+  const db = getDb();
+  return db
+    .query("SELECT * FROM token_metadata WHERE contract_address = ?")
+    .get(contractAddress.toLowerCase()) as StoredTokenMetadata | null;
+}

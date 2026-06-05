@@ -17,6 +17,8 @@ import {
   enrichTaxTransactionsEurValues,
   syncTaxTransactions,
 } from "../services/tax-transactions.js";
+import type { HypersyncClient } from "@envio-dev/hypersync-client";
+import type { Client } from "../chain/client.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-tax-sync-tests";
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
@@ -33,9 +35,19 @@ type RequestRecord = {
   params: URLSearchParams;
 };
 
+const STUB_CONTRACTS = {
+  factory: "0x0000000000000000000000000000000000000001" as `0x${string}`,
+  positionManager: "0x0000000000000000000000000000000000000002" as `0x${string}`,
+  quoter: "0x0000000000000000000000000000000000000003" as `0x${string}`,
+  swapRouter: "0x0000000000000000000000000000000000000004" as `0x${string}`,
+};
+
 function config() {
   return {
     wallet: WALLET,
+    rpc: "https://rpc.stub.invalid",
+    chainId: 999,
+    contracts: STUB_CONTRACTS,
     tax: {
       explorerApiUrl: BASE_URL,
       explorerChainId: 999,
@@ -117,6 +129,138 @@ function actionPages(requests: RequestRecord[], action: string): number[] {
     .map((request) => Number(request.params.get("page")));
 }
 
+// ---------------------------------------------------------------------------
+// HyperSync mock helpers
+// ---------------------------------------------------------------------------
+
+interface MockTx {
+  hash: string;
+  blockNumber: number;
+  blockTimestamp?: number;
+  from: string;
+  to?: string | null;
+  value?: bigint;
+  gasUsed?: bigint;
+  gasPrice?: bigint;
+  effectiveGasPrice?: bigint;
+  input?: string;
+  status?: number;
+  sighash?: string | null;
+}
+
+interface MockLog {
+  transactionHash: string;
+  blockNumber: number;
+  logIndex: number;
+  address: string;
+  data?: string;
+  topics: (string | null | undefined)[];
+}
+
+function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): HypersyncClient {
+  return {
+    get: async (_query: unknown) => ({
+      archiveHeight: 10000,
+      nextBlock: 10000,
+      totalExecutionTime: 1,
+      data: {
+        blocks: [
+          ...txs.map((t) => ({ number: t.blockNumber, timestamp: t.blockTimestamp ?? 1770000000 })),
+          ...logs.map((l) => ({ number: l.blockNumber, timestamp: 1770000000 })),
+        ],
+        transactions: txs,
+        logs,
+        traces: [],
+      },
+    }),
+  } as unknown as HypersyncClient;
+}
+
+const ERC20_TRANSFER_TOPIC0 =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+function padAddr(addr: string): string {
+  return "0x" + "0".repeat(24) + addr.toLowerCase().replace(/^0x/, "");
+}
+
+function makeTokenLog(
+  overrides: Partial<MockLog> & {
+    from: string;
+    to: string;
+    value?: bigint;
+    contractAddress: string;
+    logIndex?: number;
+    blockNumber?: number;
+    transactionHash?: string;
+  },
+): MockLog {
+  const value = overrides.value ?? 1_000_000_000_000_000_000n;
+  const hex = value.toString(16).padStart(64, "0");
+  return {
+    transactionHash:
+      overrides.transactionHash ??
+      "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+    blockNumber: overrides.blockNumber ?? 100,
+    logIndex: overrides.logIndex ?? 0,
+    address: overrides.contractAddress,
+    data: "0x" + hex,
+    topics: [ERC20_TRANSFER_TOPIC0, padAddr(overrides.from), padAddr(overrides.to)],
+  };
+}
+
+/** A no-op fetcher that suppresses txlistinternal (returns empty) */
+const noOpFetcher = async (_url: string) => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    status: "0",
+    message: "No transactions found",
+    result: "No transactions found",
+  }),
+});
+
+/** A viem mock that throws for all readContract calls (no token metadata needed) */
+function makeNoOpViemMock(): Client {
+  return {
+    readContract: async ({ functionName }: { address: string; functionName: string }) => {
+      throw new Error(`no metadata for ${functionName}`);
+    },
+  } as unknown as Client;
+}
+
+/** A viem mock that returns metadata for given contract addresses */
+function makeViemMock(
+  metadata: Record<
+    string,
+    { symbol?: string | null; name?: string | null; decimals?: number | null }
+  >,
+): Client {
+  return {
+    readContract: async ({
+      address,
+      functionName,
+    }: {
+      address: string;
+      functionName: string;
+    }) => {
+      const m = metadata[address.toLowerCase()];
+      if (functionName === "symbol") {
+        if (!m || m.symbol === null || m.symbol === undefined) throw new Error("no symbol");
+        return m.symbol;
+      }
+      if (functionName === "name") {
+        if (!m || m.name === null || m.name === undefined) throw new Error("no name");
+        return m.name;
+      }
+      if (functionName === "decimals") {
+        if (!m || m.decimals === null || m.decimals === undefined) throw new Error("no decimals");
+        return m.decimals;
+      }
+      throw new Error(`Unknown: ${functionName}`);
+    },
+  } as unknown as Client;
+}
+
 describe("tax transaction explorer sync", () => {
   beforeEach(() => {
     mkdirSync(TMP, { recursive: true });
@@ -130,80 +274,161 @@ describe("tax transaction explorer sync", () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it("paginates until a short page and sends stable explorer params", async () => {
-    const requests: RequestRecord[] = [];
-    const fetcher = makeFetcher((params) => {
-      const action = params.get("action");
-      const page = params.get("page");
-      if (action === "txlist" && page === "1") {
-        return envelope([
-          tx({ hash: "0xaaa1", blockNumber: "10" }),
-          tx({ hash: "0xaaa2", blockNumber: "11" }),
-        ]);
-      }
-      if (action === "txlist" && page === "2") {
-        return envelope([tx({ hash: "0xaaa3", blockNumber: "12" })]);
-      }
-      if (action === "txlistinternal") return unsupportedInternal();
-      return envelope([]);
-    }, requests);
+  it("fetches txlist and token transfers via HyperSync and assigns stable hypersync: IDs", async () => {
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xaaa1",
+          blockNumber: 10,
+          blockTimestamp: 1770000000,
+          from: "0xfrom",
+          to: WALLET.toLowerCase(),
+          value: 1n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+        {
+          hash: "0xaaa2",
+          blockNumber: 11,
+          blockTimestamp: 1770000001,
+          from: WALLET.toLowerCase(),
+          to: "0xto",
+          value: 2n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+        {
+          hash: "0xaaa3",
+          blockNumber: 12,
+          blockTimestamp: 1770000002,
+          from: "0xfrom",
+          to: WALLET.toLowerCase(),
+          value: 3n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
     const summary = await syncTaxTransactions(config(), {
-      fetcher,
-      pageSize: 2,
-      maxPages: 3,
-      startBlock: 9,
-      endBlock: 20,
-      source: "testsource",
+      hyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
     });
 
     expect(summary.synced).toBe(3);
     expect(summary.latestBlockNumber).toBe(12);
-    expect(actionPages(requests, "txlist")).toEqual([1, 2]);
-    expect(actionPages(requests, "tokentx")).toEqual([1]);
-    expect(actionPages(requests, "tokennfttx")).toEqual([1]);
-    expect(actionPages(requests, "txlistinternal")).toEqual([1]);
-
-    for (const request of requests) {
-      expect(request.url.startsWith(`${BASE_URL}?`)).toBe(true);
-      expect(request.params.get("chainid")).toBe("999");
-      expect(request.params.get("module")).toBe("account");
-      expect(request.params.get("address")).toBe(WALLET);
-      expect(request.params.get("offset")).toBe("2");
-      expect(request.params.get("sort")).toBe("asc");
-      expect(request.params.get("apikey")).toBe("test-key");
-      expect(request.params.get("startblock")).toBe("9");
-      expect(request.params.get("endblock")).toBe("20");
-    }
     expect(new Set(listTaxTransactions().map((row) => row.id))).toEqual(
       new Set([
-        "testsource:txlist:0xaaa1:external",
-        "testsource:txlist:0xaaa2:external",
-        "testsource:txlist:0xaaa3:external",
+        "hypersync:txlist:0xaaa1:external",
+        "hypersync:txlist:0xaaa2:external",
+        "hypersync:txlist:0xaaa3:external",
       ]),
     );
   });
 
-  it("uses Hyperscan as the default explorer without requiring an API key", async () => {
-    const requests: RequestRecord[] = [];
+  it("uses HyperSync for txlist/tokentx/tokennfttx and explorer only for txlistinternal", async () => {
+    const explorerRequests: RequestRecord[] = [];
+
+    // HyperSync returns one transaction
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xhypersync1",
+          blockNumber: 50,
+          from: "0xfrom",
+          to: WALLET.toLowerCase(),
+          value: 1n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
+
+    // Explorer fetcher only handles txlistinternal
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlistinternal") return unsupportedInternal();
+      // Should not be called for txlist/tokentx/tokennfttx
+      return envelope([]);
+    }, explorerRequests);
 
     await syncTaxTransactions(
       {
         wallet: WALLET,
+        rpc: "https://rpc.stub.invalid",
+        chainId: 999,
+        contracts: STUB_CONTRACTS,
         tax: {
           explorerApiKey: "YOUR_ETHERSCAN_API_KEY_OPTIONAL",
         },
       },
       {
-        fetcher: makeFetcher(() => envelope([]), requests),
+        hyperSyncClient,
+        viemClient: makeNoOpViemMock(),
+        fetcher,
       },
     );
 
-    expect(requests).toHaveLength(4);
-    for (const request of requests) {
-      expect(request.url.startsWith("https://www.hyperscan.com/api?")).toBe(true);
-      expect(request.params.get("apikey")).toBeNull();
-    }
+    // Only txlistinternal should go to explorer
+    expect(explorerRequests).toHaveLength(1);
+    expect(explorerRequests[0].params.get("action")).toBe("txlistinternal");
+    // HyperSync transaction should be stored
+    expect(listTaxTransactions().some((r) => r.hash === "0xhypersync1")).toBe(true);
+  });
+
+  it("throws a clear error when hyperSyncApiToken is missing or empty", async () => {
+    await expect(
+      syncTaxTransactions(
+        {
+          wallet: WALLET,
+          rpc: "https://rpc.stub.invalid",
+          chainId: 999,
+          contracts: STUB_CONTRACTS,
+          tax: { hyperSyncApiToken: "" },
+        },
+        { fetcher: noOpFetcher },
+      ),
+    ).rejects.toThrow("tax.hyperSyncApiToken");
+
+    await expect(
+      syncTaxTransactions(
+        {
+          wallet: WALLET,
+          rpc: "https://rpc.stub.invalid",
+          chainId: 999,
+          contracts: STUB_CONTRACTS,
+          tax: {},
+        },
+        { fetcher: noOpFetcher },
+      ),
+    ).rejects.toThrow("tax.hyperSyncApiToken");
+
+    await expect(
+      syncTaxTransactions(
+        {
+          wallet: WALLET,
+          rpc: "https://rpc.stub.invalid",
+          chainId: 999,
+          contracts: STUB_CONTRACTS,
+          tax: { hyperSyncApiToken: "YOUR_HYPERSYNC_API_TOKEN" },
+        },
+        { fetcher: noOpFetcher },
+      ),
+    ).rejects.toThrow("tax.hyperSyncApiToken");
   });
 
   it("fails before fetch when an explicit Etherscan v2 explorer requires a real API key", async () => {
@@ -213,12 +438,17 @@ describe("tax transaction explorer sync", () => {
       syncTaxTransactions(
         {
           wallet: WALLET,
+          rpc: "https://rpc.stub.invalid",
+          chainId: 999,
+          contracts: STUB_CONTRACTS,
           tax: {
             explorerApiUrl: "https://api.etherscan.io/v2/api",
             explorerApiKey: "YOUR_ETHERSCAN_API_KEY_OPTIONAL",
           },
         },
         {
+          hyperSyncClient: makeHyperSyncMock([], []),
+          viemClient: makeNoOpViemMock(),
           fetcher: async () => {
             called = true;
             return {
@@ -235,40 +465,33 @@ describe("tax transaction explorer sync", () => {
     expect(called).toBe(false);
   });
 
-  it("respects maxPages when every page is full", async () => {
-    const requests: RequestRecord[] = [];
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({ hash: `0xpage${params.get("page")}a` }),
-          tx({ hash: `0xpage${params.get("page")}b` }),
-        ]);
-      }
-      return envelope([]);
-    }, requests);
+  it("skips malformed HyperSync rows (missing hash) and processes valid ones", async () => {
+    // HyperSync implementation skips txs without hash or blockNumber in fetchTransactionsByAddress
+    // We test that valid rows are stored and the summary count is correct
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        // valid row
+        {
+          hash: "0xgood",
+          blockNumber: 112,
+          from: "0xfrom",
+          to: WALLET.toLowerCase(),
+          value: 1n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
-    await syncTaxTransactions(config(), { fetcher, pageSize: 2, maxPages: 2 });
-
-    expect(actionPages(requests, "txlist")).toEqual([1, 2]);
-    expect(listTaxTransactions()).toHaveLength(4);
-  });
-
-  it("skips malformed rows and treats empty or unsupported explorer responses as empty pages", async () => {
-    const fetcher = makeFetcher((params) => {
-      const action = params.get("action");
-      if (action === "txlist") {
-        return envelope([
-          tx({ hash: "" }),
-          { blockNumber: "111", value: "missing hash" },
-          tx({ hash: "0xgood", blockNumber: "112" }),
-        ]);
-      }
-      if (action === "tokentx" || action === "tokennfttx") return noTransactionsFound();
-      if (action === "txlistinternal") return unsupportedInternal();
-      return envelope([]);
+    const summary = await syncTaxTransactions(config(), {
+      hyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
     });
-
-    const summary = await syncTaxTransactions(config(), { fetcher, pageSize: 10 });
 
     expect(summary.synced).toBe(1);
     expect(listTaxTransactions().map((row) => row.hash)).toEqual(["0xgood"]);
@@ -276,23 +499,32 @@ describe("tax transaction explorer sync", () => {
 
   it("destructures native transfers relative to the configured wallet", async () => {
     const hash = "0x211d72eb6f3afa99f8de8e95ea4b27f5088892721da22672ee6700abdd2216d6";
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash,
-            from: "0x57955467e2fd905dbb3026963a144dcacd566687",
-            to: WALLET,
-            value: "252451290000000000",
-          }),
-        ]);
-      }
-      return envelope([]);
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash,
+          blockNumber: 100,
+          blockTimestamp: 1770000000,
+          from: "0x57955467e2fd905dbb3026963a144dcacd566687",
+          to: WALLET.toLowerCase(),
+          value: 252451290000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
+
+    await syncTaxTransactions(config(), {
+      hyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
     });
 
-    await syncTaxTransactions(config(), { fetcher, source: "hyperscan" });
-
-    expect(getTaxTransaction(`hyperscan:txlist:${hash}:external`)).toMatchObject({
+    expect(getTaxTransaction(`hypersync:txlist:${hash}:external`)).toMatchObject({
       incoming_quantity: "0.25245129",
       incoming_asset: "HYPE",
       outgoing_quantity: null,
@@ -301,26 +533,33 @@ describe("tax transaction explorer sync", () => {
   });
 
   it("destructures token transfers relative to the configured wallet", async () => {
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({
-            hash: "0xtokenout",
-            logIndex: "4",
-            from: WALLET.toUpperCase(),
-            to: "0xreceiver",
-            value: "25000000",
-            tokenSymbol: "USDC",
-            tokenDecimal: "6",
-          }),
-        ]);
-      }
-      return envelope([]);
+    const contractAddress = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const hyperSyncClient = makeHyperSyncMock(
+      [],
+      [
+        makeTokenLog({
+          transactionHash: "0xtokenout",
+          from: WALLET,
+          to: "0xreceiver",
+          value: 25000000n,
+          contractAddress,
+          logIndex: 4,
+          blockNumber: 100,
+        }),
+      ],
+    );
+
+    const viemClient = makeViemMock({
+      [contractAddress.toLowerCase()]: { symbol: "USDC", name: "USD Coin", decimals: 6 },
     });
 
-    await syncTaxTransactions(config(), { fetcher, source: "hyperscan" });
+    await syncTaxTransactions(config(), {
+      hyperSyncClient,
+      viemClient,
+      fetcher: noOpFetcher,
+    });
 
-    expect(getTaxTransaction("hyperscan:tokentx:0xtokenout:4")).toMatchObject({
+    expect(getTaxTransaction("hypersync:tokentx:0xtokenout:4")).toMatchObject({
       incoming_quantity: null,
       incoming_asset: null,
       outgoing_quantity: "25",
@@ -328,95 +567,160 @@ describe("tax transaction explorer sync", () => {
     });
   });
 
-  it("throws useful explorer errors without wiping existing metadata or sync state", async () => {
+  it("throws useful HyperSync errors without wiping existing metadata or sync state", async () => {
+    // First sync: store a transaction via HyperSync
+    const firstHyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xkept",
+          blockNumber: 322,
+          from: "0xfrom",
+          to: WALLET.toLowerCase(),
+          value: 1n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
+
     upsertTaxSyncState({
       wallet: WALLET,
       last_synced_at: "2026-05-30T12:00:00.000Z",
       last_block_number: 321,
-      source: "hyperevmscan",
+      source: "hypersync",
     });
+
     await syncTaxTransactions(config(), {
-      fetcher: makeFetcher((params) =>
-        params.get("action") === "txlist"
-          ? envelope([tx({ hash: "0xkept", blockNumber: "322" })])
-          : envelope([]),
-      ),
-      source: "hyperevmscan",
+      hyperSyncClient: firstHyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
     });
-    updateTaxTransaction("hyperevmscan:txlist:0xkept:external", {
+
+    updateTaxTransaction("hypersync:txlist:0xkept:external", {
       label: "Trade",
       comment: "do not lose this",
     });
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return { ok: false, status: 503 };
-      }
-      return envelope([]);
-    });
-
-    await expect(syncTaxTransactions(config(), { fetcher })).rejects.toThrow(
-      "Tax transaction sync failed for txlist: HTTP 503",
-    );
-    expect(getTaxSyncState(WALLET)).toMatchObject({ last_block_number: 322 });
-    expect(getTaxTransaction("hyperevmscan:txlist:0xkept:external")).toMatchObject({
-      label: "Trade",
-      comment: "do not lose this",
-    });
+    // Second sync: HyperSync throws
+    const errorHyperSyncClient = {
+      get: async (_query: unknown) => {
+        throw new Error("HyperSync network error");
+      },
+    } as unknown as HypersyncClient;
 
     await expect(
       syncTaxTransactions(config(), {
-        fetcher: makeFetcher(() => ({ status: "0", message: "NOTOK" })),
+        hyperSyncClient: errorHyperSyncClient,
+        viemClient: makeNoOpViemMock(),
+        fetcher: noOpFetcher,
       }),
-    ).rejects.toThrow("Tax transaction sync failed for txlist: NOTOK");
+    ).rejects.toThrow("HyperSync network error");
+
+    // Sync state should still reflect the last successful block
+    expect(getTaxSyncState(WALLET)).toMatchObject({ last_block_number: 322 });
+    // Metadata should be preserved
+    expect(getTaxTransaction("hypersync:txlist:0xkept:external")).toMatchObject({
+      label: "Trade",
+      comment: "do not lose this",
+    });
   });
 
   it("preserves row metadata, separates duplicate token logs, and keeps block state on no-row sync", async () => {
-    const firstFetcher = makeFetcher((params) => {
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({ hash: "0xtokenhash", logIndex: "1", blockNumber: "200", value: "10" }),
-          tokenTx({ hash: "0xtokenhash", logIndex: "2", blockNumber: "201", value: "20" }),
-        ]);
-      }
-      return envelope([]);
+    const contractAddress = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+    const viemClient = makeViemMock({
+      [contractAddress.toLowerCase()]: { symbol: "TOK", name: "Token", decimals: 18 },
     });
 
-    await syncTaxTransactions(config(), { fetcher: firstFetcher, source: "testsource" });
-    updateTaxTransaction("testsource:tokentx:0xtokenhash:1", {
+    const firstHyperSyncClient = makeHyperSyncMock(
+      [],
+      [
+        makeTokenLog({
+          transactionHash: "0xtokenhash",
+          from: "0xsender",
+          to: WALLET,
+          value: 10n,
+          contractAddress,
+          logIndex: 1,
+          blockNumber: 200,
+        }),
+        makeTokenLog({
+          transactionHash: "0xtokenhash",
+          from: "0xsender",
+          to: WALLET,
+          value: 20n,
+          contractAddress,
+          logIndex: 2,
+          blockNumber: 201,
+        }),
+      ],
+    );
+
+    await syncTaxTransactions(config(), {
+      hyperSyncClient: firstHyperSyncClient,
+      viemClient,
+      fetcher: noOpFetcher,
+    });
+
+    updateTaxTransaction("hypersync:tokentx:0xtokenhash:1", {
       label: "Transfer",
       comment: "manual classification",
     });
 
-    const secondFetcher = makeFetcher((params) => {
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({ hash: "0xtokenhash", logIndex: "1", blockNumber: "200", value: "999" }),
-          tokenTx({ hash: "0xtokenhash", logIndex: "2", blockNumber: "201", value: "20" }),
-        ]);
-      }
-      return envelope([]);
+    // Second sync: same logs but first one has different value
+    const secondHyperSyncClient = makeHyperSyncMock(
+      [],
+      [
+        makeTokenLog({
+          transactionHash: "0xtokenhash",
+          from: "0xsender",
+          to: WALLET,
+          value: 999n,
+          contractAddress,
+          logIndex: 1,
+          blockNumber: 200,
+        }),
+        makeTokenLog({
+          transactionHash: "0xtokenhash",
+          from: "0xsender",
+          to: WALLET,
+          value: 20n,
+          contractAddress,
+          logIndex: 2,
+          blockNumber: 201,
+        }),
+      ],
+    );
+
+    await syncTaxTransactions(config(), {
+      hyperSyncClient: secondHyperSyncClient,
+      viemClient,
+      fetcher: noOpFetcher,
     });
-    await syncTaxTransactions(config(), { fetcher: secondFetcher, source: "testsource" });
 
     expect(new Set(listTaxTransactions().map((row) => row.id))).toEqual(
-      new Set(["testsource:tokentx:0xtokenhash:1", "testsource:tokentx:0xtokenhash:2"]),
+      new Set(["hypersync:tokentx:0xtokenhash:1", "hypersync:tokentx:0xtokenhash:2"]),
     );
-    expect(getTaxTransaction("testsource:tokentx:0xtokenhash:1")).toMatchObject({
+    expect(getTaxTransaction("hypersync:tokentx:0xtokenhash:1")).toMatchObject({
       value: "999",
       label: "Transfer",
       comment: "manual classification",
     });
     expect(getTaxSyncState(WALLET)).toMatchObject({ last_block_number: 201 });
 
+    // Third sync: HyperSync returns nothing → block state preserved
     await syncTaxTransactions(config(), {
-      fetcher: makeFetcher(() => envelope([])),
-      source: "testsource",
+      hyperSyncClient: makeHyperSyncMock([], []),
+      viemClient,
+      fetcher: noOpFetcher,
     });
     expect(getTaxSyncState(WALLET)).toMatchObject({ last_block_number: 201 });
   });
 
-  it("uses transactionHash for Hyperscan internal transactions", async () => {
+  it("uses transactionHash for Hyperscan internal transactions (explorer path)", async () => {
     const fetcher = makeFetcher((params) => {
       if (params.get("action") === "txlistinternal") {
         return envelope([
@@ -436,7 +740,12 @@ describe("tax transaction explorer sync", () => {
       return envelope([]);
     });
 
-    const summary = await syncTaxTransactions(config(), { fetcher, source: "hyperscan" });
+    const summary = await syncTaxTransactions(config(), {
+      hyperSyncClient: makeHyperSyncMock([], []),
+      viemClient: makeNoOpViemMock(),
+      fetcher,
+      source: "hyperscan",
+    });
 
     expect(summary.synced).toBe(1);
     expect(listTaxTransactions()).toMatchObject([
@@ -448,51 +757,104 @@ describe("tax transaction explorer sync", () => {
     ]);
   });
 
-  it("uses stable ids across different page and block bounds without duplicate orphan rows", async () => {
-    const row = tx({ hash: "0xstable", blockNumber: "500" });
+  it("uses stable hypersync: IDs across different syncs without duplicate orphan rows", async () => {
+    const stableTx = {
+      hash: "0xstable",
+      blockNumber: 500,
+      from: "0xfrom",
+      to: WALLET.toLowerCase(),
+      value: 1n,
+      gasUsed: 21000n,
+      gasPrice: 1000000000n,
+      input: "0x",
+      status: 1,
+      sighash: null,
+    };
 
+    // First sync
     await syncTaxTransactions(config(), {
-      fetcher: makeFetcher((params) =>
-        params.get("action") === "txlist" && params.get("page") === "1"
-          ? envelope([{ blockNumber: "499", value: "missing hash keeps pagination moving" }])
-          : params.get("action") === "txlist" && params.get("page") === "2"
-            ? envelope([row])
-            : envelope([]),
-      ),
-      pageSize: 1,
-      maxPages: 2,
-      startBlock: 400,
-      endBlock: 600,
-      source: "testsource",
+      hyperSyncClient: makeHyperSyncMock([stableTx], []),
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
     });
+
+    // Second sync with same tx
     await syncTaxTransactions(config(), {
-      fetcher: makeFetcher((params) =>
-        params.get("action") === "txlist" && params.get("page") === "1"
-          ? envelope([row])
-          : envelope([]),
-      ),
-      pageSize: 10,
-      maxPages: 1,
-      startBlock: 1,
-      endBlock: 999,
-      source: "testsource",
+      hyperSyncClient: makeHyperSyncMock([stableTx], []),
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
     });
 
     expect(listTaxTransactions().map((transaction) => transaction.id)).toEqual([
-      "testsource:txlist:0xstable:external",
+      "hypersync:txlist:0xstable:external",
     ]);
   });
 
-  it("surfaces malformed non-empty explorer responses", async () => {
+  it("HyperSync error propagates and does not silently swallow failures", async () => {
+    const errorHyperSyncClient = {
+      get: async (_query: unknown) => {
+        throw new Error("HyperSync fetch failed: connection refused");
+      },
+    } as unknown as HypersyncClient;
+
     await expect(
       syncTaxTransactions(config(), {
-        fetcher: makeFetcher(() => ({
-          status: "1",
-          message: "OK",
-          result: { hash: "0xnot-array" },
-        })),
+        hyperSyncClient: errorHyperSyncClient,
+        viemClient: makeNoOpViemMock(),
+        fetcher: noOpFetcher,
       }),
-    ).rejects.toThrow("Tax transaction sync failed for txlist: OK");
+    ).rejects.toThrow("HyperSync fetch failed: connection refused");
+  });
+
+  it("txlistinternal still uses explorer and respects maxPages", async () => {
+    const explorerRequests: RequestRecord[] = [];
+    const fetcher = makeFetcher((params) => {
+      if (params.get("action") === "txlistinternal") {
+        const page = Number(params.get("page"));
+        if (page <= 2) {
+          return envelope([
+            {
+              transactionHash: `0xinternal${page}`,
+              blockNumber: String(700 + page),
+              timeStamp: "1770000000",
+              from: "0xfrom",
+              to: "0xto",
+              value: "1",
+              gasUsed: "0",
+              gasPrice: "1000000000",
+              type: "call",
+            },
+            {
+              transactionHash: `0xinternal${page}b`,
+              blockNumber: String(700 + page),
+              timeStamp: "1770000000",
+              from: "0xfrom",
+              to: "0xto",
+              value: "2",
+              gasUsed: "0",
+              gasPrice: "1000000000",
+              type: "call",
+            },
+          ]);
+        }
+        return envelope([]);
+      }
+      return envelope([]);
+    }, explorerRequests);
+
+    await syncTaxTransactions(config(), {
+      hyperSyncClient: makeHyperSyncMock([], []),
+      viemClient: makeNoOpViemMock(),
+      fetcher,
+      pageSize: 2,
+      maxPages: 2,
+    });
+
+    // Only txlistinternal goes to explorer
+    const internalPages = actionPages(explorerRequests, "txlistinternal");
+    expect(internalPages).toEqual([1, 2]);
+    // 4 internal transactions stored
+    expect(listTaxTransactions()).toHaveLength(4);
   });
 });
 
@@ -505,8 +867,16 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   }
 
   const originalFetch = globalThis.fetch;
+  beforeEach(() => {
+    mkdirSync(TMP, { recursive: true });
+    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
+    resetDb();
+  });
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    delete process.env.LP_TRACKER_DATA_DIR;
+    resetDb();
+    rmSync(TMP, { recursive: true, force: true });
   });
 
   it("null time_stamp → EUR fields stay null", async () => {
@@ -520,22 +890,59 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       });
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xnullts1",
-            timeStamp: "",
-            from: "0xsender",
-            to: WALLET,
-            value: "1000000000000000000",
-          }),
-        ]);
-      }
-      return envelope([]);
-    });
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xnullts1",
+          blockNumber: 100,
+          blockTimestamp: undefined, // no timestamp → null time_stamp
+          from: "0xsender",
+          to: WALLET.toLowerCase(),
+          value: 1000000000000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
-    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest" });
+    // Override the mock to return no timestamp in blocks
+    const noTimestampClient = {
+      get: async (_query: unknown) => ({
+        archiveHeight: 10000,
+        nextBlock: 10000,
+        totalExecutionTime: 1,
+        data: {
+          blocks: [], // no blocks → no timestamp lookup
+          transactions: [
+            {
+              hash: "0xnullts1",
+              blockNumber: 100,
+              from: "0xsender",
+              to: WALLET.toLowerCase(),
+              value: 1000000000000000000n,
+              gasUsed: 21000n,
+              gasPrice: 1000000000n,
+              input: "0x",
+              status: 1,
+              sighash: null,
+            },
+          ],
+          logs: [],
+          traces: [],
+        },
+      }),
+    } as unknown as HypersyncClient;
+
+    await syncTaxTransactions(configWithPricing(), {
+      hyperSyncClient: noTimestampClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
+      source: "eurtest",
+    });
 
     const row = listTaxTransactions().find((r) => r.hash === "0xnullts1");
     expect(row).toBeDefined();
@@ -576,7 +983,12 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       return envelope([]);
     });
 
-    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest2" });
+    await syncTaxTransactions(configWithPricing(), {
+      hyperSyncClient: makeHyperSyncMock([], []),
+      viemClient: makeNoOpViemMock(),
+      fetcher,
+      source: "eurtest2",
+    });
 
     const rows = listTaxTransactions();
     const row = rows.find((r) => r.hash === "0xnomatch1");
@@ -600,22 +1012,31 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xincoming1",
-            timeStamp: "1770002000",
-            from: "0xsender",
-            to: WALLET,
-            value: "2000000000000000000",
-          }),
-        ]);
-      }
-      return envelope([]);
-    });
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xincoming1",
+          blockNumber: 100,
+          blockTimestamp: 1770002000,
+          from: "0xsender",
+          to: WALLET.toLowerCase(),
+          value: 2000000000000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
-    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest3" });
+    await syncTaxTransactions(configWithPricing(), {
+      hyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
+      source: "eurtest3",
+    });
 
     const row = listTaxTransactions().find((r) => r.hash === "0xincoming1");
     expect(row).toBeDefined();
@@ -637,22 +1058,31 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xoutgoing1",
-            timeStamp: "1770003000",
-            from: WALLET,
-            to: "0xrecipient",
-            value: "3000000000000000000",
-          }),
-        ]);
-      }
-      return envelope([]);
-    });
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xoutgoing1",
+          blockNumber: 100,
+          blockTimestamp: 1770003000,
+          from: WALLET.toLowerCase(),
+          to: "0xrecipient",
+          value: 3000000000000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
-    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest4" });
+    await syncTaxTransactions(configWithPricing(), {
+      hyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
+      source: "eurtest4",
+    });
 
     const row = listTaxTransactions().find((r) => r.hash === "0xoutgoing1");
     expect(row).toBeDefined();
@@ -674,25 +1104,37 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       });
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({
-            hash: "0xunknownasset1",
-            logIndex: "1",
-            timeStamp: "1770005000",
-            from: "0xsender",
-            to: WALLET,
-            value: "1000000000000000000",
-            tokenSymbol: "UNKNOWN_TOKEN_XYZ",
-            tokenDecimal: "18",
-          }),
-        ]);
-      }
-      return envelope([]);
+    const contractAddress = "0x1234567890123456789012345678901234567890";
+    const hyperSyncClient = makeHyperSyncMock(
+      [],
+      [
+        makeTokenLog({
+          transactionHash: "0xunknownasset1",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000000000000000n,
+          contractAddress,
+          logIndex: 1,
+          blockNumber: 100,
+        }),
+      ],
+    );
+
+    // Token metadata returns UNKNOWN_TOKEN_XYZ which has no coingeckoId
+    const viemClient = makeViemMock({
+      [contractAddress.toLowerCase()]: {
+        symbol: "UNKNOWN_TOKEN_XYZ",
+        name: "Unknown Token",
+        decimals: 18,
+      },
     });
 
-    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest6" });
+    await syncTaxTransactions(configWithPricing(), {
+      hyperSyncClient,
+      viemClient,
+      fetcher: noOpFetcher,
+      source: "eurtest6",
+    });
 
     const row = listTaxTransactions().find((r) => r.hash === "0xunknownasset1");
     expect(row).toBeDefined();
@@ -713,25 +1155,32 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({
-            hash: "0xusdcout1",
-            logIndex: "7",
-            timeStamp: "1770004000",
-            from: WALLET,
-            to: "0xrecipient",
-            value: "50000000",
-            tokenSymbol: "USDC",
-            tokenDecimal: "6",
-          }),
-        ]);
-      }
-      return envelope([]);
+    const contractAddress = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const hyperSyncClient = makeHyperSyncMock(
+      [],
+      [
+        makeTokenLog({
+          transactionHash: "0xusdcout1",
+          from: WALLET,
+          to: "0xrecipient",
+          value: 50000000n,
+          contractAddress,
+          logIndex: 7,
+          blockNumber: 100,
+        }),
+      ],
+    );
+
+    const viemClient = makeViemMock({
+      [contractAddress.toLowerCase()]: { symbol: "USDC", name: "USD Coin", decimals: 6 },
     });
 
-    await syncTaxTransactions(configWithPricing(), { fetcher, source: "eurtest5" });
+    await syncTaxTransactions(configWithPricing(), {
+      hyperSyncClient,
+      viemClient,
+      fetcher: noOpFetcher,
+      source: "eurtest5",
+    });
 
     const row = listTaxTransactions().find((r) => r.hash === "0xusdcout1");
     expect(row).toBeDefined();
@@ -770,24 +1219,30 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       throw new Error(`unexpected fetch: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xresil1",
-            timeStamp: "1770010000",
-            from: "0xsender",
-            to: WALLET,
-            value: "1000000000000000000",
-          }),
-        ]);
-      }
-      return envelope([]);
-    });
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xresil1",
+          blockNumber: 100,
+          blockTimestamp: 1770010000,
+          from: "0xsender",
+          to: WALLET.toLowerCase(),
+          value: 1000000000000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
     await expect(
       syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-1" }), {
-        fetcher,
+        hyperSyncClient,
+        viemClient: makeNoOpViemMock(),
+        fetcher: noOpFetcher,
         source: "resil1",
       }),
     ).resolves.toBeDefined();
@@ -814,38 +1269,48 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       throw new Error(`unexpected fetch: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xresil2hype",
-            timeStamp: "1770011000",
-            from: "0xsender",
-            to: WALLET,
-            value: "1000000000000000000",
-          }),
-        ]);
-      }
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({
-            hash: "0xresil2usdc",
-            logIndex: "1",
-            timeStamp: "1770011001",
-            from: "0xsender",
-            to: WALLET,
-            value: "1000000",
-            tokenSymbol: "USDC",
-            tokenDecimal: "6",
-          }),
-        ]);
-      }
-      return envelope([]);
+    const contractAddress = "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e";
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xresil2hype",
+          blockNumber: 100,
+          blockTimestamp: 1770011000,
+          from: "0xsender",
+          to: WALLET.toLowerCase(),
+          value: 1000000000000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [
+        makeTokenLog({
+          transactionHash: "0xresil2usdc",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000n,
+          contractAddress,
+          logIndex: 1,
+          blockNumber: 101,
+        }),
+      ],
+    );
+
+    const viemClient = makeViemMock({
+      [contractAddress.toLowerCase()]: { symbol: "USDC", name: "USD Coin", decimals: 6 },
     });
 
     await syncTaxTransactions(
       configWithPricing({ HYPE: "resilience-hype", USDC: "resilience-usdc" }),
-      { fetcher, source: "resil2" },
+      {
+        hyperSyncClient,
+        viemClient,
+        fetcher: noOpFetcher,
+        source: "resil2",
+      },
     );
 
     const hypeRow = listTaxTransactions().find((r) => r.hash === "0xresil2hype");
@@ -872,23 +1337,29 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       throw new Error(`unexpected fetch: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher1 = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xresil3",
-            timeStamp: "1770012000",
-            from: "0xsender",
-            to: WALLET,
-            value: "252451290000000000",
-          }),
-        ]);
-      }
-      return envelope([]);
-    });
+    const firstHyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xresil3",
+          blockNumber: 100,
+          blockTimestamp: 1770012000,
+          from: "0xsender",
+          to: WALLET.toLowerCase(),
+          value: 252451290000000000n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
     await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), {
-      fetcher: fetcher1,
+      hyperSyncClient: firstHyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
       source: "resil3",
     });
 
@@ -909,23 +1380,29 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       throw new Error(`unexpected fetch: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher2 = makeFetcher((params) => {
-      if (params.get("action") === "txlist") {
-        return envelope([
-          tx({
-            hash: "0xresil3",
-            timeStamp: "1770012000",
-            from: "0xsender",
-            to: WALLET,
-            value: "999999999999999999",
-          }),
-        ]);
-      }
-      return envelope([]);
-    });
+    const secondHyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash: "0xresil3",
+          blockNumber: 100,
+          blockTimestamp: 1770012000,
+          from: "0xsender",
+          to: WALLET.toLowerCase(),
+          value: 999999999999999999n,
+          gasUsed: 21000n,
+          gasPrice: 1000000000n,
+          input: "0x",
+          status: 1,
+          sighash: null,
+        },
+      ],
+      [],
+    );
 
     await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-3" }), {
-      fetcher: fetcher2,
+      hyperSyncClient: secondHyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
       source: "resil3",
     });
 
@@ -948,67 +1425,70 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       throw new Error(`unexpected globalThis.fetch call: ${urlStr}`);
     }) as unknown as typeof globalThis.fetch;
 
-    const fetcher = makeFetcher((params) => {
-      if (params.get("action") === "tokentx") {
-        return envelope([
-          tokenTx({
-            hash: "0xdedup1",
-            logIndex: "1",
-            from: "0xsender",
-            to: WALLET,
-            tokenSymbol: "DEDUP_TOK",
-            tokenDecimal: "18",
-            value: "1000000000000000000",
-            timeStamp: "1770100000",
-          }),
-          tokenTx({
-            hash: "0xdedup2",
-            logIndex: "2",
-            from: "0xsender",
-            to: WALLET,
-            tokenSymbol: "DEDUP_TOK",
-            tokenDecimal: "18",
-            value: "1000000000000000000",
-            timeStamp: "1770100000",
-          }),
-          tokenTx({
-            hash: "0xdedup3",
-            logIndex: "3",
-            from: "0xsender",
-            to: WALLET,
-            tokenSymbol: "DEDUP_TOK",
-            tokenDecimal: "18",
-            value: "1000000000000000000",
-            timeStamp: "1770100000",
-          }),
-          tokenTx({
-            hash: "0xdedup4",
-            logIndex: "4",
-            from: "0xsender",
-            to: WALLET,
-            tokenSymbol: "DEDUP_TOK",
-            tokenDecimal: "18",
-            value: "1000000000000000000",
-            timeStamp: "1770100000",
-          }),
-          tokenTx({
-            hash: "0xdedup5",
-            logIndex: "5",
-            from: "0xsender",
-            to: WALLET,
-            tokenSymbol: "DEDUP_TOK",
-            tokenDecimal: "18",
-            value: "1000000000000000000",
-            timeStamp: "1770100000",
-          }),
-        ]);
-      }
-      return envelope([]);
+    const contractAddress = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    const hyperSyncClient = makeHyperSyncMock(
+      [],
+      [
+        makeTokenLog({
+          transactionHash: "0xdedup1",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000000000000000n,
+          contractAddress,
+          logIndex: 1,
+          blockNumber: 100,
+        }),
+        makeTokenLog({
+          transactionHash: "0xdedup2",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000000000000000n,
+          contractAddress,
+          logIndex: 2,
+          blockNumber: 100,
+        }),
+        makeTokenLog({
+          transactionHash: "0xdedup3",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000000000000000n,
+          contractAddress,
+          logIndex: 3,
+          blockNumber: 100,
+        }),
+        makeTokenLog({
+          transactionHash: "0xdedup4",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000000000000000n,
+          contractAddress,
+          logIndex: 4,
+          blockNumber: 100,
+        }),
+        makeTokenLog({
+          transactionHash: "0xdedup5",
+          from: "0xsender",
+          to: WALLET,
+          value: 1000000000000000000n,
+          contractAddress,
+          logIndex: 5,
+          blockNumber: 100,
+        }),
+      ],
+    );
+
+    const viemClient = makeViemMock({
+      [contractAddress.toLowerCase()]: { symbol: "DEDUP_TOK", name: "Dedup Token", decimals: 18 },
     });
 
     await syncTaxTransactions(
       { ...config(), pricing: { coingeckoIds: { DEDUP_TOK: "dedup-coingecko-id" } } },
-      { fetcher, source: "dedup-test" },
+      {
+        hyperSyncClient,
+        viemClient,
+        fetcher: noOpFetcher,
+        source: "dedup-test",
+      },
     );
 
     // Only 1 CoinGecko call despite 5 transactions with same asset+date

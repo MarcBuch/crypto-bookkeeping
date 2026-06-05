@@ -8,6 +8,16 @@ import {
   type SyncedTaxTransaction,
 } from "../db/store.js";
 import { getHistoricalEurPrice } from "./pricing.js";
+import { createClient, type Client } from "../chain/client.js";
+import {
+  createHyperSyncClient,
+  fetchTransactionsByAddress,
+  fetchTokenTransfersByAddress,
+  type HyperSyncTransaction,
+  type HyperSyncTokenTransfer,
+} from "../chain/hypersync.js";
+import { resolveTokenMetadata } from "../chain/token-metadata.js";
+import type { HypersyncClient } from "@envio-dev/hypersync-client";
 
 const DEFAULT_EXPLORER_API_URL = "https://www.hyperscan.com/api";
 const DEFAULT_EXPLORER_CHAIN_ID = 999;
@@ -33,6 +43,9 @@ export interface SyncTaxTransactionsOptions {
   source?: string;
   startBlock?: number;
   endBlock?: number;
+  // Injectable clients for testing
+  hyperSyncClient?: HypersyncClient;
+  viemClient?: Client;
 }
 
 export interface SyncTaxTransactionsSummary {
@@ -52,10 +65,216 @@ interface ExplorerEnvelope {
 type ExplorerTransaction = Record<string, unknown>;
 
 export async function syncTaxTransactions(
-  config: Pick<Config, "wallet" | "tax" | "pricing">,
+  config: Pick<Config, "wallet" | "tax" | "pricing" | "rpc" | "logsRpc" | "contracts" | "chainId">,
   options: SyncTaxTransactionsOptions = {},
 ): Promise<SyncTaxTransactionsSummary> {
   const wallet = config.wallet;
+  const syncedAt = new Date().toISOString();
+  const previousSyncState = getTaxSyncState(wallet);
+  const fromBlock =
+    previousSyncState?.last_block_number != null
+      ? previousSyncState.last_block_number + 1
+      : 0;
+
+  let synced = 0;
+  let latestBlockNumber: number | null = null;
+
+  // ── HyperSync path: txlist + tokentx + tokennfttx ─────────────────────────
+  const hyperSyncUrl = config.tax?.hyperSyncUrl ?? "https://hyperliquid.hypersync.xyz";
+  const hyperSyncApiToken = normalizedHyperSyncApiToken(config.tax?.hyperSyncApiToken);
+
+  if (!options.hyperSyncClient && !hyperSyncApiToken) {
+    throw new Error(
+      "Tax transaction sync requires tax.hyperSyncApiToken. " +
+        "Get a free token at https://app.envio.dev/api-tokens and add it to your config.json.",
+    );
+  }
+
+  const hyperSyncClient =
+    options.hyperSyncClient ??
+    createHyperSyncClient({ url: hyperSyncUrl, apiToken: hyperSyncApiToken! });
+  const viemClient = options.viemClient ?? createClient(config as Config);
+
+  // Fetch external transactions
+  const txs = await fetchTransactionsByAddress(hyperSyncClient, wallet, fromBlock);
+  for (const tx of txs) {
+    const row = hyperSyncTxToSyncedTaxTransaction(tx, wallet, syncedAt);
+    const [enriched] = await enrichTaxTransactionsWithEurValues([row], config);
+    upsertSyncedTaxTransaction(enriched);
+    synced += 1;
+    if (row.block_number !== null) {
+      latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
+    }
+  }
+
+  // Fetch token transfers
+  const transfers = await fetchTokenTransfersByAddress(hyperSyncClient, wallet, fromBlock);
+  for (const transfer of transfers) {
+    const row = await hyperSyncTokenTransferToSyncedTaxTransaction(
+      transfer,
+      wallet,
+      viemClient,
+      syncedAt,
+    );
+    const [enriched] = await enrichTaxTransactionsWithEurValues([row], config);
+    upsertSyncedTaxTransaction(enriched);
+    synced += 1;
+    if (row.block_number !== null) {
+      latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
+    }
+  }
+
+  // ── Explorer fallback: txlistinternal only ─────────────────────────────────
+  const explorerSynced = await syncInternalTransactions(config, options, wallet, fromBlock, syncedAt);
+  synced += explorerSynced.synced;
+  if (explorerSynced.latestBlockNumber !== null) {
+    latestBlockNumber = Math.max(
+      latestBlockNumber ?? explorerSynced.latestBlockNumber,
+      explorerSynced.latestBlockNumber,
+    );
+  }
+
+  // ── Update sync state watermark ────────────────────────────────────────────
+  upsertTaxSyncState({
+    wallet,
+    last_synced_at: syncedAt,
+    last_block_number: latestKnownBlockNumber(
+      previousSyncState?.last_block_number ?? null,
+      latestBlockNumber,
+    ),
+    source: "hypersync",
+  });
+
+  return { synced, insertedOrUpdated: synced, source: "hypersync", wallet, latestBlockNumber };
+}
+
+// ---------------------------------------------------------------------------
+// HyperSync normalisation helpers
+// ---------------------------------------------------------------------------
+
+function hyperSyncTxToSyncedTaxTransaction(
+  tx: HyperSyncTransaction,
+  wallet: string,
+  syncedAt: string,
+): SyncedTaxTransaction {
+  const hash = tx.hash;
+  const gasUsed = tx.gasUsed.toString();
+  const gasPrice = tx.gasPrice.toString();
+  const value = tx.value.toString();
+  const blockTimestamp = tx.blockTimestamp;
+  const timeStamp = blockTimestamp ? new Date(blockTimestamp * 1000).toISOString() : null;
+
+  const taxFields = taxLedgerFields({
+    action: "txlist" as TaxExplorerAction,
+    fromAddress: tx.from,
+    toAddress: tx.to,
+    value,
+    tokenDecimal: 18, // native HYPE
+    tokenSymbol: null, // will use "HYPE" fallback
+    wallet,
+  });
+
+  return {
+    id: `hypersync:txlist:${hash}:external`,
+    hash,
+    block_number: tx.blockNumber,
+    time_stamp: timeStamp,
+    from_address: tx.from,
+    to_address: tx.to,
+    value,
+    gas_used: gasUsed,
+    gas_price: gasPrice,
+    fee: (tx.gasUsed * tx.gasPrice).toString(),
+    method_id: tx.sighash,
+    function_name: null,
+    input: tx.input,
+    contract_address: null,
+    token_symbol: null,
+    token_decimal: 18,
+    token_name: null,
+    transaction_type: "txlist",
+    source: "hypersync",
+    is_error: tx.status === 0 ? 1 : 0,
+    ...taxFields,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  };
+}
+
+async function hyperSyncTokenTransferToSyncedTaxTransaction(
+  transfer: HyperSyncTokenTransfer,
+  wallet: string,
+  viemClient: Client,
+  syncedAt: string,
+): Promise<SyncedTaxTransaction> {
+  // Resolve token metadata (uses DB cache)
+  const metadata = await resolveTokenMetadata(viemClient, transfer.contractAddress);
+  const tokenDecimal = metadata.decimals;
+  const tokenSymbol = metadata.symbol;
+  const tokenName = metadata.name;
+
+  const value = transfer.value.toString();
+  const timeStamp = transfer.blockTimestamp
+    ? new Date(transfer.blockTimestamp * 1000).toISOString()
+    : null;
+
+  const action = (transfer.isNft ? "tokennfttx" : "tokentx") as TaxExplorerAction;
+  const id = `hypersync:${action}:${transfer.transactionHash}:${transfer.logIndex}`;
+
+  const taxFields = taxLedgerFields({
+    action,
+    fromAddress: transfer.from,
+    toAddress: transfer.to,
+    value,
+    tokenDecimal,
+    tokenSymbol,
+    wallet,
+  });
+
+  return {
+    id,
+    hash: transfer.transactionHash,
+    block_number: transfer.blockNumber,
+    time_stamp: timeStamp,
+    from_address: transfer.from,
+    to_address: transfer.to,
+    value,
+    gas_used: null, // not available from log data
+    gas_price: null,
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: transfer.contractAddress,
+    token_symbol: tokenSymbol,
+    token_decimal: tokenDecimal,
+    token_name: tokenName,
+    transaction_type: action,
+    source: "hypersync",
+    is_error: 0,
+    ...taxFields,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Explorer fallback: txlistinternal only
+// ---------------------------------------------------------------------------
+
+async function syncInternalTransactions(
+  config: Pick<Config, "wallet" | "tax" | "pricing">,
+  options: SyncTaxTransactionsOptions,
+  wallet: string,
+  fromBlock: number,
+  syncedAt: string,
+): Promise<{ synced: number; latestBlockNumber: number | null }> {
   const source = options.source ?? DEFAULT_SOURCE;
   const baseUrl = options.baseUrl ?? config.tax?.explorerApiUrl ?? DEFAULT_EXPLORER_API_URL;
   const chainId = config.tax?.explorerChainId ?? DEFAULT_EXPLORER_CHAIN_ID;
@@ -63,8 +282,6 @@ export async function syncTaxTransactions(
   const pageSize = positiveInteger(options.pageSize) ?? DEFAULT_PAGE_SIZE;
   const maxPages = positiveInteger(options.maxPages) ?? DEFAULT_MAX_PAGES;
   const fetcher = options.fetcher ?? fetch;
-  const syncedAt = new Date().toISOString();
-  const previousSyncState = getTaxSyncState(wallet);
 
   if (requiresExplorerApiKey(baseUrl) && !apiKey) {
     throw new Error(
@@ -75,63 +292,46 @@ export async function syncTaxTransactions(
   let synced = 0;
   let latestBlockNumber: number | null = null;
 
-  for (const action of TAX_EXPLORER_ACTIONS) {
-    for (let page = 1; page <= maxPages; page += 1) {
-      const response = await fetchExplorerPage({
-        action,
-        address: wallet,
-        apiKey,
-        baseUrl,
-        chainId,
-        fetcher,
-        page,
-        pageSize,
-        startBlock: options.startBlock,
-        endBlock: options.endBlock,
-      });
+  const action: TaxExplorerAction = "txlistinternal";
+  for (let page = 1; page <= maxPages; page += 1) {
+    const response = await fetchExplorerPage({
+      action,
+      address: wallet,
+      apiKey,
+      baseUrl,
+      chainId,
+      fetcher,
+      page,
+      pageSize,
+      startBlock: options.startBlock ?? fromBlock,
+      endBlock: options.endBlock,
+    });
 
-      if (response.length === 0) break;
+    if (response.length === 0) break;
 
-      // Build rows for this page
-      const pageRows: SyncedTaxTransaction[] = [];
-      for (const item of response) {
-        const row = toSyncedTaxTransaction({ action, item, wallet, source, syncedAt });
-        if (row) pageRows.push(row);
-      }
-
-      // Batch-enrich with historical EUR values
-      const enrichedRows = await enrichTaxTransactionsWithEurValues(pageRows, config);
-
-      // Upsert each enriched row
-      for (const row of enrichedRows) {
-        upsertSyncedTaxTransaction(row);
-        synced += 1;
-        if (row.block_number !== null) {
-          latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
-        }
-      }
-
-      if (response.length < pageSize) break;
+    // Build rows for this page
+    const pageRows: SyncedTaxTransaction[] = [];
+    for (const item of response) {
+      const row = toSyncedTaxTransaction({ action, item, wallet, source, syncedAt });
+      if (row) pageRows.push(row);
     }
+
+    // Batch-enrich with historical EUR values
+    const enrichedRows = await enrichTaxTransactionsWithEurValues(pageRows, config);
+
+    // Upsert each enriched row
+    for (const row of enrichedRows) {
+      upsertSyncedTaxTransaction(row);
+      synced += 1;
+      if (row.block_number !== null) {
+        latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
+      }
+    }
+
+    if (response.length < pageSize) break;
   }
 
-  upsertTaxSyncState({
-    wallet,
-    last_synced_at: syncedAt,
-    last_block_number: latestKnownBlockNumber(
-      previousSyncState?.last_block_number ?? null,
-      latestBlockNumber,
-    ),
-    source,
-  });
-
-  return {
-    synced,
-    insertedOrUpdated: synced,
-    source,
-    wallet,
-    latestBlockNumber,
-  };
+  return { synced, latestBlockNumber };
 }
 
 export async function enrichTaxTransactionsEurValues(
@@ -506,6 +706,13 @@ function integerValue(value: unknown): number | null {
 function positiveInteger(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return null;
   return value;
+}
+
+function normalizedHyperSyncApiToken(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "YOUR_HYPERSYNC_API_TOKEN") return undefined;
+  return trimmed;
 }
 
 function normalizedExplorerApiKey(value: unknown): string | undefined {

@@ -162,6 +162,14 @@ function initSchema(database: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_positions_view_cache_synced_at ON positions_view_cache(synced_at);
     CREATE INDEX IF NOT EXISTS idx_pnl_view_cache_synced_at ON pnl_view_cache(synced_at);
+
+    CREATE TABLE IF NOT EXISTS token_metadata (
+      contract_address TEXT PRIMARY KEY,
+      symbol TEXT,
+      name TEXT,
+      decimals INTEGER,
+      fetched_at TEXT NOT NULL
+    );
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist

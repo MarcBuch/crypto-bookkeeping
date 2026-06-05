@@ -14,6 +14,13 @@ export interface PricingConfig {
 }
 
 export interface TaxConfig {
+  // HyperSync fields (new — preferred)
+  /** HyperSync URL for Hyperliquid. Default: "https://hyperliquid.hypersync.xyz" */
+  hyperSyncUrl?: string;
+  /** HyperSync API token (required since Nov 2025). */
+  hyperSyncApiToken?: string;
+
+  // Explorer fields (kept for txlistinternal and backward compat)
   explorerApiUrl?: string;
   explorerApiKey?: string;
   explorerChainId?: number;
@@ -128,6 +135,28 @@ function validateConfig(raw: unknown, path: string): void {
       throw new Error(
         `Config at ${path}: "logsFromBlock" must be a positive integer (got ${JSON.stringify(v)})`,
       );
+    }
+  }
+
+  // Validate tax config if present
+  if (cfg.tax !== undefined && cfg.tax !== null) {
+    const tax = cfg.tax as Record<string, unknown>;
+    if (tax.hyperSyncUrl !== undefined && tax.hyperSyncUrl !== null) {
+      if (typeof tax.hyperSyncUrl !== "string" || !tax.hyperSyncUrl.trim()) {
+        throw new Error(`Config at ${path}: "tax.hyperSyncUrl" must be a non-empty string`);
+      }
+      // Basic URL validation
+      try {
+        new URL(tax.hyperSyncUrl as string);
+      } catch {
+        throw new Error(`Config at ${path}: "tax.hyperSyncUrl" must be a valid URL (got ${JSON.stringify(tax.hyperSyncUrl)})`);
+      }
+    }
+    if (tax.hyperSyncApiToken !== undefined && tax.hyperSyncApiToken !== null) {
+      if (typeof tax.hyperSyncApiToken !== "string") {
+        throw new Error(`Config at ${path}: "tax.hyperSyncApiToken" must be a string`);
+      }
+      // Empty string treated as absent — no error, just ignored at runtime
     }
   }
 }

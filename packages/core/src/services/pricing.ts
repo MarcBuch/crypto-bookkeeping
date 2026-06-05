@@ -219,3 +219,62 @@ export async function getHistoricalEurPrice(
     return null;
   }
 }
+
+export async function getHistoricalUsdPrice(
+  config: Pick<Config, "pricing">,
+  symbol: string,
+  isoTimestamp: string,
+): Promise<number | null> {
+  const coinGeckoId = resolveCoinGeckoId(config, symbol);
+  if (!coinGeckoId) return null;
+
+  let dateStr: string;
+  try {
+    dateStr = isoToddmmyyyy(isoTimestamp);
+  } catch {
+    return null;
+  }
+
+  const cacheKey = `usd:${coinGeckoId}:${dateStr}`;
+  const cached = getCachedHistoricalPrice(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const url = `${COINGECKO_HISTORY_URL}/${coinGeckoId}/history?date=${dateStr}&localization=false`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const data = await response.json();
+    const marketData = (data as Record<string, unknown>)?.["market_data"] as
+      | Record<string, unknown>
+      | undefined;
+    const currentPrice = marketData?.["current_price"] as Record<string, unknown> | undefined;
+    const price = currentPrice?.["usd"];
+
+    if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    historicalPriceCache.set(cacheKey, {
+      price,
+      expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
+    });
+    return price;
+  } catch {
+    historicalPriceCache.set(cacheKey, {
+      price: null,
+      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+    });
+    return null;
+  }
+}

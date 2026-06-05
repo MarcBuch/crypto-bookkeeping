@@ -407,16 +407,20 @@ tax
 
     if (!isJsonMode()) console.log(`Syncing tax transactions for ${config.wallet}...`);
 
-    const sync = await syncTaxTransactions(config);
+    try {
+      const sync = await syncTaxTransactions(config);
 
-    output({ sync }, () => {
-      console.log(
-        `Synced ${sync.synced} tax transaction(s) from ${sync.source} for ${sync.wallet}.`,
-      );
-      if (sync.latestBlockNumber !== null) {
-        console.log(`Latest block: ${sync.latestBlockNumber}`);
-      }
-    });
+      output({ sync }, () => {
+        console.log(
+          `Synced ${sync.synced} tax transaction(s) from ${sync.source} for ${sync.wallet}.`,
+        );
+        if (sync.latestBlockNumber !== null) {
+          console.log(`Latest block: ${sync.latestBlockNumber}`);
+        }
+      });
+    } catch (err) {
+      printCommandError(err instanceof Error ? err.message : "Tax sync failed");
+    }
   });
 
 tax

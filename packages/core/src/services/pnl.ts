@@ -13,7 +13,7 @@ import {
   getTokenAmounts,
 } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-import { getUsdPrices } from "./pricing.js";
+import { getHistoricalUsdPrice, getUsdPrices } from "./pricing.js";
 
 export interface PnLView {
   tokenId: string;
@@ -442,15 +442,43 @@ export async function getPnLView(
     let token0UsdPrice: number | null = null;
     let token1UsdPrice: number | null = null;
 
-    try {
-      const usdPrices = await getUsdPrices(config, [
-        { symbol: t0sym, address: pos.token0 },
-        { symbol: t1sym, address: pos.token1 },
-      ]);
-      token0UsdPrice = usdPrices[token0PriceKey] ?? null;
-      token1UsdPrice = usdPrices[token1PriceKey] ?? null;
-    } catch {
-      // Live USD pricing is optional; token1-denominated P&L must still succeed.
+    if ((storedPos?.close_block ?? null) !== null) {
+      // Closed position: use historical USD price at close time
+      if (storedPos!.close_usd_price0 != null && storedPos!.close_usd_price1 != null) {
+        // Fast path: prices already persisted in DB
+        token0UsdPrice = storedPos!.close_usd_price0;
+        token1UsdPrice = storedPos!.close_usd_price1;
+      } else {
+        // Slow path: fetch historical price at close block timestamp
+        try {
+          const block = await client.getBlock({ blockNumber: BigInt(storedPos!.close_block!) });
+          const isoTimestamp = new Date(Number(block.timestamp * 1000n)).toISOString();
+          [token0UsdPrice, token1UsdPrice] = await Promise.all([
+            getHistoricalUsdPrice(config, t0sym, isoTimestamp),
+            getHistoricalUsdPrice(config, t1sym, isoTimestamp),
+          ]);
+          // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
+          upsertPosition({
+            ...storedPos!,
+            close_usd_price0: token0UsdPrice,
+            close_usd_price1: token1UsdPrice,
+          });
+        } catch {
+          // Graceful degradation: leave prices as null
+        }
+      }
+    } else {
+      // Active position (or closed without a recorded close_block): use live prices
+      try {
+        const usdPrices = await getUsdPrices(config, [
+          { symbol: t0sym, address: pos.token0 },
+          { symbol: t1sym, address: pos.token1 },
+        ]);
+        token0UsdPrice = usdPrices[token0PriceKey] ?? null;
+        token1UsdPrice = usdPrices[token1PriceKey] ?? null;
+      } catch {
+        // Live USD pricing is optional; token1-denominated P&L must still succeed.
+      }
     }
 
     const { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource } =

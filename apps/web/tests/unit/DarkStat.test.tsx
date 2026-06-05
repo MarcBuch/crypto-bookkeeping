@@ -26,7 +26,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
+
 import { renderToStaticMarkup } from "react-dom/server";
+
 import { formatNumber, formatUsd } from "../../src/App.tsx";
 import { DarkStat } from "../../src/App.tsx";
 
@@ -34,17 +36,19 @@ import { DarkStat } from "../../src/App.tsx";
 // Tooltip construction logic (copied from ActivePositionRow)
 // ============================================================================
 
-function constructTooltip(pnl: {
-  absolutePnlInToken1: number;
-  token1Symbol: string;
-  token1UsdPrice: number | null;
-} | undefined): string | undefined {
+function constructTooltip(
+  pnl:
+    | {
+        absolutePnlInToken1: number;
+        token1Symbol: string;
+        token1UsdPrice: number | null;
+      }
+    | undefined,
+): string | undefined {
   return pnl
     ? [
         `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`,
-        pnl.token1UsdPrice != null
-          ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)
-          : null,
+        pnl.token1UsdPrice != null ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice) : null,
       ]
         .filter(Boolean)
         .join("\n")
@@ -245,9 +249,7 @@ describe("DarkStat render contract", () => {
   // Test 1: No tooltip prop → no tooltip element in DOM
   // -------------------------------------------------------------------------
   it("renders without tooltip element when tooltip prop is absent", () => {
-    const html = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" />,
-    );
+    const html = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" />);
 
     // The HTML should not contain a span with the tooltip content
     expect(html).not.toContain("position: fixed");
@@ -260,9 +262,7 @@ describe("DarkStat render contract", () => {
   // (because visible state is false by default with renderToStaticMarkup)
   // -------------------------------------------------------------------------
   it("does not render tooltip span when visible state is false (default)", () => {
-    const html = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" tooltip="25.50 UBTC" />,
-    );
+    const html = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" tooltip="25.50 UBTC" />);
 
     // With renderToStaticMarkup, visible defaults to false, so the tooltip span
     // is not rendered (it's behind the && visible check)
@@ -273,9 +273,7 @@ describe("DarkStat render contract", () => {
   // Test 3: cursor-default class present when tooltip provided
   // -------------------------------------------------------------------------
   it("has cursor-default class on value <p> when tooltip prop is provided", () => {
-    const html = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" tooltip="25.50 UBTC" />,
-    );
+    const html = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" tooltip="25.50 UBTC" />);
 
     // The value <p> should have cursor-default class
     expect(html).toContain("cursor-default");
@@ -285,9 +283,7 @@ describe("DarkStat render contract", () => {
   // Test 4: cursor-default class absent when no tooltip
   // -------------------------------------------------------------------------
   it("does not have cursor-default class on value <p> when tooltip prop is absent", () => {
-    const html = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" />,
-    );
+    const html = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" />);
 
     // The value <p> should NOT have cursor-default
     expect(html).not.toContain("cursor-default");
@@ -297,9 +293,7 @@ describe("DarkStat render contract", () => {
   // Test 5: Value text is always rendered
   // -------------------------------------------------------------------------
   it("renders the value prop regardless of tooltip prop", () => {
-    const html1 = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" />,
-    );
+    const html1 = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" />);
     expect(html1).toContain("25.50%");
 
     const html2 = renderToStaticMarkup(
@@ -312,9 +306,7 @@ describe("DarkStat render contract", () => {
   // Test 6: Label is always rendered
   // -------------------------------------------------------------------------
   it("renders the label prop regardless of tooltip prop", () => {
-    const html1 = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" />,
-    );
+    const html1 = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" />);
     expect(html1).toContain("ROI");
 
     const html2 = renderToStaticMarkup(
@@ -338,9 +330,7 @@ describe("DarkStat render contract", () => {
   // Test 8: Detail text is not rendered when absent
   // -------------------------------------------------------------------------
   it("does not render detail when absent", () => {
-    const html = renderToStaticMarkup(
-      <DarkStat label="ROI" value="25.50%" />,
-    );
+    const html = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" />);
 
     // Should have the label and value, but no extra detail
     expect(html).toContain("ROI");
@@ -392,27 +382,25 @@ describe("DarkStat render contract", () => {
     expect(html).toContain("cursor-default");
   });
 
-   // -------------------------------------------------------------------------
-   // Test 12: onMouseEnter/onMouseLeave handlers are NOT set when tooltip absent
-   // -------------------------------------------------------------------------
-   it("does not have cursor-default (indicating no mouse handlers) when tooltip is absent", () => {
-     const html = renderToStaticMarkup(
-       <DarkStat label="ROI" value="25.50%" />,
-     );
+  // -------------------------------------------------------------------------
+  // Test 12: onMouseEnter/onMouseLeave handlers are NOT set when tooltip absent
+  // -------------------------------------------------------------------------
+  it("does not have cursor-default (indicating no mouse handlers) when tooltip is absent", () => {
+    const html = renderToStaticMarkup(<DarkStat label="ROI" value="25.50%" />);
 
-     // Without tooltip, cursor-default is not present
-     expect(html).not.toContain("cursor-default");
-   });
+    // Without tooltip, cursor-default is not present
+    expect(html).not.toContain("cursor-default");
+  });
 
-   // -------------------------------------------------------------------------
-   // Test 13: multiline tooltip structure (whitespace-pre-line) is in JSX
-   // -------------------------------------------------------------------------
-   it.todo("tooltip span uses whitespace-pre-line class (requires jsdom)", () => {});
+  // -------------------------------------------------------------------------
+  // Test 13: multiline tooltip structure (whitespace-pre-line) is in JSX
+  // -------------------------------------------------------------------------
+  it.todo("tooltip span uses whitespace-pre-line class (requires jsdom)", () => {});
 
-   // -------------------------------------------------------------------------
-   // Test 14: Fixed positioning classes in tooltip span
-   // -------------------------------------------------------------------------
-   it.todo("tooltip span (when visible) uses fixed positioning classes (requires jsdom)", () => {});
+  // -------------------------------------------------------------------------
+  // Test 14: Fixed positioning classes in tooltip span
+  // -------------------------------------------------------------------------
+  it.todo("tooltip span (when visible) uses fixed positioning classes (requires jsdom)", () => {});
 });
 
 // ============================================================================

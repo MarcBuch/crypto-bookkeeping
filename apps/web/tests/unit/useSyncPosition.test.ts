@@ -146,7 +146,7 @@ describe("useSyncPosition polling logic (single position)", () => {
     const syncMock = mock(async (tokenId: string) => {
       throw new Error("RPC rate limited on tokenId=" + tokenId);
     });
-    const statusMock = mock(async (tokenId: string) => ({ status: "idle" }) as api.SyncStatus);
+    const statusMock = mock(async (_tokenId: string) => ({ status: "idle" }) as api.SyncStatus);
 
     const poller = buildSinglePoller({
       tokenId: "42",
@@ -169,7 +169,7 @@ describe("useSyncPosition polling logic (single position)", () => {
   // 2. Stops polling on completed + invalidates cache
   // -------------------------------------------------------------------------
   it("stops polling and invalidates cache when getSinglePositionSyncStatus returns completed", async () => {
-    const syncMock = mock(async (tokenId: string) => ({ message: "ok" }));
+    const syncMock = mock(async (_tokenId: string) => ({ message: "ok" }));
     const completedStatus: api.SyncStatus = {
       status: "completed",
       startedAt: null,
@@ -177,7 +177,7 @@ describe("useSyncPosition polling logic (single position)", () => {
       error: null,
       positionCount: 1,
     };
-    const statusMock = mock(async (tokenId: string) => completedStatus);
+    const statusMock = mock(async (_tokenId: string) => completedStatus);
     const invalidateSpy = spyOn(queryClient, "invalidateQueries");
 
     const poller = buildSinglePoller({
@@ -219,7 +219,7 @@ describe("useSyncPosition polling logic (single position)", () => {
   // 3. Stops polling on failed + surfaces error (no cache invalidation)
   // -------------------------------------------------------------------------
   it("stops polling and sets error when getSinglePositionSyncStatus returns failed", async () => {
-    const syncMock = mock(async (tokenId: string) => ({ message: "ok" }));
+    const syncMock = mock(async (_tokenId: string) => ({ message: "ok" }));
     const failedStatus: api.SyncStatus = {
       status: "failed",
       startedAt: null,
@@ -227,7 +227,7 @@ describe("useSyncPosition polling logic (single position)", () => {
       error: "on-chain RPC timeout",
       positionCount: null,
     };
-    const statusMock = mock(async (tokenId: string) => failedStatus);
+    const statusMock = mock(async (_tokenId: string) => failedStatus);
     const invalidateSpy = spyOn(queryClient, "invalidateQueries");
 
     const poller = buildSinglePoller({
@@ -258,9 +258,9 @@ describe("useSyncPosition polling logic (single position)", () => {
   // 4. State transitions: running -> completed (multiple ticks)
   // -------------------------------------------------------------------------
   it("continues polling while status is running, stops on completed", async () => {
-    const syncMock = mock(async (tokenId: string) => ({ message: "ok" }));
+    const syncMock = mock(async (_tokenId: string) => ({ message: "ok" }));
     let tickCount = 0;
-    const statusMock = mock(async (tokenId: string): Promise<api.SyncStatus> => {
+    const statusMock = mock(async (_tokenId: string): Promise<api.SyncStatus> => {
       tickCount++;
       if (tickCount < 3) {
         return {
@@ -319,24 +319,28 @@ describe("useSyncPosition polling logic (single position)", () => {
   // 6. Multiple instances with different tokenIds are independent
   // -------------------------------------------------------------------------
   it("two instances with different tokenIds poll independently", async () => {
-    const syncMockA = mock(async (tokenId: string) => ({ message: "ok" }));
-    const syncMockB = mock(async (tokenId: string) => ({ message: "ok" }));
+    const syncMockA = mock(async (_tokenId: string) => ({ message: "ok" }));
+    const syncMockB = mock(async (_tokenId: string) => ({ message: "ok" }));
 
-    const statusMockA = mock(async (tokenId: string): Promise<api.SyncStatus> => ({
-      status: "running",
-      startedAt: null,
-      finishedAt: null,
-      error: null,
-      positionCount: null,
-    }));
+    const statusMockA = mock(
+      async (_tokenId: string): Promise<api.SyncStatus> => ({
+        status: "running",
+        startedAt: null,
+        finishedAt: null,
+        error: null,
+        positionCount: null,
+      }),
+    );
 
-    const statusMockB = mock(async (tokenId: string): Promise<api.SyncStatus> => ({
-      status: "completed",
-      startedAt: null,
-      finishedAt: null,
-      error: null,
-      positionCount: 1,
-    }));
+    const statusMockB = mock(
+      async (_tokenId: string): Promise<api.SyncStatus> => ({
+        status: "completed",
+        startedAt: null,
+        finishedAt: null,
+        error: null,
+        positionCount: 1,
+      }),
+    );
 
     const pollerA = buildSinglePoller({
       tokenId: "10",
@@ -387,8 +391,8 @@ describe("useSyncPosition polling logic (single position)", () => {
   // 7. Error during polling stops polling and surfaces error
   // -------------------------------------------------------------------------
   it("surfaces error when getSinglePositionSyncStatus throws during polling", async () => {
-    const syncMock = mock(async (tokenId: string) => ({ message: "ok" }));
-    const statusMock = mock(async (tokenId: string) => {
+    const syncMock = mock(async (_tokenId: string) => ({ message: "ok" }));
+    const statusMock = mock(async (_tokenId: string) => {
       throw new Error("Connection lost");
     });
 

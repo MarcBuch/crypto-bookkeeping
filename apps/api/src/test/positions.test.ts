@@ -402,21 +402,21 @@ describe("POST /positions/:tokenId/sync", () => {
     expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
   });
 
-   it("returns 409 when sync is already running for a position", async () => {
-     let resolveSyncSinglePosition: (v: unknown) => void;
-     mockSyncSinglePosition = () =>
-       new Promise((resolve) => {
-         resolveSyncSinglePosition = resolve;
-       });
+  it("returns 409 when sync is already running for a position", async () => {
+    let resolveSyncSinglePosition: (v: unknown) => void;
+    mockSyncSinglePosition = () =>
+      new Promise((resolve) => {
+        resolveSyncSinglePosition = resolve;
+      });
 
-     await server.inject({ method: "POST", url: "/positions/42/sync" });
-     const res = await server.inject({ method: "POST", url: "/positions/42/sync" });
-     expect(res.statusCode).toBe(409);
-     expect(res.json()).toMatchObject({ error: "Sync already in progress for position 42" });
+    await server.inject({ method: "POST", url: "/positions/42/sync" });
+    const res = await server.inject({ method: "POST", url: "/positions/42/sync" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "Sync already in progress for position 42" });
 
-     resolveSyncSinglePosition!({ tokenId: "42" });
-     await new Promise((r) => setTimeout(r, 20));
-   });
+    resolveSyncSinglePosition!({ tokenId: "42" });
+    await new Promise((r) => setTimeout(r, 20));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -449,7 +449,10 @@ describe("POST /positions/:tokenId/sync — invalid tokenId", () => {
   });
 
   it("returns 202 for very large but valid numeric tokenId (position may not exist, but sync attempt is made)", async () => {
-    mockSyncSinglePosition = async () => ({ tokenId: "999999999", syncedAt: new Date().toISOString() });
+    mockSyncSinglePosition = async () => ({
+      tokenId: "999999999",
+      syncedAt: new Date().toISOString(),
+    });
 
     const res = await server.inject({ method: "POST", url: "/positions/999999999/sync" });
     expect(res.statusCode).toBe(202);

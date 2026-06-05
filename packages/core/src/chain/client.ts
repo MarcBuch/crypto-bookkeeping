@@ -33,10 +33,7 @@ const TRANSPORT_TIMEOUT = 30_000;
 
 // Methods supported by Envio HyperRPC. All others (eth_call, etc.) must go
 // to a full node. See https://docs.envio.dev/docs/HyperRPC/overview-hyperrpc
-const HYPER_RPC_METHODS = new Set([
-  "eth_getLogs",
-  "eth_getTransactionReceipt",
-]);
+const HYPER_RPC_METHODS = new Set(["eth_getLogs", "eth_getTransactionReceipt"]);
 
 async function fetchRpc(url: string, method: string, params: unknown): Promise<unknown> {
   const controller = new AbortController();
@@ -65,9 +62,9 @@ async function fetchRpc(url: string, method: string, params: unknown): Promise<u
     return data.result;
   } catch (err: any) {
     if (err.name === "AbortError") {
-      const timeout = new Error(
-        `RPC request timed out after ${TRANSPORT_TIMEOUT}ms`,
-      ) as Error & { code: number };
+      const timeout = new Error(`RPC request timed out after ${TRANSPORT_TIMEOUT}ms`) as Error & {
+        code: number;
+      };
       timeout.code = -32099;
       throw timeout;
     }

@@ -25,7 +25,6 @@ import { join } from "path";
 // ---------------------------------------------------------------------------
 
 let mockGetPositionData: (...args: unknown[]) => unknown = async () => ({});
-let mockGetPositionsView: (...args: unknown[]) => unknown = async () => [];
 let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
 
 mock.module("../chain/positions.js", () => ({
@@ -89,7 +88,6 @@ import {
   listCachedPositionViews,
   listCachedPnLViews,
   upsertPositionViewCache,
-  upsertPnLViewCache,
 } from "../db/store.js";
 import { syncSinglePosition } from "../services/positions.js";
 
@@ -97,7 +95,8 @@ import { syncSinglePosition } from "../services/positions.js";
 // Shared fixtures
 // ---------------------------------------------------------------------------
 
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-single-position-tests";
+const TMP =
+  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-single-position-tests";
 
 const fakeConfig = {
   rpc: "http://test-rpc",
@@ -121,24 +120,6 @@ const fakeRawPosition = {
   fee: 3000,
   feeGrowthInside0LastX128: 0n,
   feeGrowthInside1LastX128: 0n,
-};
-
-const fakePositionView = {
-  tokenId: "12345",
-  token0: { address: "0xaaa", symbol: "WHYPE", decimals: 18 },
-  token1: { address: "0xbbb", symbol: "USDC", decimals: 6 },
-  fee: 3000,
-  feePercent: 0.3,
-  tickLower: -100,
-  tickUpper: 100,
-  priceLower: 1.0,
-  priceUpper: 2.0,
-  currentPrice: 1.5,
-  liquidity: "1000000000",
-  status: "active",
-  inRange: true,
-  currentAmount0: 5.0,
-  currentAmount1: 7.5,
 };
 
 const fakePnLView = {
@@ -185,7 +166,6 @@ beforeEach(() => {
   resetDb();
   // Reset mocks to safe defaults
   mockGetPositionData = async () => fakeRawPosition;
-  mockGetPositionsView = async () => [fakePositionView];
   mockGetPnLView = async () => [fakePnLView];
 });
 
@@ -251,7 +231,7 @@ describe("syncSinglePosition — RPC error propagation", () => {
     expect(positions).toHaveLength(0);
 
     const pnlViews = listCachedPnLViews();
-     expect(pnlViews).toHaveLength(0);
+    expect(pnlViews).toHaveLength(0);
   });
 });
 

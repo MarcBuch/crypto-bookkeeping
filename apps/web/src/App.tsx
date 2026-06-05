@@ -1,7 +1,11 @@
 import { useRef, useState } from "react";
 
 import type { DashboardPosition } from "./api";
-import { useDashboardPositions, useSyncPositions, useSyncPosition } from "./hooks/useDashboardPositions";
+import {
+  useDashboardPositions,
+  useSyncPositions,
+  useSyncPosition,
+} from "./hooks/useDashboardPositions";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -184,7 +188,7 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
                   <PnlHeaderTooltip />
                 </th>
                 <th className="px-5 py-3">Fees</th>
-                <th className="px-5 py-3"></th>
+                <th className="px-5 py-3" aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
@@ -220,7 +224,9 @@ function MetricCard({
         </p>
         <span className="mt-1 h-1.5 w-1.5 rounded-full bg-neutral-300 transition group-hover:bg-neutral-950" />
       </div>
-      <p className={`mt-4 font-mono text-3xl font-black tracking-tight ${valueClassName ?? toneClass(tone)}`}>
+      <p
+        className={`mt-4 font-mono text-3xl font-black tracking-tight ${valueClassName ?? toneClass(tone)}`}
+      >
         {value}
       </p>
       {detail ? <p className="mt-2 text-xs font-medium text-neutral-500">{detail}</p> : null}
@@ -279,10 +285,18 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         label="ROI"
         value={pnl ? formatPercent(pnl.absolutePnlPercent) : "n/a"}
         valueClassName={pnl ? darkToneClass(pnl.absolutePnlPercent) : undefined}
-        tooltip={pnl ? [
-          `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`,
-          pnl.token1UsdPrice != null ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice) : null,
-        ].filter(Boolean).join("\n") : undefined}
+        tooltip={
+          pnl
+            ? [
+                `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`,
+                pnl.token1UsdPrice != null
+                  ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)
+                  : null,
+              ]
+                .filter(Boolean)
+                .join("\n")
+            : undefined
+        }
       />
 
       <div className="min-w-0 font-mono text-xs font-bold">
@@ -394,7 +408,7 @@ export function DarkStat({
       ) : null}
       {tooltip && visible && (
         <span
-          className="pointer-events-none fixed z-[9999] w-48 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal tracking-normal text-white normal-case shadow-lg whitespace-pre-line"
+          className="pointer-events-none fixed z-[9999] w-48 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal tracking-normal whitespace-pre-line text-white normal-case shadow-lg"
           style={{ left: coords.x, top: coords.y - 8, transform: "translate(-50%, -100%)" }}
         >
           {tooltip}
@@ -407,7 +421,11 @@ export function DarkStat({
 
 function PositionRow({ position }: { position: DashboardPosition }) {
   const pnl = position.pnl;
-  const { trigger: syncPosition, isPolling: isSyncingPosition, error: syncPositionError } = useSyncPosition(position.tokenId);
+  const {
+    trigger: syncPosition,
+    isPolling: isSyncingPosition,
+    error: syncPositionError,
+  } = useSyncPosition(position.tokenId);
 
   return (
     <tr className="text-neutral-700 transition hover:bg-neutral-50">
@@ -459,9 +477,7 @@ function PositionRow({ position }: { position: DashboardPosition }) {
         >
           {isSyncingPosition ? "…" : "Sync"}
         </button>
-        {syncPositionError ? (
-          <span className="ml-2 text-xs text-rose-600">!</span>
-        ) : null}
+        {syncPositionError ? <span className="ml-2 text-xs text-rose-600">!</span> : null}
       </td>
     </tr>
   );

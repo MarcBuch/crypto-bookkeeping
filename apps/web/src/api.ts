@@ -272,7 +272,9 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 }
 
 export async function syncSinglePosition(tokenId: string): Promise<{ message: string }> {
-  const data = await fetchJson<{ message: string }>(`/positions/${tokenId}/sync`, { method: "POST" });
+  const data = await fetchJson<{ message: string }>(`/positions/${tokenId}/sync`, {
+    method: "POST",
+  });
   return data;
 }
 

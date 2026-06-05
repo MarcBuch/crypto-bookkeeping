@@ -1,4 +1,9 @@
-import { syncLpData, syncSinglePosition, listCachedPositionViews, getPositionsCacheSyncedAt } from "@lp-tracker/core";
+import {
+  syncLpData,
+  syncSinglePosition,
+  listCachedPositionViews,
+  getPositionsCacheSyncedAt,
+} from "@lp-tracker/core";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 
 import { isNumericString } from "../utils/validation.js";
@@ -79,7 +84,9 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
 
       const existing = positionSyncStates.get(tokenId);
       if (existing?.status === "running") {
-        return reply.status(409).send({ error: `Sync already in progress for position ${tokenId}` });
+        return reply
+          .status(409)
+          .send({ error: `Sync already in progress for position ${tokenId}` });
       }
 
       const config = fastify.lpConfig;

@@ -1,7 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getDashboardPositions, getSinglePositionSyncStatus, getSyncStatus, syncPositions, syncSinglePosition, SyncStatus } from "../api";
+import {
+  getDashboardPositions,
+  getSinglePositionSyncStatus,
+  getSyncStatus,
+  syncPositions,
+  syncSinglePosition,
+  SyncStatus,
+} from "../api";
 
 export const queryKeys = {
   dashboardPositions: ["dashboardPositions"] as const,

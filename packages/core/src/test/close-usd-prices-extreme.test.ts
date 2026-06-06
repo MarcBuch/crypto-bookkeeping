@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, existsSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 
 import { resetDb } from "../db/schema.js";
 import { upsertPosition, getPosition } from "../db/store.js";
 import type { StoredPosition } from "../db/store.js";
 
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-tests";
+const TMP = join(tmpdir(), "lp-tracker-db-tests");
 
 // Helper to create a minimal StoredPosition stub
 function minimalPosition(

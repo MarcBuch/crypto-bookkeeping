@@ -27,6 +27,7 @@ export interface StoredPosition {
   close_block?: number | null;
   close_usd_price0?: number | null;
   close_usd_price1?: number | null;
+  exit_sqrt_price_x96?: string | null;
   created_at: string;
 }
 
@@ -178,8 +179,8 @@ export function upsertPosition(position: Omit<StoredPosition, "created_at">): vo
     `INSERT INTO positions 
      (token_id, token0, token1, token0_symbol, token1_symbol, token0_decimals, token1_decimals, 
       fee, tick_lower, tick_upper, entry_sqrt_price_x96, entry_block, entry_amount0, entry_amount1, entry_liquidity,
-      open_tx, close_tx, exit_amount0, exit_amount1, fees_collected0, fees_collected1, close_block, close_usd_price0, close_usd_price1)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      open_tx, close_tx, exit_amount0, exit_amount1, fees_collected0, fees_collected1, close_block, close_usd_price0, close_usd_price1, exit_sqrt_price_x96)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(token_id) DO UPDATE SET
        token0 = excluded.token0,
        token1 = excluded.token1,
@@ -203,7 +204,8 @@ export function upsertPosition(position: Omit<StoredPosition, "created_at">): vo
        fees_collected1 = COALESCE(excluded.fees_collected1, fees_collected1),
        close_block = COALESCE(excluded.close_block, close_block),
        close_usd_price0 = COALESCE(excluded.close_usd_price0, close_usd_price0),
-       close_usd_price1 = COALESCE(excluded.close_usd_price1, close_usd_price1)`,
+       close_usd_price1 = COALESCE(excluded.close_usd_price1, close_usd_price1),
+       exit_sqrt_price_x96 = COALESCE(excluded.exit_sqrt_price_x96, exit_sqrt_price_x96)`,
     [
       position.token_id,
       position.token0,
@@ -229,6 +231,7 @@ export function upsertPosition(position: Omit<StoredPosition, "created_at">): vo
       position.close_block ?? null,
       position.close_usd_price0 ?? null,
       position.close_usd_price1 ?? null,
+      position.exit_sqrt_price_x96 ?? null,
     ],
   );
 }

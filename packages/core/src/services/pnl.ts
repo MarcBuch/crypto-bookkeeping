@@ -354,8 +354,10 @@ export async function getPnLView(
         exitAmount1 = BigInt(storedPos!.exit_amount1 ?? "0");
         feesCollected0 = BigInt(storedPos!.fees_collected0 ?? "0");
         feesCollected1 = BigInt(storedPos!.fees_collected1 ?? "0");
-        // Use close_block price if available, otherwise fall back to current price
-        if (storedPos!.close_block) {
+        // Use stored exit price if available (stable across syncs)
+        if (storedPos!.exit_sqrt_price_x96) {
+          exitSqrtPriceX96 = BigInt(storedPos!.exit_sqrt_price_x96);
+        } else if (storedPos!.close_block) {
           const closePrice = await getPoolPriceAtBlock(
             client,
             poolAddress,
@@ -363,7 +365,36 @@ export async function getPnLView(
           );
           if (closePrice) {
             exitSqrtPriceX96 = closePrice.sqrtPriceX96;
+          } else {
+            // Historical pool state unavailable for old blocks; derive a stable price
+            // from the fixed on-chain exit amounts so P&L doesn't fluctuate with live price.
+            exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
+              exitAmount0,
+              exitAmount1,
+              entryLiquidity,
+              pos.tickLower,
+              pos.tickUpper,
+            );
           }
+          // Persist so future syncs skip getPoolPriceAtBlock entirely
+          upsertPosition({
+            token_id: pos.tokenId.toString(),
+            token0: pos.token0,
+            token1: pos.token1,
+            token0_symbol: token0Info.symbol,
+            token1_symbol: token1Info.symbol,
+            token0_decimals: token0Info.decimals,
+            token1_decimals: token1Info.decimals,
+            fee: pos.fee,
+            tick_lower: pos.tickLower,
+            tick_upper: pos.tickUpper,
+            entry_sqrt_price_x96: storedPos!.entry_sqrt_price_x96 ?? null,
+            entry_block: storedPos!.entry_block ?? null,
+            entry_amount0: storedPos!.entry_amount0 ?? null,
+            entry_amount1: storedPos!.entry_amount1 ?? null,
+            entry_liquidity: storedPos!.entry_liquidity ?? null,
+            exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
+          });
         }
       } else {
         // Slow path: find the close event on chain
@@ -394,10 +425,27 @@ export async function getPnLView(
           feesCollected0 = closeEvent.collectedFees0;
           feesCollected1 = closeEvent.collectedFees1;
 
-          // Get pool price at close block for accurate exit price
-          const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
-          if (closePrice) {
-            exitSqrtPriceX96 = closePrice.sqrtPriceX96;
+          // Use stored exit price if available (guards against RPC inconsistency for
+          // historical blocks — once stored, the value never changes across syncs).
+          // Only call getPoolPriceAtBlock when there is nothing stored yet.
+          if (storedPos?.exit_sqrt_price_x96) {
+            exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
+          } else {
+            // Get pool price at close block for accurate exit price
+            const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
+            if (closePrice) {
+              exitSqrtPriceX96 = closePrice.sqrtPriceX96;
+            } else {
+              // Historical pool state unavailable for old blocks; derive a stable price
+              // from the fixed on-chain exit amounts so P&L doesn't fluctuate with live price.
+              exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
+                exitAmount0,
+                exitAmount1,
+                entryLiquidity,
+                pos.tickLower,
+                pos.tickUpper,
+              );
+            }
           }
 
           // Persist close data for future fast-path use (m2t4)
@@ -424,6 +472,7 @@ export async function getPnLView(
             fees_collected0: closeEvent.collectedFees0.toString(),
             fees_collected1: closeEvent.collectedFees1.toString(),
             close_block: Number(closeEvent.blockNumber),
+            exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
           });
         }
         // If no close event found, continue with zeroed amounts and current price

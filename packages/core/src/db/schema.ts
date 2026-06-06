@@ -221,6 +221,10 @@ function initSchema(database: Database): void {
     database.exec("ALTER TABLE positions ADD COLUMN close_usd_price1 REAL");
   }
 
+  if (!positionCols.some((c) => c.name === "exit_sqrt_price_x96")) {
+    database.exec("ALTER TABLE positions ADD COLUMN exit_sqrt_price_x96 TEXT");
+  }
+
   const taxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
     name: string;
     pk: number;

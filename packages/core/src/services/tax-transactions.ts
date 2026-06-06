@@ -11,11 +11,13 @@ import {
 import { resolveTokenMetadata } from "../chain/token-metadata.js";
 import type { Config } from "../config.js";
 import {
+  getAllPositions,
   getTaxSyncState,
   getTaxTransactionsNeedingEurEnrichment,
   updateTaxTransactionEurValues,
   upsertSyncedTaxTransaction,
   upsertTaxSyncState,
+  type StoredPosition,
   type SyncedTaxTransaction,
 } from "../db/store.js";
 import { getHistoricalEurPrice } from "./pricing.js";
@@ -35,6 +37,23 @@ type TaxTransactionFetcher = (url: string) => Promise<{
   status: number;
   json: () => Promise<unknown>;
 }>;
+
+interface ExplorerEnvelope {
+  status?: string;
+  message?: string;
+  result?: unknown;
+}
+
+type ExplorerTransaction = Record<string, unknown>;
+
+export interface SyncLpTaxFlowsOptions {
+  viemClient?: Client;
+}
+
+export interface SyncLpTaxFlowsSummary {
+  synced: number;
+  skipped: number;
+}
 
 export interface SyncTaxTransactionsOptions {
   fetcher?: TaxTransactionFetcher;
@@ -57,13 +76,310 @@ export interface SyncTaxTransactionsSummary {
   latestBlockNumber: number | null;
 }
 
-interface ExplorerEnvelope {
-  status?: string;
-  message?: string;
-  result?: unknown;
+export async function syncLpTaxFlows(
+  config: Pick<Config, "wallet" | "pricing" | "rpc" | "chainId" | "contracts">,
+  options: SyncLpTaxFlowsOptions = {},
+): Promise<SyncLpTaxFlowsSummary> {
+  const viemClient = options.viemClient ?? createClient(config as Config);
+  const syncedAt = new Date().toISOString();
+  const positions = getAllPositions();
+
+  // Build a map of unique block numbers → timestamps
+  const blockNumbers = new Set<number>();
+  for (const pos of positions) {
+    if (pos.entry_block !== null && pos.entry_block !== undefined) blockNumbers.add(pos.entry_block);
+    if (pos.close_block !== null && pos.close_block !== undefined) blockNumbers.add(pos.close_block);
+  }
+
+  const blockTimestampMap = new Map<number, number | null>();
+  for (const blockNum of blockNumbers) {
+    try {
+      const block = await viemClient.getBlock({ blockNumber: BigInt(blockNum) });
+      blockTimestampMap.set(blockNum, block.timestamp ? Number(block.timestamp) : null);
+    } catch {
+      blockTimestampMap.set(blockNum, null);
+    }
+  }
+
+  let synced = 0;
+  let skipped = 0;
+
+  for (const position of positions) {
+    // ── Deposit entries ────────────────────────────────────────────────────
+    if (position.open_tx) {
+      const hasEntry = (position.entry_amount0 !== null && position.entry_amount0 !== "0") ||
+                       (position.entry_amount1 !== null && position.entry_amount1 !== "0");
+      if (hasEntry && position.entry_block !== null) {
+        // Token0
+        if (position.entry_amount0 !== null && position.entry_amount0 !== "0") {
+          const depositEntry = buildLpDepositEntry(
+            position,
+            0,
+            position.open_tx,
+            position.entry_block,
+            blockTimestampMap,
+            config.wallet,
+            config.contracts.positionManager,
+            syncedAt,
+          );
+          const [enriched] = await enrichTaxTransactionsWithEurValues([depositEntry], config);
+          upsertSyncedTaxTransaction(enriched);
+          synced += 1;
+        }
+
+        // Token1
+        if (position.entry_amount1 !== null && position.entry_amount1 !== "0") {
+          const depositEntry = buildLpDepositEntry(
+            position,
+            1,
+            position.open_tx,
+            position.entry_block,
+            blockTimestampMap,
+            config.wallet,
+            config.contracts.positionManager,
+            syncedAt,
+          );
+          const [enriched] = await enrichTaxTransactionsWithEurValues([depositEntry], config);
+          upsertSyncedTaxTransaction(enriched);
+          synced += 1;
+        }
+      } else {
+        skipped += 1;
+      }
+    }
+
+    // ── Withdrawal entries ─────────────────────────────────────────────────
+    if (position.close_tx && position.close_block !== null) {
+      const hasExit = (position.exit_amount0 !== null && position.exit_amount0 !== "0") ||
+                      (position.exit_amount1 !== null && position.exit_amount1 !== "0");
+      
+      if (hasExit) {
+        // Token0
+        if (position.exit_amount0 !== null && position.exit_amount0 !== "0") {
+          const withdrawalEntry = buildLpWithdrawalEntry(
+            position,
+            0,
+            position.close_tx,
+            position.close_block,
+            blockTimestampMap,
+            syncedAt,
+          );
+          const [enriched] = await enrichTaxTransactionsWithEurValues([withdrawalEntry], config);
+          upsertSyncedTaxTransaction(enriched);
+          synced += 1;
+        }
+
+        // Token1
+        if (position.exit_amount1 !== null && position.exit_amount1 !== "0") {
+          const withdrawalEntry = buildLpWithdrawalEntry(
+            position,
+            1,
+            position.close_tx,
+            position.close_block,
+            blockTimestampMap,
+            syncedAt,
+          );
+          const [enriched] = await enrichTaxTransactionsWithEurValues([withdrawalEntry], config);
+          upsertSyncedTaxTransaction(enriched);
+          synced += 1;
+        }
+      }
+    }
+
+    // ── Fee entries ────────────────────────────────────────────────────────
+    if (position.close_tx && position.close_block !== null) {
+      const hasFees = (position.fees_collected0 !== null && position.fees_collected0 !== "0") ||
+                      (position.fees_collected1 !== null && position.fees_collected1 !== "0");
+      
+      if (hasFees) {
+        // Token0
+        if (position.fees_collected0 !== null && position.fees_collected0 !== "0") {
+          const feeEntry = buildLpFeeEntry(
+            position,
+            0,
+            position.close_tx,
+            position.close_block,
+            blockTimestampMap,
+            syncedAt,
+          );
+          const [enriched] = await enrichTaxTransactionsWithEurValues([feeEntry], config);
+          upsertSyncedTaxTransaction(enriched);
+          synced += 1;
+        }
+
+        // Token1
+        if (position.fees_collected1 !== null && position.fees_collected1 !== "0") {
+          const feeEntry = buildLpFeeEntry(
+            position,
+            1,
+            position.close_tx,
+            position.close_block,
+            blockTimestampMap,
+            syncedAt,
+          );
+          const [enriched] = await enrichTaxTransactionsWithEurValues([feeEntry], config);
+          upsertSyncedTaxTransaction(enriched);
+          synced += 1;
+        }
+      }
+    }
+  }
+
+  return { synced, skipped };
 }
 
-type ExplorerTransaction = Record<string, unknown>;
+function buildLpDepositEntry(
+  position: StoredPosition,
+  tokenIndex: 0 | 1,
+  hash: string,
+  blockNumber: number | undefined,
+  blockTimestampMap: Map<number, number | null>,
+  wallet: string,
+  positionManager: string,
+  syncedAt: string,
+): SyncedTaxTransaction {
+  const token0 = tokenIndex === 0;
+  const tokenAddress = token0 ? position.token0 : position.token1;
+  const tokenSymbol = token0 ? position.token0_symbol : position.token1_symbol;
+  const tokenDecimals = token0 ? position.token0_decimals : position.token1_decimals;
+  const amount = token0 ? position.entry_amount0 : position.entry_amount1;
+  const quantity = formatTaxQuantity(amount, tokenDecimals);
+  const timeStamp = blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
+  const timeStampIso = timeStamp ? new Date(timeStamp * 1000).toISOString() : null;
+
+  return {
+    id: `lp:deposit:${hash}:${tokenAddress}:${tokenIndex}`,
+    hash,
+    block_number: blockNumber ?? null,
+    time_stamp: timeStampIso,
+    from_address: wallet,
+    to_address: positionManager,
+    value: amount,
+    gas_used: null,
+    gas_price: null,
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: tokenAddress,
+    token_symbol: tokenSymbol,
+    token_decimal: tokenDecimals,
+    token_name: null,
+    transaction_type: "lp-deposit",
+    source: "lp-events",
+    is_error: 0,
+    incoming_quantity: null,
+    incoming_asset: null,
+    outgoing_quantity: quantity,
+    outgoing_asset: tokenSymbol,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  };
+}
+
+function buildLpWithdrawalEntry(
+  position: StoredPosition,
+  tokenIndex: 0 | 1,
+  hash: string,
+  blockNumber: number | undefined,
+  blockTimestampMap: Map<number, number | null>,
+  syncedAt: string,
+): SyncedTaxTransaction {
+  const token0 = tokenIndex === 0;
+  const tokenAddress = token0 ? position.token0 : position.token1;
+  const tokenSymbol = token0 ? position.token0_symbol : position.token1_symbol;
+  const tokenDecimals = token0 ? position.token0_decimals : position.token1_decimals;
+  const amount = (token0 ? position.exit_amount0 : position.exit_amount1) ?? null;
+  const quantity = formatTaxQuantity(amount, tokenDecimals);
+  const timeStamp = blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
+  const timeStampIso = timeStamp ? new Date(timeStamp * 1000).toISOString() : null;
+
+  return {
+    id: `lp:withdrawal:${hash}:${tokenAddress}:${tokenIndex}`,
+    hash,
+    block_number: blockNumber ?? null,
+    time_stamp: timeStampIso,
+    from_address: null,
+    to_address: null,
+    value: amount,
+    gas_used: null,
+    gas_price: null,
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: tokenAddress,
+    token_symbol: tokenSymbol,
+    token_decimal: tokenDecimals,
+    token_name: null,
+    transaction_type: "lp-withdrawal",
+    source: "lp-events",
+    is_error: 0,
+    incoming_quantity: quantity,
+    incoming_asset: tokenSymbol,
+    outgoing_quantity: null,
+    outgoing_asset: null,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  };
+}
+
+function buildLpFeeEntry(
+  position: StoredPosition,
+  tokenIndex: 0 | 1,
+  hash: string,
+  blockNumber: number | undefined,
+  blockTimestampMap: Map<number, number | null>,
+  syncedAt: string,
+): SyncedTaxTransaction {
+  const token0 = tokenIndex === 0;
+  const tokenAddress = token0 ? position.token0 : position.token1;
+  const tokenSymbol = token0 ? position.token0_symbol : position.token1_symbol;
+  const tokenDecimals = token0 ? position.token0_decimals : position.token1_decimals;
+  const amount = (token0 ? position.fees_collected0 : position.fees_collected1) ?? null;
+  const quantity = formatTaxQuantity(amount, tokenDecimals);
+  const timeStamp = blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
+  const timeStampIso = timeStamp ? new Date(timeStamp * 1000).toISOString() : null;
+
+  return {
+    id: `lp:fees:${hash}:${tokenAddress}:${tokenIndex}`,
+    hash,
+    block_number: blockNumber ?? null,
+    time_stamp: timeStampIso,
+    from_address: null,
+    to_address: null,
+    value: amount,
+    gas_used: null,
+    gas_price: null,
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: tokenAddress,
+    token_symbol: tokenSymbol,
+    token_decimal: tokenDecimals,
+    token_name: null,
+    transaction_type: "lp-fees",
+    source: "lp-events",
+    is_error: 0,
+    incoming_quantity: quantity,
+    incoming_asset: tokenSymbol,
+    outgoing_quantity: null,
+    outgoing_asset: null,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  };
+}
+
 
 export async function syncTaxTransactions(
   config: Pick<
@@ -144,6 +460,10 @@ export async function syncTaxTransactions(
       explorerSynced.latestBlockNumber,
     );
   }
+
+  // ── LP flow sync: deposit/withdrawal/fees from LP event data ──────────────
+  const lpFlowResult = await syncLpTaxFlows(config, { viemClient });
+  synced += lpFlowResult.synced;
 
   // ── Update sync state watermark ────────────────────────────────────────────
   upsertTaxSyncState({

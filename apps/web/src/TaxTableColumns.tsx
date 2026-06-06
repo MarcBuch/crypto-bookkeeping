@@ -53,8 +53,7 @@ export const taxTableColumns = [
     header: "Hash",
     size: 11,
     enableSorting: false,
-    cell: ({ row, table }) => {
-      const meta = table.options.meta as TableMeta;
+    cell: ({ row }) => {
       const groupData: TaxTransactionGroup | undefined = row.original._groupData;
 
       if (groupData) {

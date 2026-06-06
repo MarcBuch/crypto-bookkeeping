@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import {
-  getHistoricalEurPrice,
-  getHistoricalUsdPrice,
-  getUsdPrices,
-} from "../services/pricing.js";
+import { getHistoricalEurPrice, getHistoricalUsdPrice, getUsdPrices } from "../services/pricing.js";
 
 const originalFetch = globalThis.fetch;
 const originalDateNow = Date.now;
@@ -492,48 +488,44 @@ describe("getHistoricalEurPrice — caching", () => {
   });
 
   it("negative cache (null response) lasts 5 seconds", async () => {
-     setNow(0);
- 
-     let responseOk = false;
-     let responseData: unknown = { error: "not found" };
-     const calls: FetchCall[] = [];
-     globalThis.fetch = (async (input: RequestInfo | URL) => {
-       calls.push({ url: String(input) });
-       return {
-         ok: responseOk,
-         json: async () => responseData,
-       } as Response;
-     }) as unknown as typeof fetch;
- 
-     const config = { pricing: { coingeckoIds: { H_CACHE_TTL_NEG: "h-cache-ttl-neg-id" } } };
-     const ts = "2024-06-05T12:00:00.000Z";
- 
-     const r1 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
-     expect(r1).toBeNull();
-     expect(calls).toHaveLength(1);
- 
-     setNow(4999);
-     const r2 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
-     expect(r2).toBeNull();
-     expect(calls).toHaveLength(1);
- 
-     responseOk = true;
-     responseData = { market_data: { current_price: { eur: 42 } } };
-     setNow(5000);
-     const r3 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
-     expect(r3).toBe(42);
-     expect(calls).toHaveLength(2);
-   });
+    setNow(0);
+
+    let responseOk = false;
+    let responseData: unknown = { error: "not found" };
+    const calls: FetchCall[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push({ url: String(input) });
+      return {
+        ok: responseOk,
+        json: async () => responseData,
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const config = { pricing: { coingeckoIds: { H_CACHE_TTL_NEG: "h-cache-ttl-neg-id" } } };
+    const ts = "2024-06-05T12:00:00.000Z";
+
+    const r1 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
+    expect(r1).toBeNull();
+    expect(calls).toHaveLength(1);
+
+    setNow(4999);
+    const r2 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
+    expect(r2).toBeNull();
+    expect(calls).toHaveLength(1);
+
+    responseOk = true;
+    responseData = { market_data: { current_price: { eur: 42 } } };
+    setNow(5000);
+    const r3 = await getHistoricalEurPrice(config, "H_CACHE_TTL_NEG", ts);
+    expect(r3).toBe(42);
+    expect(calls).toHaveLength(2);
+  });
 });
 
 describe("getHistoricalUsdPrice — unknown assets and invalid inputs", () => {
   it("returns null and avoids fetch when pricing config is missing", async () => {
     const calls = mockFetchJson({ market_data: { current_price: { usd: 10 } } });
-    const result = await getHistoricalUsdPrice(
-      {} as any,
-      "HYPE",
-      "2024-01-15T00:00:00.000Z",
-    );
+    const result = await getHistoricalUsdPrice({} as any, "HYPE", "2024-01-15T00:00:00.000Z");
     expect(result).toBeNull();
     expect(calls).toHaveLength(0);
   });
@@ -574,17 +566,13 @@ describe("getHistoricalUsdPrice — unknown assets and invalid inputs", () => {
     expect(calls).toHaveLength(0);
   });
 
-   it("returns null when current_price exists but usd key is missing", async () => {
-     const calls = mockFetchJson({ market_data: { current_price: { eur: 50 } } });
-     const config = { pricing: { coingeckoIds: { HYPE: "hyperliquid" } } };
-     const result = await getHistoricalUsdPrice(
-       config,
-       "HYPE",
-       "2024-01-15T00:00:00.000Z",
-     );
-     expect(result).toBeNull();
-     expect(calls).toHaveLength(1);
-   });
+  it("returns null when current_price exists but usd key is missing", async () => {
+    const calls = mockFetchJson({ market_data: { current_price: { eur: 50 } } });
+    const config = { pricing: { coingeckoIds: { HYPE: "hyperliquid" } } };
+    const result = await getHistoricalUsdPrice(config, "HYPE", "2024-01-15T00:00:00.000Z");
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe("getHistoricalUsdPrice — API failures", () => {
@@ -615,7 +603,11 @@ describe("getHistoricalUsdPrice — API failures", () => {
   it("returns null when market_data field is missing", async () => {
     const calls = mockFetchJson({ other_field: { current_price: { usd: 50 } } });
     const config = { pricing: { coingeckoIds: { USD_NO_MD_TOKEN: "usd-no-md-id" } } };
-    const result = await getHistoricalUsdPrice(config, "USD_NO_MD_TOKEN", "2024-03-10T12:00:00.000Z");
+    const result = await getHistoricalUsdPrice(
+      config,
+      "USD_NO_MD_TOKEN",
+      "2024-03-10T12:00:00.000Z",
+    );
     expect(result).toBeNull();
     expect(calls).toHaveLength(1);
   });
@@ -647,7 +639,11 @@ describe("getHistoricalUsdPrice — API failures", () => {
   it("returns null when fetch throws a network error", async () => {
     const calls = mockFetchReject(new Error("network down"));
     const config = { pricing: { coingeckoIds: { USD_NET_ERR_TOKEN: "usd-net-err-id" } } };
-    const result = await getHistoricalUsdPrice(config, "USD_NET_ERR_TOKEN", "2024-03-10T12:00:00.000Z");
+    const result = await getHistoricalUsdPrice(
+      config,
+      "USD_NET_ERR_TOKEN",
+      "2024-03-10T12:00:00.000Z",
+    );
     expect(result).toBeNull();
     expect(calls).toHaveLength(1);
   });

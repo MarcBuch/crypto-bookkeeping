@@ -1,17 +1,36 @@
 import { isAddress } from "viem";
-import type { Client } from "./client.js";
+
 import { getTokenMetadata, upsertTokenMetadata, type StoredTokenMetadata } from "../db/store.js";
+import type { Client } from "./client.js";
 
 const ERC20_SYMBOL_ABI = [
-  { name: "symbol", type: "function", inputs: [], outputs: [{ type: "string" }], stateMutability: "view" },
+  {
+    name: "symbol",
+    type: "function",
+    inputs: [],
+    outputs: [{ type: "string" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 const ERC20_NAME_ABI = [
-  { name: "name", type: "function", inputs: [], outputs: [{ type: "string" }], stateMutability: "view" },
+  {
+    name: "name",
+    type: "function",
+    inputs: [],
+    outputs: [{ type: "string" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 const ERC20_DECIMALS_ABI = [
-  { name: "decimals", type: "function", inputs: [], outputs: [{ type: "uint8" }], stateMutability: "view" },
+  {
+    name: "decimals",
+    type: "function",
+    inputs: [],
+    outputs: [{ type: "uint8" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 /** In-flight deduplication: prevents duplicate RPC calls for the same address. */

@@ -1,6 +1,6 @@
 import { createClient } from "../chain/client.js";
-import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
+import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
 import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
 import { withRetry } from "../chain/rpc.js";

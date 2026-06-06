@@ -1020,7 +1020,14 @@ describe("tax transactions rendering", () => {
     const html = renderToStaticMarkup(
       <TaxTransactionLedger
         transactions={[
-          { ...taxTransaction, id: "part-1", hash, transaction_type: "txlist", token_symbol: null, token_decimal: null },
+          {
+            ...taxTransaction,
+            id: "part-1",
+            hash,
+            transaction_type: "txlist",
+            token_symbol: null,
+            token_decimal: null,
+          },
           { ...taxTransaction, id: "part-2", hash, transaction_type: "tokentx" },
         ]}
         updateTransaction={() => undefined}
@@ -1049,7 +1056,14 @@ describe("tax transactions rendering", () => {
     const html = renderToStaticMarkup(
       <TaxTransactionLedger
         transactions={[
-          { ...taxTransaction, id: "part-1", hash, transaction_type: "txlist", token_symbol: null, token_decimal: null },
+          {
+            ...taxTransaction,
+            id: "part-1",
+            hash,
+            transaction_type: "txlist",
+            token_symbol: null,
+            token_decimal: null,
+          },
           { ...taxTransaction, id: "part-2", hash, transaction_type: "tokentx" },
         ]}
         defaultExpandedGroups={[`hash:${hash}`]}
@@ -1535,7 +1549,9 @@ describe("tax transactions rendering", () => {
   it("hides multiple columns when defaultColumnVisibility sets them false", () => {
     const hiddenHtml = renderToStaticMarkup(
       <TaxTransactionLedger
-        transactions={[{ ...taxTransaction, gain_eur: "123.45", cost_eur: "500.00", block_number: 21534838 }]}
+        transactions={[
+          { ...taxTransaction, gain_eur: "123.45", cost_eur: "500.00", block_number: 21534838 },
+        ]}
         defaultColumnVisibility={{ gain_eur: false, cost_eur: false, time_stamp: false }}
         updateTransaction={() => undefined}
         isUpdating={false}

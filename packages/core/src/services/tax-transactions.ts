@@ -1,3 +1,14 @@
+import type { HypersyncClient } from "@envio-dev/hypersync-client";
+
+import { createClient, type Client } from "../chain/client.js";
+import {
+  createHyperSyncClient,
+  fetchTransactionsByAddress,
+  fetchTokenTransfersByAddress,
+  type HyperSyncTransaction,
+  type HyperSyncTokenTransfer,
+} from "../chain/hypersync.js";
+import { resolveTokenMetadata } from "../chain/token-metadata.js";
 import type { Config } from "../config.js";
 import {
   getTaxSyncState,
@@ -8,16 +19,6 @@ import {
   type SyncedTaxTransaction,
 } from "../db/store.js";
 import { getHistoricalEurPrice } from "./pricing.js";
-import { createClient, type Client } from "../chain/client.js";
-import {
-  createHyperSyncClient,
-  fetchTransactionsByAddress,
-  fetchTokenTransfersByAddress,
-  type HyperSyncTransaction,
-  type HyperSyncTokenTransfer,
-} from "../chain/hypersync.js";
-import { resolveTokenMetadata } from "../chain/token-metadata.js";
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
 
 const DEFAULT_EXPLORER_API_URL = "https://www.hyperscan.com/api";
 const DEFAULT_EXPLORER_CHAIN_ID = 999;
@@ -65,25 +66,24 @@ interface ExplorerEnvelope {
 type ExplorerTransaction = Record<string, unknown>;
 
 export async function syncTaxTransactions(
-  config: Pick<Config, "wallet" | "tax" | "hyperSync" | "pricing" | "rpc" | "logsRpc" | "contracts" | "chainId">,
+  config: Pick<
+    Config,
+    "wallet" | "tax" | "hyperSync" | "pricing" | "rpc" | "logsRpc" | "contracts" | "chainId"
+  >,
   options: SyncTaxTransactionsOptions = {},
 ): Promise<SyncTaxTransactionsSummary> {
   const wallet = config.wallet;
   const syncedAt = new Date().toISOString();
   const previousSyncState = getTaxSyncState(wallet);
   const fromBlock =
-    previousSyncState?.last_block_number != null
-      ? previousSyncState.last_block_number + 1
-      : 0;
+    previousSyncState?.last_block_number != null ? previousSyncState.last_block_number + 1 : 0;
 
   let synced = 0;
   let latestBlockNumber: number | null = null;
 
   // ── HyperSync path: txlist + tokentx + tokennfttx ─────────────────────────
   const hyperSyncUrl =
-    config.tax?.hyperSyncUrl ??
-    config.hyperSync?.url ??
-    "https://hyperliquid.hypersync.xyz";
+    config.tax?.hyperSyncUrl ?? config.hyperSync?.url ?? "https://hyperliquid.hypersync.xyz";
   const hyperSyncApiToken =
     normalizedHyperSyncApiToken(config.tax?.hyperSyncApiToken) ??
     normalizedHyperSyncApiToken(config.hyperSync?.apiToken);
@@ -130,7 +130,13 @@ export async function syncTaxTransactions(
   }
 
   // ── Explorer fallback: txlistinternal only ─────────────────────────────────
-  const explorerSynced = await syncInternalTransactions(config, options, wallet, fromBlock, syncedAt);
+  const explorerSynced = await syncInternalTransactions(
+    config,
+    options,
+    wallet,
+    fromBlock,
+    syncedAt,
+  );
   synced += explorerSynced.synced;
   if (explorerSynced.latestBlockNumber !== null) {
     latestBlockNumber = Math.max(

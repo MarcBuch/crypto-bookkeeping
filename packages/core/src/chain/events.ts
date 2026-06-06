@@ -1,13 +1,9 @@
-import { parseAbiItem, decodeEventLog, type Address, type TransactionReceipt } from "viem";
 import type { HypersyncClient } from "@envio-dev/hypersync-client";
+import { parseAbiItem, decodeEventLog, type Address, type TransactionReceipt } from "viem";
 
 import type { Client } from "./client";
+import { fetchLogsByAddressAndTopics, padUint256, type HyperSyncRawLog } from "./hypersync.js";
 import { withRetry } from "./rpc";
-import {
-  fetchLogsByAddressAndTopics,
-  padUint256,
-  type HyperSyncRawLog,
-} from "./hypersync.js";
 
 // Discriminated union for event lookup results
 export type EventResult<T> =
@@ -287,7 +283,8 @@ export async function findCloseEvent(
     if (hyperSyncClient) {
       // SDK path: fetch DecreaseLiquidity and Collect logs in parallel
       const paddedTokenId = padUint256(tokenId);
-      const toBlockNum = resolvedLatestBlock !== undefined ? Number(resolvedLatestBlock) : undefined;
+      const toBlockNum =
+        resolvedLatestBlock !== undefined ? Number(resolvedLatestBlock) : undefined;
 
       const [decreaseLogs, collectLogs] = await Promise.all([
         fetchLogsByAddressAndTopics(

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
 
+import type { Client } from "../chain/client.js";
+import { resolveTokenMetadata } from "../chain/token-metadata.js";
 import { resetDb } from "../db/schema.js";
 import { getTokenMetadata, upsertTokenMetadata } from "../db/store.js";
-import { resolveTokenMetadata } from "../chain/token-metadata.js";
-import type { Client } from "../chain/client.js";
 
 const TMP =
   "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-token-metadata-resolver-tests";

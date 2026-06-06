@@ -1,5 +1,3 @@
-import { useEffect, useMemo, useState } from "react";
-
 import {
   type ExpandedState,
   type SortingState,
@@ -10,7 +8,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { type TableMeta, taxTableColumns } from "./TaxTableColumns";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   ManualTaxTransactionCreateInput,
@@ -24,6 +22,7 @@ import {
   useTaxTransactions,
   useUpdateTaxTransaction,
 } from "./hooks/useTaxTransactions";
+import { type TableMeta, taxTableColumns } from "./TaxTableColumns";
 
 export const taxTransactionLabelOptions: Array<{
   label: string;
@@ -558,7 +557,7 @@ export function TaxTransactionLedger({
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
-          return { ...(defaultColumnVisibility ?? {}), ...JSON.parse(stored) };
+          return { ...defaultColumnVisibility, ...JSON.parse(stored) };
         }
       } catch {
         // ignore
@@ -639,7 +638,7 @@ export function TaxTransactionLedger({
               Columns
             </button>
             {showColumnMenu && (
-              <div className="absolute right-5 top-10 z-10 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+              <div className="absolute top-10 right-5 z-10 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
                 {table.getAllLeafColumns().map((column) => (
                   <label
                     key={column.id}
@@ -647,6 +646,11 @@ export function TaxTransactionLedger({
                   >
                     <input
                       type="checkbox"
+                      aria-label={
+                        typeof column.columnDef.header === "string"
+                          ? column.columnDef.header
+                          : column.id
+                      }
                       checked={column.getIsVisible()}
                       onChange={column.getToggleVisibilityHandler()}
                     />
@@ -706,8 +710,7 @@ export function TaxTransactionLedger({
                 {table.getRowModel().rows.map((row) => {
                   const isGroupChild = row.depth > 0;
                   const isLastGroupChild =
-                    isGroupChild &&
-                    row.index === (row.getParentRow()?.subRows.length ?? 1) - 1;
+                    isGroupChild && row.index === (row.getParentRow()?.subRows.length ?? 1) - 1;
 
                   const firstCellConnectorClass = isGroupChild
                     ? isLastGroupChild
@@ -736,7 +739,10 @@ export function TaxTransactionLedger({
 
                         if (isFirstCell) {
                           return (
-                            <td key={cell.id} className="py-4 pr-2 pl-2 font-mono text-xs font-bold text-neutral-950">
+                            <td
+                              key={cell.id}
+                              className="py-4 pr-2 pl-2 font-mono text-xs font-bold text-neutral-950"
+                            >
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
                             </td>
                           );
@@ -1616,7 +1622,6 @@ export function CommentEditor({
     </div>
   );
 }
-
 
 function TaxDetail({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (

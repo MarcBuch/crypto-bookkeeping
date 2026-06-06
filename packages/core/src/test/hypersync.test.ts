@@ -1,12 +1,13 @@
 import { describe, expect, it } from "bun:test";
 
+import type { HypersyncClient } from "@envio-dev/hypersync-client";
+
 import {
   fetchLogsByAddressAndTopics,
   fetchTokenTransfersByAddress,
   fetchTransactionsByAddress,
   padAddress,
 } from "../chain/hypersync.js";
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
 
 // ---------------------------------------------------------------------------
 // Types mirroring the SDK shapes we need for mocking
@@ -74,8 +75,7 @@ function mockClient(responses: MockQueryResponse[]): HypersyncClient {
 
 const WALLET = "0xabcdef1234567890abcdef1234567890abcdef12";
 const WALLET_LOWER = WALLET.toLowerCase();
-const ERC20_TRANSFER_TOPIC0 =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 function makeTx(overrides: Partial<MockTransaction> = {}): MockTransaction {
   return {
@@ -106,7 +106,7 @@ function makeLog(overrides: Partial<MockLog> = {}): MockLog {
     topics: [
       ERC20_TRANSFER_TOPIC0,
       paddedWallet, // from = wallet
-      paddedOther,  // to = other
+      paddedOther, // to = other
     ],
     ...overrides,
   };
@@ -189,8 +189,12 @@ describe("fetchTransactionsByAddress — pagination", () => {
   });
 
   it("multi-page: exactly two calls made, results from both pages combined", async () => {
-    const tx1 = makeTx({ hash: "0xaaaa000000000000000000000000000000000000000000000000000000000001" });
-    const tx2 = makeTx({ hash: "0xaaaa000000000000000000000000000000000000000000000000000000000002" });
+    const tx1 = makeTx({
+      hash: "0xaaaa000000000000000000000000000000000000000000000000000000000001",
+    });
+    const tx2 = makeTx({
+      hash: "0xaaaa000000000000000000000000000000000000000000000000000000000002",
+    });
 
     const page1: MockQueryResponse = {
       archiveHeight: 1000,
@@ -366,8 +370,14 @@ describe("fetchTokenTransfersByAddress — pagination", () => {
   });
 
   it("multi-page: exactly two calls made, results from both pages combined", async () => {
-    const log1 = makeLog({ transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001", logIndex: 0 });
-    const log2 = makeLog({ transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000002", logIndex: 0 });
+    const log1 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+      logIndex: 0,
+    });
+    const log2 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000002",
+      logIndex: 0,
+    });
 
     const page1: MockQueryResponse = {
       archiveHeight: 1000,
@@ -491,11 +501,7 @@ describe("fetchTokenTransfersByAddress — normalization and deduplication", () 
     const fromAddr = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const toAddr = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const log1 = makeLog({
-      topics: [
-        ERC20_TRANSFER_TOPIC0,
-        padAddress(fromAddr),
-        padAddress(toAddr),
-      ],
+      topics: [ERC20_TRANSFER_TOPIC0, padAddress(fromAddr), padAddress(toAddr)],
     });
     const client = mockClient([singlePageLogResponse([log1])]);
     const results = await fetchTokenTransfersByAddress(client, WALLET, 0);

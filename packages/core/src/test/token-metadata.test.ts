@@ -3,18 +3,12 @@ import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
 import { getDb, resetDb } from "../db/schema.js";
-import {
-  upsertTokenMetadata,
-  getTokenMetadata,
-  type StoredTokenMetadata,
-} from "../db/store.js";
+import { upsertTokenMetadata, getTokenMetadata, type StoredTokenMetadata } from "../db/store.js";
 
 const TMP =
   "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-token-metadata-tests";
 
-function makeTokenMetadata(
-  overrides: Partial<StoredTokenMetadata> = {},
-): StoredTokenMetadata {
+function makeTokenMetadata(overrides: Partial<StoredTokenMetadata> = {}): StoredTokenMetadata {
   return {
     contract_address: "0xabc123",
     symbol: "HYPE",
@@ -140,7 +134,10 @@ describe("upsertTokenMetadata — update behavior", () => {
     const address = "0xsingle";
     for (let i = 0; i < 3; i++) {
       upsertTokenMetadata(
-        makeTokenMetadata({ contract_address: address, fetched_at: `2026-06-0${i + 1}T00:00:00.000Z` }),
+        makeTokenMetadata({
+          contract_address: address,
+          fetched_at: `2026-06-0${i + 1}T00:00:00.000Z`,
+        }),
       );
     }
     const db = getDb();

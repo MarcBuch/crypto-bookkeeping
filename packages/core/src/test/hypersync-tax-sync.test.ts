@@ -11,17 +11,17 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
+import type { HypersyncClient } from "@envio-dev/hypersync-client";
+
+import type { Client } from "../chain/client.js";
 import { resetDb } from "../db/schema.js";
 import {
   getTaxSyncState,
   getTaxTransaction,
-  listTaxTransactions,
   upsertTaxSyncState,
   updateTaxTransactionEurValues,
 } from "../db/store.js";
 import { syncTaxTransactions } from "../services/tax-transactions.js";
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
-import type { Client } from "../chain/client.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -154,13 +154,7 @@ function makeViemMock(
   metadata: Record<string, { symbol: string | null; name: string | null; decimals: number | null }>,
 ): Client {
   return {
-    readContract: async ({
-      address,
-      functionName,
-    }: {
-      address: string;
-      functionName: string;
-    }) => {
+    readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
       const m = metadata[address.toLowerCase()];
       if (!m) throw new Error(`No metadata for ${address}`);
       if (functionName === "symbol") {
@@ -186,8 +180,7 @@ function padAddr(address: string): string {
   return "0x" + "0".repeat(24) + hex;
 }
 
-const ERC20_TRANSFER_TOPIC0 =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 /** Build an ERC-20 Transfer log */
 function erc20Log(overrides: {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
-import { encodeAbiParameters, type TransactionReceipt } from "viem";
 import type { HypersyncClient } from "@envio-dev/hypersync-client";
+import { encodeAbiParameters } from "viem";
 
 import { findCloseEvent, findOpenEvent } from "../chain/events.js";
 import { padUint256 } from "../chain/hypersync.js";
@@ -23,11 +23,6 @@ const DECREASE_LIQUIDITY_TOPIC =
   "0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4" as Hex;
 const COLLECT_TOPIC = "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01" as Hex;
 
-interface MockBlock {
-  number?: number;
-  timestamp?: number;
-}
-
 interface MockLog {
   transactionHash?: string;
   logIndex?: number;
@@ -35,29 +30,6 @@ interface MockLog {
   address?: string;
   data?: string;
   topics?: (string | undefined | null)[];
-}
-
-interface MockPage {
-  data: { logs: MockLog[]; blocks: MockBlock[]; transactions: any[]; traces: any[] };
-  nextBlock: number;
-  archiveHeight?: number;
-  totalExecutionTime?: number;
-}
-
-/**
- * Build a mock HypersyncClient that returns pages in sequence.
- * Tracks calls and throws if unexpectedly called after all pages.
- */
-function mockHyperSyncClient(pages: MockPage[]): HypersyncClient {
-  let callIndex = 0;
-  return {
-    get: async (_query: unknown) => {
-      if (callIndex >= pages.length) {
-        throw new Error("Unexpected extra SDK call");
-      }
-      return pages[callIndex++];
-    },
-  } as unknown as HypersyncClient;
 }
 
 /**
@@ -69,10 +41,6 @@ function mockViemClient(logsToReturn: any[] = []): OpenClient {
     getBlockNumber: async () => 10_000n,
     getLogs: async () => logsToReturn,
   } as unknown as OpenClient;
-}
-
-function tokenTopic(tokenId: bigint): Hex {
-  return `0x${tokenId.toString(16).padStart(64, "0")}` as Hex;
 }
 
 /**
@@ -387,10 +355,8 @@ describe("findCloseEvent SDK path", () => {
     const tokenId = 789n;
     const toBlock = 10_000;
 
-    let callCount = 0;
     const hyperSyncClient = {
       get: async (_query: unknown) => {
-        callCount++;
         // Both DecreaseLiquidity and Collect calls return empty
         return {
           data: {
@@ -465,15 +431,7 @@ describe("findCloseEvent SDK path", () => {
           // Second call: Collect fetch
           return {
             data: {
-              logs: [
-                mockCollectLog(
-                  tokenId,
-                  WALLET,
-                  collectAmount0,
-                  collectAmount1,
-                  blockNumber,
-                ),
-              ],
+              logs: [mockCollectLog(tokenId, WALLET, collectAmount0, collectAmount1, blockNumber)],
               blocks: [{ number: blockNumber, timestamp: 1700002000 }],
               transactions: [],
               traces: [],
@@ -887,7 +845,9 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
     const viemClient = {
       getBlockNumber: async () => BigInt(toBlock),
       getTransactionReceipt: async () => closeReceipt,
-      getLogs: async () => { throw new Error("getLogs should not be called in SDK fast path"); },
+      getLogs: async () => {
+        throw new Error("getLogs should not be called in SDK fast path");
+      },
     } as unknown as CloseClient;
 
     // HyperSync: returns BOTH the prior Collect and the close-tx Collect
@@ -915,9 +875,9 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
       POSITION_MANAGER,
       tokenId,
       WALLET,
-      CLOSE_TX,    // knownCloseTx → fast path
-      undefined,   // fromBlock unknown (no entry_block in DB)
-      undefined,   // default window
+      CLOSE_TX, // knownCloseTx → fast path
+      undefined, // fromBlock unknown (no entry_block in DB)
+      undefined, // default window
       BigInt(toBlock),
       hyperSyncClient,
     );
@@ -941,7 +901,7 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
     const decreaseAmount0 = 10_000n;
     const decreaseAmount1 = 5_000n;
     const closeTxCollect0 = 10_200n; // principal + 200 fees
-    const closeTxCollect1 = 5_050n;  // principal + 50 fees
+    const closeTxCollect1 = 5_050n; // principal + 50 fees
     const closeBlock = 800;
     const toBlock = 10_000;
     const CLOSE_TX = "0xdd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00" as Hex;
@@ -958,16 +918,16 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
     const viemClient = {
       getBlockNumber: async () => BigInt(toBlock),
       getTransactionReceipt: async () => closeReceipt,
-      getLogs: async () => { throw new Error("getLogs should not be called"); },
+      getLogs: async () => {
+        throw new Error("getLogs should not be called");
+      },
     } as unknown as CloseClient;
 
     // HyperSync: returns only the close-tx Collect (no prior claims)
     const hyperSyncClient = {
       get: async (_query: unknown) => ({
         data: {
-          logs: [
-            mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
-          ],
+          logs: [mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1)],
           blocks: [{ number: closeBlock, timestamp: 1700000800 }],
           transactions: [],
           traces: [],
@@ -1035,7 +995,15 @@ describe("decodeHyperSyncLog robustness", () => {
         if (callCount === 1) {
           return {
             data: {
-              logs: [mockDecreaseLiquidityLog(tokenId, liquidity, decreaseAmount0, decreaseAmount1, blockNumber)],
+              logs: [
+                mockDecreaseLiquidityLog(
+                  tokenId,
+                  liquidity,
+                  decreaseAmount0,
+                  decreaseAmount1,
+                  blockNumber,
+                ),
+              ],
               blocks: [{ number: blockNumber, timestamp: 1700009000 }],
               transactions: [],
               traces: [],

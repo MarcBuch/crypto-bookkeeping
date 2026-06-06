@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
+import type { HypersyncClient } from "@envio-dev/hypersync-client";
+
+import type { Client } from "../chain/client.js";
 import { resetDb } from "../db/schema.js";
 import {
   getTaxSyncState,
@@ -17,8 +20,6 @@ import {
   enrichTaxTransactionsEurValues,
   syncTaxTransactions,
 } from "../services/tax-transactions.js";
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
-import type { Client } from "../chain/client.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-tax-sync-tests";
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
@@ -60,41 +61,8 @@ function envelope(result: unknown): ExplorerBody {
   return { status: "1", message: "OK", result };
 }
 
-function noTransactionsFound(): ExplorerBody {
-  return { status: "0", message: "No transactions found", result: "No transactions found" };
-}
-
 function unsupportedInternal(): ExplorerBody {
   return { status: "0", message: "NOTOK", result: "Action txlistinternal is not supported" };
-}
-
-function tx(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    blockNumber: "100",
-    timeStamp: "1770000000",
-    from: "0xfrom",
-    to: "0xto",
-    value: "1",
-    gasUsed: "21000",
-    gasPrice: "1000000000",
-    methodId: "0x12345678",
-    functionName: "transfer(address,uint256)",
-    input: "0xabcdef",
-    isError: "0",
-    ...overrides,
-  };
-}
-
-function tokenTx(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return tx({
-    contractAddress: "0xtoken",
-    tokenName: "Token",
-    tokenSymbol: "TOK",
-    tokenDecimal: "18",
-    value: "1000000000000000000",
-    ...overrides,
-  });
 }
 
 function makeFetcher(
@@ -176,8 +144,7 @@ function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): HypersyncClient {
   } as unknown as HypersyncClient;
 }
 
-const ERC20_TRANSFER_TOPIC0 =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 function padAddr(addr: string): string {
   return "0x" + "0".repeat(24) + addr.toLowerCase().replace(/^0x/, "");
@@ -236,13 +203,7 @@ function makeViemMock(
   >,
 ): Client {
   return {
-    readContract: async ({
-      address,
-      functionName,
-    }: {
-      address: string;
-      functionName: string;
-    }) => {
+    readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
       const m = metadata[address.toLowerCase()];
       if (functionName === "symbol") {
         if (!m || m.symbol === null || m.symbol === undefined) throw new Error("no symbol");
@@ -890,7 +851,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       });
     }) as unknown as typeof globalThis.fetch;
 
-    const hyperSyncClient = makeHyperSyncMock(
+    const _hyperSyncClient = makeHyperSyncMock(
       [
         {
           hash: "0xnullts1",

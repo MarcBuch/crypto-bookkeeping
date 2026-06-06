@@ -23,7 +23,9 @@ mock.module("../services/pricing.js", () => ({
   getHistoricalUsdPrice: (...args: unknown[]) => mockGetHistoricalUsdPrice(...args),
 }));
 
-let mockGetBlock: (_args: { blockNumber: bigint }) => Promise<{ timestamp: bigint }> = async () => ({
+let mockGetBlock: (_args: {
+  blockNumber: bigint;
+}) => Promise<{ timestamp: bigint }> = async () => ({
   timestamp: 1700000000n,
 });
 

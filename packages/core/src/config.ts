@@ -158,7 +158,9 @@ function validateConfig(raw: unknown, path: string): void {
       try {
         new URL(tax.hyperSyncUrl as string);
       } catch {
-        throw new Error(`Config at ${path}: "tax.hyperSyncUrl" must be a valid URL (got ${JSON.stringify(tax.hyperSyncUrl)})`);
+        throw new Error(
+          `Config at ${path}: "tax.hyperSyncUrl" must be a valid URL (got ${JSON.stringify(tax.hyperSyncUrl)})`,
+        );
       }
     }
     if (tax.hyperSyncApiToken !== undefined && tax.hyperSyncApiToken !== null) {
@@ -180,7 +182,9 @@ function validateConfig(raw: unknown, path: string): void {
       try {
         new URL(hyperSync.url as string);
       } catch {
-        throw new Error(`Config at ${path}: "hyperSync.url" must be a valid URL (got ${JSON.stringify(hyperSync.url)})`);
+        throw new Error(
+          `Config at ${path}: "hyperSync.url" must be a valid URL (got ${JSON.stringify(hyperSync.url)})`,
+        );
       }
     }
     if (hyperSync.apiToken !== undefined && hyperSync.apiToken !== null) {

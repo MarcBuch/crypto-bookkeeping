@@ -86,8 +86,7 @@ export function padAddress(address: string): string {
   return "0x" + "0".repeat(24) + hex;
 }
 
-const ERC20_TRANSFER_TOPIC0 =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 // ---------------------------------------------------------------------------
 // fetchTransactionsByAddress
@@ -336,7 +335,7 @@ export async function fetchLogsByAddressAndTopics(
     {
       include: {
         address: [addressLower],
-        topics: topicFilters,
+        topics: topicFilters as string[][],
       },
     },
   ];

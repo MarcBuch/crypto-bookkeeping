@@ -289,3 +289,123 @@ export async function fetchTokenTransfersByAddress(
 
   return Array.from(resultMap.values());
 }
+
+// ---------------------------------------------------------------------------
+// fetchLogsByAddressAndTopics
+// ---------------------------------------------------------------------------
+
+/** Pads a uint256 value to a 32-byte (64 hex char) topic format */
+export function padUint256(n: bigint): string {
+  const hex = n.toString(16);
+  return "0x" + hex.padStart(64, "0");
+}
+
+/** Generic raw log from HyperSync with optional block join */
+export interface HyperSyncRawLog {
+  transactionHash: string;
+  blockNumber: number;
+  /** From joined block — may be undefined if block join missed */
+  blockTimestamp?: number;
+  logIndex: number;
+  address: string;
+  /** Array of topic hex strings (0x-prefixed), sparse — absent topics are empty string */
+  topics: string[];
+  data: string;
+}
+
+/**
+ * Generic paginated log fetcher using HyperSync SDK.
+ * Filters by address and topics, with block timestamp join.
+ */
+export async function fetchLogsByAddressAndTopics(
+  client: HypersyncClient,
+  address: string,
+  topicFilters: string[][],
+  fromBlock: number,
+  toBlock?: number,
+): Promise<HyperSyncRawLog[]> {
+  const addressLower = address.toLowerCase();
+
+  const logs: LogSelection[] = [
+    {
+      include: {
+        address: [addressLower],
+        topics: topicFilters,
+      },
+    },
+  ];
+
+  const fieldSelection: FieldSelection = {
+    log: [
+      "LogIndex",
+      "TransactionHash",
+      "BlockNumber",
+      "Address",
+      "Data",
+      "Topic0",
+      "Topic1",
+      "Topic2",
+      "Topic3",
+    ] as LogField[],
+    block: ["Number", "Timestamp"] as BlockField[],
+  };
+
+  const resultMap = new Map<string, HyperSyncRawLog>();
+  let currentBlock = fromBlock;
+
+  while (true) {
+    const response = await client.get({
+      fromBlock: currentBlock,
+      toBlock,
+      logs,
+      fieldSelection,
+      joinMode: JoinMode.Default,
+    });
+
+    // Build block timestamp map for this page
+    const blockTimestamps = new Map<number, number>();
+    for (const block of response.data.blocks) {
+      if (block.number !== undefined && block.timestamp !== undefined) {
+        blockTimestamps.set(block.number, block.timestamp);
+      }
+    }
+
+    // Normalise logs
+    for (const log of response.data.logs) {
+      if (!log.transactionHash || log.logIndex === undefined) continue;
+      if (log.blockNumber === undefined) continue;
+
+      const key = `${log.transactionHash.toLowerCase()}:${log.logIndex}`;
+      if (resultMap.has(key)) continue; // dedup safety
+
+      const blockNumber = log.blockNumber;
+
+      // Build 4-element topics array (absent topics default to empty string)
+      const topics = [
+        log.topics[0] ?? "",
+        log.topics[1] ?? "",
+        log.topics[2] ?? "",
+        log.topics[3] ?? "",
+      ].map((t) => t.toLowerCase());
+
+      resultMap.set(key, {
+        transactionHash: log.transactionHash.toLowerCase(),
+        blockNumber,
+        blockTimestamp: blockTimestamps.get(blockNumber),
+        logIndex: log.logIndex,
+        address: log.address?.toLowerCase() ?? "",
+        topics,
+        data: log.data ?? "0x",
+      });
+    }
+
+    // When toBlock and archiveHeight are both absent (live node), targetEnd = nextBlock
+    // → loop terminates after the first page. Callers should pass toBlock when
+    // querying live nodes to avoid silent truncation.
+    const targetEnd = toBlock ?? response.archiveHeight ?? response.nextBlock;
+    if (response.nextBlock >= targetEnd) break;
+    currentBlock = response.nextBlock;
+  }
+
+  return Array.from(resultMap.values());
+}

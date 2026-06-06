@@ -1,4 +1,5 @@
 import { createClient } from "../chain/client.js";
+import { createHyperSyncClient } from "../chain/hypersync.js";
 import { findOpenEvent } from "../chain/events.js";
 import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
@@ -12,6 +13,8 @@ import {
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
 
+const DEFAULT_HYPERSYNC_URL = "https://hyperliquid.hypersync.xyz";
+
 export interface SnapshotResult {
   tokenId: string;
   saved: boolean;
@@ -20,6 +23,13 @@ export interface SnapshotResult {
 
 export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
   const client = createClient(config);
+
+  const hyperSyncClient = config.hyperSync?.apiToken
+    ? createHyperSyncClient({
+        url: config.hyperSync.url ?? DEFAULT_HYPERSYNC_URL,
+        apiToken: config.hyperSync.apiToken,
+      })
+    : undefined;
 
   const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
@@ -82,6 +92,8 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         posConfigSnap?.openTx,
         undefined,
         logsWindowBlocks,
+        undefined,
+        hyperSyncClient,
       );
 
       if (openResult.status === "rpc_error") {

@@ -13,6 +13,13 @@ export interface PricingConfig {
   coingeckoIds?: Record<string, string>;
 }
 
+export interface HyperSyncSharedConfig {
+  /** HyperSync URL. Default: "https://hyperliquid.hypersync.xyz" */
+  url?: string;
+  /** HyperSync API token (required since Nov 2025) */
+  apiToken?: string;
+}
+
 export interface TaxConfig {
   // HyperSync fields (new — preferred)
   /** HyperSync URL for Hyperliquid. Default: "https://hyperliquid.hypersync.xyz" */
@@ -48,6 +55,8 @@ export interface Config {
   positions?: Record<string, PositionConfig>;
   /** Optional live USD pricing configuration */
   pricing?: PricingConfig;
+  /** Shared HyperSync data API config used by LP services and (as fallback) by the tax service. */
+  hyperSync?: HyperSyncSharedConfig;
   /** Optional tax transaction sync configuration */
   tax?: TaxConfig;
   /** Optional: number of blocks to scan back from the chain head when discovering
@@ -155,6 +164,28 @@ function validateConfig(raw: unknown, path: string): void {
     if (tax.hyperSyncApiToken !== undefined && tax.hyperSyncApiToken !== null) {
       if (typeof tax.hyperSyncApiToken !== "string") {
         throw new Error(`Config at ${path}: "tax.hyperSyncApiToken" must be a string`);
+      }
+      // Empty string treated as absent — no error, just ignored at runtime
+    }
+  }
+
+  // Validate hyperSync config if present
+  if (cfg.hyperSync !== undefined && cfg.hyperSync !== null) {
+    const hyperSync = cfg.hyperSync as Record<string, unknown>;
+    if (hyperSync.url !== undefined && hyperSync.url !== null) {
+      if (typeof hyperSync.url !== "string" || !hyperSync.url.trim()) {
+        throw new Error(`Config at ${path}: "hyperSync.url" must be a non-empty string`);
+      }
+      // Basic URL validation
+      try {
+        new URL(hyperSync.url as string);
+      } catch {
+        throw new Error(`Config at ${path}: "hyperSync.url" must be a valid URL (got ${JSON.stringify(hyperSync.url)})`);
+      }
+    }
+    if (hyperSync.apiToken !== undefined && hyperSync.apiToken !== null) {
+      if (typeof hyperSync.apiToken !== "string") {
+        throw new Error(`Config at ${path}: "hyperSync.apiToken" must be a string`);
       }
       // Empty string treated as absent — no error, just ignored at runtime
     }

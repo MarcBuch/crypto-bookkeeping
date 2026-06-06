@@ -1,4 +1,5 @@
 import { createClient } from "../chain/client.js";
+import { createHyperSyncClient } from "../chain/hypersync.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
 import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
@@ -13,6 +14,8 @@ import {
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
+
+const DEFAULT_HYPERSYNC_URL = "https://hyperliquid.hypersync.xyz";
 
 export interface ILView {
   tokenId: string;
@@ -36,6 +39,13 @@ export interface ILView {
 
 export async function getILView(config: Config, tokenId?: string): Promise<ILView[]> {
   const client = createClient(config);
+
+  const hyperSyncClient = config.hyperSync?.apiToken
+    ? createHyperSyncClient({
+        url: config.hyperSync.url ?? DEFAULT_HYPERSYNC_URL,
+        apiToken: config.hyperSync.apiToken,
+      })
+    : undefined;
 
   const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
@@ -98,6 +108,8 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         posConfigIL?.openTx,
         undefined,
         logsWindowBlocks,
+        undefined,
+        hyperSyncClient,
       );
 
       if (openResult.status === "rpc_error") {
@@ -169,6 +181,8 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         posConfigIL?.closeTx,
         entryBlockIL,
         logsWindowBlocks,
+        undefined,
+        hyperSyncClient,
       );
       if (closeResult.status === "rpc_error") {
         console.error(

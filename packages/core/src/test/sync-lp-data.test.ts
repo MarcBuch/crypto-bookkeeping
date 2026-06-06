@@ -7,8 +7,6 @@
  */
 
 import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
 
 // ---------------------------------------------------------------------------
 // Mocks must be set up BEFORE importing the module under test
@@ -57,7 +55,6 @@ mock.module("../chain/client.js", () => ({
 // Now import the module under test + DB helpers
 // ---------------------------------------------------------------------------
 
-import { resetDb } from "../db/schema.js";
 import {
   listCachedPositionViews,
   listCachedPnLViews,
@@ -66,12 +63,11 @@ import {
   replaceCachedPnLViews,
 } from "../db/store.js";
 import { syncLpData } from "../services/positions.js";
+import { useTestDb } from "./helpers/db.js";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
 // ---------------------------------------------------------------------------
-
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-sync-tests";
 
 const fakeConfig = {
   rpc: "http://test-rpc",
@@ -141,19 +137,16 @@ const fakePnLView = {
 // Test setup/teardown
 // ---------------------------------------------------------------------------
 
+useTestDb();
+
 beforeEach(() => {
-  mkdirSync(TMP, { recursive: true });
-  process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-  resetDb();
   // Reset mocks to safe defaults
   mockGetAllPositions = async () => [];
   mockGetPnLView = async () => [];
 });
 
 afterEach(() => {
-  delete process.env.LP_TRACKER_DATA_DIR;
-  resetDb();
-  rmSync(TMP, { recursive: true, force: true });
+  // afterEach is handled by useTestDb()
 });
 
 // ---------------------------------------------------------------------------

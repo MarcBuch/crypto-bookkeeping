@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
 
 import type { Client } from "../chain/client.js";
 import { resolveTokenMetadata } from "../chain/token-metadata.js";
-import { resetDb } from "../db/schema.js";
 import { getTokenMetadata, upsertTokenMetadata } from "../db/store.js";
+import { useTestDb } from "./helpers/db.js";
 
-const TMP =
-  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-token-metadata-resolver-tests";
+useTestDb();
 
 // A valid checksummed ERC-55 address and its lowercase counterpart.
 const ADDR_LOWER = "0xabcdef1234567890abcdef1234567890abcdef12";
@@ -22,13 +20,11 @@ function mockClient(overrides: {
 }
 
 beforeEach(() => {
-  mkdirSync(TMP, { recursive: true });
-  process.env.LP_TRACKER_DATA_DIR = TMP;
+  // (additional setup if needed)
 });
 
 afterEach(() => {
-  resetDb();
-  rmSync(TMP, { recursive: true, force: true });
+  // (cleanup handled by useTestDb)
 });
 
 // ---------------------------------------------------------------------------

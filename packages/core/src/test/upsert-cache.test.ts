@@ -1,33 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { describe, it, expect } from "bun:test";
 
-import { resetDb } from "../db/schema.js";
 import {
   listCachedPositionViews,
   listCachedPnLViews,
   upsertPositionViewCache,
   upsertPnLViewCache,
 } from "../db/store.js";
-
-const TMP =
-  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-upsert-cache-tests";
+import { useTestDb } from "./helpers/db.js";
 
 const validSyncedAt = "2026-06-01T20:00:00.000Z";
 const validData = { foo: 1, bar: "test" };
 
 describe("upsertPositionViewCache — invalid tokenId", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("accepts empty string tokenId and stores it as-is", () => {
     // The implementation doesn't validate tokenId, so empty string is accepted
@@ -64,17 +49,7 @@ describe("upsertPositionViewCache — invalid tokenId", () => {
 });
 
 describe("upsertPnLViewCache — invalid tokenId", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("accepts empty string tokenId and stores it as-is", () => {
     // The implementation doesn't validate tokenId, so empty string is accepted
@@ -111,17 +86,7 @@ describe("upsertPnLViewCache — invalid tokenId", () => {
 });
 
 describe("upsertPositionViewCache — INSERT OR REPLACE behavior", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("replaces existing row when same tokenId is upserted again", () => {
     const data1 = { value: "first" };
@@ -139,17 +104,7 @@ describe("upsertPositionViewCache — INSERT OR REPLACE behavior", () => {
 });
 
 describe("upsertPnLViewCache — INSERT OR REPLACE behavior", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("replaces existing row when same tokenId is upserted again", () => {
     const data1 = { value: "first" };
@@ -167,17 +122,7 @@ describe("upsertPnLViewCache — INSERT OR REPLACE behavior", () => {
 });
 
 describe("upsertPositionViewCache — row isolation and idempotency", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("row isolation: only target row modified when upserting", () => {
     // Pre-populate 3 rows
@@ -253,17 +198,7 @@ describe("upsertPositionViewCache — row isolation and idempotency", () => {
 });
 
 describe("upsertPnLViewCache — row isolation and idempotency", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("row isolation: only target row modified when upserting", () => {
     // Pre-populate 3 rows

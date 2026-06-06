@@ -7,9 +7,7 @@
  * 4. DB fast-path does not overwrite existing open_tx with null
  */
 
-import { mock, describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing the module under test
@@ -106,16 +104,13 @@ mock.module("../math/divergence-loss.js", () => ({
 // Import module under test + DB helpers (after mocks)
 // ---------------------------------------------------------------------------
 
-import { resetDb } from "../db/schema.js";
 import { getPosition, upsertPosition } from "../db/store.js";
 import { getPnLView } from "../services/pnl.js";
+import { useTestDb } from "./helpers/db.js";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
 // ---------------------------------------------------------------------------
-
-const TMP =
-  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-pnl-persistence-tests";
 
 const TOKEN_ID = "42";
 
@@ -160,20 +155,13 @@ const baseConfig = {
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
+useTestDb();
+
 beforeEach(() => {
-  mkdirSync(TMP, { recursive: true });
-  process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-  resetDb();
   findOpenEventCallCount = 0;
   mockFindOpenEvent = async () => ({ status: "not_found" });
   mockFindCloseEvent = async () => ({ status: "not_found" });
   mockGetAllPositions = async () => [fakePos];
-});
-
-afterEach(() => {
-  delete process.env.LP_TRACKER_DATA_DIR;
-  resetDb();
-  rmSync(TMP, { recursive: true, force: true });
 });
 
 afterAll(() => {

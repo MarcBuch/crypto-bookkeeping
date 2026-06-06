@@ -7,14 +7,11 @@
  *   m4t4 — token metadata integration, self-transfers, zero-value txs
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { describe, expect, it } from "bun:test";
 
 import type { HypersyncClient } from "@envio-dev/hypersync-client";
 
 import type { Client } from "../chain/client.js";
-import { resetDb } from "../db/schema.js";
 import {
   getTaxSyncState,
   getTaxTransaction,
@@ -22,13 +19,8 @@ import {
   updateTaxTransactionEurValues,
 } from "../db/store.js";
 import { syncTaxTransactions } from "../services/tax-transactions.js";
+import { useTestDb } from "./helpers/db.js";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const TMP =
-  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-hypersync-tax-sync-tests";
 const WALLET = "0xabcdef1234567890abcdef1234567890abcdef12" as `0x${string}`;
 
 // ---------------------------------------------------------------------------
@@ -230,17 +222,7 @@ function erc721Log(overrides: {
 // Test lifecycle
 // ---------------------------------------------------------------------------
 
-beforeEach(() => {
-  mkdirSync(TMP, { recursive: true });
-  process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-  resetDb();
-});
-
-afterEach(() => {
-  delete process.env.LP_TRACKER_DATA_DIR;
-  resetDb();
-  rmSync(TMP, { recursive: true, force: true });
-});
+useTestDb();
 
 // ===========================================================================
 // Suite 1 (m4t2): Transaction type mapping, direction detection, ID generation

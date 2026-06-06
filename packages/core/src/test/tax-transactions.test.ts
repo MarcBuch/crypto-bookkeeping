@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { describe, it, expect } from "bun:test";
 
-import { getDb, resetDb } from "../db/schema.js";
+import { getDb } from "../db/schema.js";
 import {
   createManualTaxTransaction,
   getTaxSyncState,
@@ -14,8 +12,7 @@ import {
   upsertTaxSyncState,
   updateTaxTransaction,
 } from "../db/store.js";
-
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-tax-tests";
+import { useTestDb } from "./helpers/db.js";
 
 function makeSyncedTaxTransaction(
   overrides: Partial<SyncedTaxTransaction> = {},
@@ -74,17 +71,7 @@ function makeManualTaxTransaction(
 }
 
 describe("tax transaction persistence", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("upserts the same id by updating synced fields while preserving manual metadata", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());

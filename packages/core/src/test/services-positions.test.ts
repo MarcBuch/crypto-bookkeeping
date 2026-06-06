@@ -7,26 +7,16 @@
  * Tests 3-5 exercise getHistoryView which only touches the SQLite layer.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { describe, it, expect } from "bun:test";
 
-import { resetDb } from "../db/schema.js";
 import { upsertPosition, insertSnapshot } from "../db/store.js";
 import { NotFoundError } from "../services/errors.js";
 import { getHistoryView } from "../services/history.js";
-
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-services-tests";
+import { useTestDb } from "./helpers/db.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function setupTmpDir(subdir: string): string {
-  const dir = join(TMP, subdir);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
 
 function makePosition(tokenId: string) {
   upsertPosition({
@@ -91,17 +81,7 @@ describe("getPnLView / getILView with unknown tokenId [DEFERRED — requires net
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — no stored position", () => {
-  beforeEach(() => {
-    const dir = setupTmpDir("history-no-pos");
-    process.env.LP_TRACKER_DATA_DIR = dir;
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(join(TMP, "history-no-pos"), { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("throws NotFoundError when tokenId has no stored position", async () => {
     await expect(getHistoryView("999999", 10)).rejects.toThrow(NotFoundError);
@@ -123,17 +103,7 @@ describe("getHistoryView — no stored position", () => {
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — position exists but no snapshots", () => {
-  beforeEach(() => {
-    const dir = setupTmpDir("history-no-snaps");
-    process.env.LP_TRACKER_DATA_DIR = dir;
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(join(TMP, "history-no-snaps"), { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("throws NotFoundError when position exists but has no snapshots", async () => {
     makePosition("42");
@@ -157,17 +127,7 @@ describe("getHistoryView — position exists but no snapshots", () => {
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — position with snapshots returns results", () => {
-  beforeEach(() => {
-    const dir = setupTmpDir("history-with-snaps");
-    process.env.LP_TRACKER_DATA_DIR = dir;
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(join(TMP, "history-with-snaps"), { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("returns an array when snapshots exist", async () => {
     makePosition("7");
@@ -211,17 +171,7 @@ describe("getHistoryView — position with snapshots returns results", () => {
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — limit edge cases", () => {
-  beforeEach(() => {
-    const dir = setupTmpDir("history-limit");
-    process.env.LP_TRACKER_DATA_DIR = dir;
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(join(TMP, "history-limit"), { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("limit = 0: SQLite returns 0 rows — service throws NotFoundError (no snapshots path)", async () => {
     // SQLite LIMIT 0 returns zero rows. Even if we insert snapshots, getSnapshots()

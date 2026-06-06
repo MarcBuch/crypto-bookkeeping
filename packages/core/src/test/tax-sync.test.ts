@@ -1,11 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { beforeEach, describe, expect, it } from "bun:test";
 
 import type { HypersyncClient } from "@envio-dev/hypersync-client";
 
 import type { Client } from "../chain/client.js";
-import { resetDb } from "../db/schema.js";
 import {
   getTaxSyncState,
   getTaxTransaction,
@@ -20,8 +17,8 @@ import {
   enrichTaxTransactionsEurValues,
   syncTaxTransactions,
 } from "../services/tax-transactions.js";
+import { useTestDb } from "./helpers/db.js";
 
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-tax-sync-tests";
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
 const BASE_URL = "https://explorer.test/api";
 
@@ -223,17 +220,7 @@ function makeViemMock(
 }
 
 describe("tax transaction explorer sync", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("fetches txlist and token transfers via HyperSync and assigns stable hypersync: IDs", async () => {
     const hyperSyncClient = makeHyperSyncMock(
@@ -820,6 +807,8 @@ describe("tax transaction explorer sync", () => {
 });
 
 describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
+  useTestDb();
+
   function configWithPricing() {
     return {
       ...config(),
@@ -829,15 +818,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-  afterEach(() => {
     globalThis.fetch = originalFetch;
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
   });
 
   it("null time_stamp → EUR fields stay null", async () => {
@@ -1135,21 +1116,15 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 });
 
 describe("syncTaxTransactions — EUR enrichment (resilience and value preservation)", () => {
+  useTestDb();
+
   function configWithPricing(coingeckoIds: Record<string, string>) {
     return { ...config(), pricing: { coingeckoIds } };
   }
 
   const originalFetchResil = globalThis.fetch;
   beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-  afterEach(() => {
     globalThis.fetch = originalFetchResil;
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
   });
 
   it("CoinGecko unavailable → sync completes, EUR fields all null", async () => {
@@ -1485,20 +1460,7 @@ function makeEurDbRow(
 }
 
 describe("DB EUR update functions", () => {
-  const TMP_EUR =
-    "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-eur-tests";
-
-  beforeEach(() => {
-    mkdirSync(TMP_EUR, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP_EUR, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP_EUR, { recursive: true, force: true });
-  });
+  useTestDb();
 
   // Test 1: getTaxTransactionsNeedingEurEnrichment returns only null-EUR rows
   it("getTaxTransactionsNeedingEurEnrichment — returns only rows where both EUR fields are null", () => {
@@ -1642,8 +1604,7 @@ function makeBackfillRow(
 }
 
 describe("enrichTaxTransactionsEurValues — backfill service", () => {
-  const TMP_BACKFILL =
-    "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-backfill-tests";
+  useTestDb();
 
   function configWithPricing(coingeckoIds: Record<string, string>) {
     return {
@@ -1655,16 +1616,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    mkdirSync(TMP_BACKFILL, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP_BACKFILL, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
     globalThis.fetch = originalFetch;
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP_BACKFILL, { recursive: true, force: true });
   });
 
   // Test 1 — already-enriched rows are not in the enrichment queue

@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { describe, it, expect } from "bun:test";
 
-import { resetDb } from "../db/schema.js";
 import {
   listCachedPositionViews,
   listCachedPnLViews,
@@ -12,8 +9,7 @@ import {
   getLpSyncState,
   upsertLpSyncState,
 } from "../db/store.js";
-
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-cache-tests";
+import { useTestDb } from "./helpers/db.js";
 
 const fakeSyncedAt = "2026-06-01T20:00:00.000Z";
 
@@ -70,17 +66,7 @@ const fakePnLView = {
 };
 
 describe("lp cache store", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   describe("empty DB behavior", () => {
     it("listCachedPositionViews returns [] on fresh DB without throwing", () => {

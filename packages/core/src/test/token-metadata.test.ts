@@ -1,12 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { describe, it, expect } from "bun:test";
 
-import { getDb, resetDb } from "../db/schema.js";
+import { getDb } from "../db/schema.js";
 import { upsertTokenMetadata, getTokenMetadata, type StoredTokenMetadata } from "../db/store.js";
-
-const TMP =
-  "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-token-metadata-tests";
+import { useTestDb } from "./helpers/db.js";
 
 function makeTokenMetadata(overrides: Partial<StoredTokenMetadata> = {}): StoredTokenMetadata {
   return {
@@ -20,17 +16,7 @@ function makeTokenMetadata(overrides: Partial<StoredTokenMetadata> = {}): Stored
 }
 
 describe("getTokenMetadata — cache miss", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("returns null for an unknown contract address", () => {
     const result = getTokenMetadata("0xdeadbeef");
@@ -46,17 +32,7 @@ describe("getTokenMetadata — cache miss", () => {
 });
 
 describe("upsertTokenMetadata + getTokenMetadata — basic CRUD", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("inserts a new row and retrieves it with all fields intact", () => {
     const meta = makeTokenMetadata();
@@ -104,17 +80,7 @@ describe("upsertTokenMetadata + getTokenMetadata — basic CRUD", () => {
 });
 
 describe("upsertTokenMetadata — update behavior", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("upserting the same contract address updates all fields (not duplicates)", () => {
     const address = "0xcontract";
@@ -170,17 +136,7 @@ describe("upsertTokenMetadata — update behavior", () => {
 });
 
 describe("schema migration — token_metadata table exists in fresh DB", () => {
-  beforeEach(() => {
-    mkdirSync(TMP, { recursive: true });
-    process.env.LP_TRACKER_DATA_DIR = join(TMP, crypto.randomUUID());
-    resetDb();
-  });
-
-  afterEach(() => {
-    delete process.env.LP_TRACKER_DATA_DIR;
-    resetDb();
-    rmSync(TMP, { recursive: true, force: true });
-  });
+  useTestDb();
 
   it("the token_metadata table exists after calling getDb() on a fresh DB", () => {
     const db = getDb();

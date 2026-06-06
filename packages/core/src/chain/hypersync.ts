@@ -11,6 +11,12 @@ import {
 } from "@envio-dev/hypersync-client";
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_HYPERSYNC_URL = "https://hyperliquid.hypersync.xyz";
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -320,7 +326,7 @@ export interface HyperSyncRawLog {
 export async function fetchLogsByAddressAndTopics(
   client: HypersyncClient,
   address: string,
-  topicFilters: string[][],
+  topicFilters: (string | null)[][],
   fromBlock: number,
   toBlock?: number,
 ): Promise<HyperSyncRawLog[]> {

@@ -119,28 +119,28 @@ export async function findOpenEvent(
         resolvedLatestBlock !== undefined ? Number(resolvedLatestBlock) : undefined,
       );
 
-       if (rawLogs.length > 0) {
-         const log = rawLogs[0]; // first match is the open event
-         console.log(`    Found open event at block ${log.blockNumber}`);
-         const decoded = decodeHyperSyncLog(log, eventAbi);
-         if (decoded && decoded.eventName === "IncreaseLiquidity") {
-           const args = decoded.args as any;
-           // Defensive check: SDK filters by topic1, but verify tokenId matches
-           if (BigInt(args.tokenId) === tokenId) {
-             return {
-               status: "found",
-               event: {
-                 tokenId,
-                 blockNumber: BigInt(log.blockNumber),
-                 transactionHash: log.transactionHash,
-                 amount0: BigInt(args.amount0),
-                 amount1: BigInt(args.amount1),
-                 liquidity: BigInt(args.liquidity),
-               },
-             };
-           }
-         }
-       }
+      if (rawLogs.length > 0) {
+        const log = rawLogs[0]; // first match is the open event
+        console.log(`    Found open event at block ${log.blockNumber}`);
+        const decoded = decodeHyperSyncLog(log, eventAbi);
+        if (decoded && decoded.eventName === "IncreaseLiquidity") {
+          const args = decoded.args as any;
+          // Defensive check: SDK filters by topic1, but verify tokenId matches
+          if (BigInt(args.tokenId) === tokenId) {
+            return {
+              status: "found",
+              event: {
+                tokenId,
+                blockNumber: BigInt(log.blockNumber),
+                transactionHash: log.transactionHash,
+                amount0: BigInt(args.amount0),
+                amount1: BigInt(args.amount1),
+                liquidity: BigInt(args.liquidity),
+              },
+            };
+          }
+        }
+      }
       console.warn(`    Could not find open event for token #${tokenId}`);
       return { status: "not_found" };
     } else {
@@ -295,14 +295,14 @@ export async function findCloseEvent(
           positionManager,
           [[DECREASE_LIQUIDITY_TOPIC], [paddedTokenId]],
           Number(startBlock),
-          toBlockNum,
+          toBlockNum !== undefined ? toBlockNum + 1 : undefined,
         ),
         fetchLogsByAddressAndTopics(
           hyperSyncClient,
           positionManager,
           [[COLLECT_TOPIC], [paddedTokenId]],
           Number(startBlock),
-          toBlockNum,
+          toBlockNum !== undefined ? toBlockNum + 1 : undefined,
         ),
       ]);
 
@@ -322,23 +322,25 @@ export async function findCloseEvent(
       const decreaseAmount0 = BigInt(dArgs.amount0);
       const decreaseAmount1 = BigInt(dArgs.amount1);
 
-       console.log(`    Found close event at block ${dLog.blockNumber}`);
+      console.log(`    Found close event at block ${dLog.blockNumber}`);
 
-       // Sum collect amounts for fees, but only up to and including the close block
-       // (in case the tokenId is reused in a new lifecycle after this close)
-       let collectAmount0 = 0n;
-       let collectAmount1 = 0n;
-       const boundedCollectLogs = collectLogs.filter((c) => c.blockNumber <= dLog.blockNumber);
-       for (const cLog of boundedCollectLogs) {
-         const collectDecoded = decodeHyperSyncLog(cLog, eventAbi);
-         if (collectDecoded && collectDecoded.eventName === "Collect") {
-           const cArgs = collectDecoded.args as any;
-           collectAmount0 += BigInt(cArgs.amount0Collect);
-           collectAmount1 += BigInt(cArgs.amount1Collect);
-         }
-       }
+      // Sum collect amounts for fees, but only up to and including the close block
+      // (in case the tokenId is reused in a new lifecycle after this close)
+      // Collect logs were fetched in parallel to toBlock (we didn't know the close
+      // block yet); bound them here to exclude any logs from a future position lifecycle.
+      let collectAmount0 = 0n;
+      let collectAmount1 = 0n;
+      const boundedCollectLogs = collectLogs.filter((c) => c.blockNumber <= dLog.blockNumber);
+      for (const cLog of boundedCollectLogs) {
+        const collectDecoded = decodeHyperSyncLog(cLog, eventAbi);
+        if (collectDecoded && collectDecoded.eventName === "Collect") {
+          const cArgs = collectDecoded.args as any;
+          collectAmount0 += BigInt(cArgs.amount0Collect);
+          collectAmount1 += BigInt(cArgs.amount1Collect);
+        }
+      }
 
-       const collectTotals = { amount0: collectAmount0, amount1: collectAmount1 };
+      const collectTotals = { amount0: collectAmount0, amount1: collectAmount1 };
       return {
         status: "found",
         event: applyCollectTotals(

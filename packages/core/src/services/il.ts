@@ -1,5 +1,5 @@
 import { createClient } from "../chain/client.js";
-import { createHyperSyncClient } from "../chain/hypersync.js";
+import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
 import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
@@ -14,8 +14,6 @@ import {
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-
-const DEFAULT_HYPERSYNC_URL = "https://hyperliquid.hypersync.xyz";
 
 export interface ILView {
   tokenId: string;

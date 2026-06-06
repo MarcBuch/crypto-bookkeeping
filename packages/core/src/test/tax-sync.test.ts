@@ -851,25 +851,6 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       });
     }) as unknown as typeof globalThis.fetch;
 
-    const _hyperSyncClient = makeHyperSyncMock(
-      [
-        {
-          hash: "0xnullts1",
-          blockNumber: 100,
-          blockTimestamp: undefined, // no timestamp → null time_stamp
-          from: "0xsender",
-          to: WALLET.toLowerCase(),
-          value: 1000000000000000000n,
-          gasUsed: 21000n,
-          gasPrice: 1000000000n,
-          input: "0x",
-          status: 1,
-          sighash: null,
-        },
-      ],
-      [],
-    );
-
     // Override the mock to return no timestamp in blocks
     const noTimestampClient = {
       get: async (_query: unknown) => ({
@@ -1465,47 +1446,47 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
   });
 });
 
+function makeEurDbRow(
+  id: string,
+  overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {},
+): import("../db/store.js").SyncedTaxTransaction {
+  return {
+    id,
+    hash: id,
+    block_number: 100,
+    time_stamp: "1770000000",
+    from_address: "0xfrom",
+    to_address: "0xto",
+    value: "1000000000000000000",
+    gas_used: "21000",
+    gas_price: "1000000000",
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: null,
+    token_symbol: null,
+    token_decimal: null,
+    token_name: null,
+    transaction_type: "txlist",
+    source: "testsource",
+    is_error: 0,
+    incoming_quantity: null,
+    incoming_asset: null,
+    outgoing_quantity: null,
+    outgoing_asset: null,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 describe("DB EUR update functions", () => {
   const TMP_EUR =
     "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-eur-tests";
-
-  function makeRow(
-    id: string,
-    overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {},
-  ): import("../db/store.js").SyncedTaxTransaction {
-    return {
-      id,
-      hash: id,
-      block_number: 100,
-      time_stamp: "1770000000",
-      from_address: "0xfrom",
-      to_address: "0xto",
-      value: "1000000000000000000",
-      gas_used: "21000",
-      gas_price: "1000000000",
-      fee: null,
-      method_id: null,
-      function_name: null,
-      input: null,
-      contract_address: null,
-      token_symbol: null,
-      token_decimal: null,
-      token_name: null,
-      transaction_type: "txlist",
-      source: "testsource",
-      is_error: 0,
-      incoming_quantity: null,
-      incoming_asset: null,
-      outgoing_quantity: null,
-      outgoing_asset: null,
-      cost_eur: null,
-      proceeds_eur: null,
-      gain_eur: null,
-      holding_duration_days: null,
-      synced_at: new Date().toISOString(),
-      ...overrides,
-    };
-  }
 
   beforeEach(() => {
     mkdirSync(TMP_EUR, { recursive: true });
@@ -1521,9 +1502,15 @@ describe("DB EUR update functions", () => {
 
   // Test 1: getTaxTransactionsNeedingEurEnrichment returns only null-EUR rows
   it("getTaxTransactionsNeedingEurEnrichment — returns only rows where both EUR fields are null", () => {
-    upsertSyncedTaxTransaction(makeRow("dbeur-t1-row1", { cost_eur: null, proceeds_eur: null }));
-    upsertSyncedTaxTransaction(makeRow("dbeur-t1-row2", { cost_eur: null, proceeds_eur: null }));
-    upsertSyncedTaxTransaction(makeRow("dbeur-t1-row3", { proceeds_eur: "50", cost_eur: null }));
+    upsertSyncedTaxTransaction(
+      makeEurDbRow("dbeur-t1-row1", { cost_eur: null, proceeds_eur: null }),
+    );
+    upsertSyncedTaxTransaction(
+      makeEurDbRow("dbeur-t1-row2", { cost_eur: null, proceeds_eur: null }),
+    );
+    upsertSyncedTaxTransaction(
+      makeEurDbRow("dbeur-t1-row3", { proceeds_eur: "50", cost_eur: null }),
+    );
 
     const result = getTaxTransactionsNeedingEurEnrichment();
     const ids = result.map((r) => r.id);
@@ -1536,7 +1523,9 @@ describe("DB EUR update functions", () => {
 
   // Test 2: excludes rows where only one EUR field is set
   it("getTaxTransactionsNeedingEurEnrichment — excludes row with cost_eur set but proceeds_eur null", () => {
-    upsertSyncedTaxTransaction(makeRow("dbeur-t2-row1", { cost_eur: "30", proceeds_eur: null }));
+    upsertSyncedTaxTransaction(
+      makeEurDbRow("dbeur-t2-row1", { cost_eur: "30", proceeds_eur: null }),
+    );
 
     const result = getTaxTransactionsNeedingEurEnrichment();
     const ids = result.map((r) => r.id);
@@ -1557,7 +1546,7 @@ describe("DB EUR update functions", () => {
 
   // Test 4: updateTaxTransactionEurValues — updates all three fields
   it("updateTaxTransactionEurValues — updates cost_eur, proceeds_eur, and gain_eur", () => {
-    upsertSyncedTaxTransaction(makeRow("dbeur-t4-row1"));
+    upsertSyncedTaxTransaction(makeEurDbRow("dbeur-t4-row1"));
 
     updateTaxTransactionEurValues("dbeur-t4-row1", {
       cost_eur: "10",
@@ -1574,7 +1563,7 @@ describe("DB EUR update functions", () => {
 
   // Test 5: updateTaxTransactionEurValues — partial null values (field isolation)
   it("updateTaxTransactionEurValues — allows cost_eur null while setting proceeds_eur and gain_eur", () => {
-    upsertSyncedTaxTransaction(makeRow("dbeur-t5-row1"));
+    upsertSyncedTaxTransaction(makeEurDbRow("dbeur-t5-row1"));
 
     updateTaxTransactionEurValues("dbeur-t5-row1", {
       cost_eur: null,
@@ -1592,7 +1581,7 @@ describe("DB EUR update functions", () => {
   // Test 6: updateTaxTransactionEurValues — does not clobber other fields
   it("updateTaxTransactionEurValues — does not overwrite unrelated fields", () => {
     upsertSyncedTaxTransaction(
-      makeRow("dbeur-t6-row1", {
+      makeEurDbRow("dbeur-t6-row1", {
         incoming_asset: "HYPE",
         incoming_quantity: "2.5",
       }),
@@ -1614,6 +1603,44 @@ describe("DB EUR update functions", () => {
   });
 });
 
+function makeBackfillRow(
+  id: string,
+  overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {},
+): import("../db/store.js").SyncedTaxTransaction {
+  return {
+    id,
+    hash: id,
+    block_number: 100,
+    time_stamp: new Date(1770000000 * 1000).toISOString(),
+    from_address: "0xfrom",
+    to_address: "0xto",
+    value: "1000000000000000000",
+    gas_used: "21000",
+    gas_price: "1000000000",
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: null,
+    token_symbol: null,
+    token_decimal: null,
+    token_name: null,
+    transaction_type: "txlist",
+    source: "backfill-test",
+    is_error: 0,
+    incoming_quantity: null,
+    incoming_asset: null,
+    outgoing_quantity: null,
+    outgoing_asset: null,
+    cost_eur: null,
+    proceeds_eur: null,
+    gain_eur: null,
+    holding_duration_days: null,
+    synced_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 describe("enrichTaxTransactionsEurValues — backfill service", () => {
   const TMP_BACKFILL =
     "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-backfill-tests";
@@ -1622,44 +1649,6 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     return {
       ...config(),
       pricing: { coingeckoIds },
-    };
-  }
-
-  function makeRow(
-    id: string,
-    overrides: Partial<import("../db/store.js").SyncedTaxTransaction> = {},
-  ): import("../db/store.js").SyncedTaxTransaction {
-    return {
-      id,
-      hash: id,
-      block_number: 100,
-      time_stamp: new Date(1770000000 * 1000).toISOString(),
-      from_address: "0xfrom",
-      to_address: "0xto",
-      value: "1000000000000000000",
-      gas_used: "21000",
-      gas_price: "1000000000",
-      fee: null,
-      method_id: null,
-      function_name: null,
-      input: null,
-      contract_address: null,
-      token_symbol: null,
-      token_decimal: null,
-      token_name: null,
-      transaction_type: "txlist",
-      source: "backfill-test",
-      is_error: 0,
-      incoming_quantity: null,
-      incoming_asset: null,
-      outgoing_quantity: null,
-      outgoing_asset: null,
-      cost_eur: null,
-      proceeds_eur: null,
-      gain_eur: null,
-      holding_duration_days: null,
-      synced_at: new Date().toISOString(),
-      ...overrides,
     };
   }
 
@@ -1685,7 +1674,10 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     }) as unknown as typeof globalThis.fetch;
 
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t1-row1", { incoming_asset: "BACKFILL_TOK", incoming_quantity: "2" }),
+      makeBackfillRow("backfill-t1-row1", {
+        incoming_asset: "BACKFILL_TOK",
+        incoming_quantity: "2",
+      }),
     );
     updateTaxTransactionEurValues("backfill-t1-row1", {
       cost_eur: null,
@@ -1715,7 +1707,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     }) as unknown as typeof globalThis.fetch;
 
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t2-row1", {
+      makeBackfillRow("backfill-t2-row1", {
         incoming_asset: null,
         outgoing_asset: null,
         time_stamp: "1770000000",
@@ -1735,7 +1727,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     }) as unknown as typeof globalThis.fetch;
 
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t3-row1", {
+      makeBackfillRow("backfill-t3-row1", {
         incoming_asset: "BACKFILL_TOK",
         incoming_quantity: "1",
         time_stamp: null,
@@ -1761,7 +1753,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     }) as unknown as typeof globalThis.fetch;
 
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t4-row1", {
+      makeBackfillRow("backfill-t4-row1", {
         incoming_asset: "BACKFILL_TOK",
         incoming_quantity: "2",
         time_stamp: new Date(1770100000 * 1000).toISOString(),
@@ -1794,7 +1786,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     }) as unknown as typeof globalThis.fetch;
 
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t5-row1", {
+      makeBackfillRow("backfill-t5-row1", {
         incoming_asset: "BACKFILL_TOK",
         incoming_quantity: "2",
         outgoing_asset: null,
@@ -1832,14 +1824,14 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
     }) as unknown as typeof globalThis.fetch;
 
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t6-known", {
+      makeBackfillRow("backfill-t6-known", {
         incoming_asset: "BACKFILL_TOK",
         incoming_quantity: "1",
         time_stamp: new Date(1770300000 * 1000).toISOString(),
       }),
     );
     upsertSyncedTaxTransaction(
-      makeRow("backfill-t6-unknown", {
+      makeBackfillRow("backfill-t6-unknown", {
         incoming_asset: "UNKNOWN_BACKFILL",
         incoming_quantity: "1",
         time_stamp: new Date(1770300000 * 1000).toISOString(),

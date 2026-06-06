@@ -950,7 +950,7 @@ describe("POST /tax/transactions/enrich", () => {
     const body = res.json();
     expect(typeof body.enriched).toBe("number");
     expect(typeof body.skipped).toBe("number");
-    expect(Object.keys(body).sort()).toEqual(["enriched", "skipped"]);
+    expect(Object.keys(body).toSorted()).toEqual(["enriched", "skipped"]);
   });
 
   it("returns enriched > 0 when unenriched rows exist and service enriches them", async () => {

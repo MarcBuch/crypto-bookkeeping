@@ -155,9 +155,7 @@ function validateConfig(raw: unknown, path: string): void {
         throw new Error(`Config at ${path}: "tax.hyperSyncUrl" must be a non-empty string`);
       }
       // Basic URL validation
-      try {
-        new URL(tax.hyperSyncUrl as string);
-      } catch {
+      if (!URL.canParse(tax.hyperSyncUrl as string)) {
         throw new Error(
           `Config at ${path}: "tax.hyperSyncUrl" must be a valid URL (got ${JSON.stringify(tax.hyperSyncUrl)})`,
         );
@@ -179,9 +177,7 @@ function validateConfig(raw: unknown, path: string): void {
         throw new Error(`Config at ${path}: "hyperSync.url" must be a non-empty string`);
       }
       // Basic URL validation
-      try {
-        new URL(hyperSync.url as string);
-      } catch {
+      if (!URL.canParse(hyperSync.url as string)) {
         throw new Error(
           `Config at ${path}: "hyperSync.url" must be a valid URL (got ${JSON.stringify(hyperSync.url)})`,
         );

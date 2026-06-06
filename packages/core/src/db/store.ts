@@ -466,7 +466,7 @@ function nextManualTaxTransactionId(baseId: string): string {
 function manualTaxTransactionHash(transaction: ManualTaxTransactionInput): string {
   const entries = Object.entries(transaction)
     .filter(([key, value]) => key !== "id" && value !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right));
+    .toSorted(([left], [right]) => left.localeCompare(right));
   return createHash("sha256").update(JSON.stringify(entries)).digest("hex").slice(0, 24);
 }
 

@@ -53,6 +53,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
           error: null,
           positionCount: summary.positionCount,
         };
+        return syncState;
       })
       .catch((err: unknown) => {
         syncState = {
@@ -108,6 +109,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
             error: null,
             positionCount: 1,
           });
+          return positionSyncStates.get(tokenId);
         })
         .catch((err: unknown) => {
           positionSyncStates.set(tokenId, {

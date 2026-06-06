@@ -8,10 +8,12 @@ function makeRateLimitError() {
   return Object.assign(new Error("rate limited"), { details: "rate limited" });
 }
 
+const immediateSuccessFn = async () => 42;
+const callBFn = async () => "callB done";
+
 describe("withRetry — retry exhaustion and passthrough", () => {
   it("resolves immediately when fn succeeds on first attempt", async () => {
-    const fn = async () => 42;
-    const result = await withRetry(fn, 0);
+    const result = await withRetry(immediateSuccessFn, 0);
     expect(result).toBe(42);
   });
 
@@ -84,8 +86,6 @@ describe("withRetry — adaptive backoff propagation", () => {
       }
       return "callA done";
     };
-
-    const callBFn = async () => "callB done";
 
     const [resultA, resultB] = await Promise.all([
       withRetry(callAFn, 3, 50),

@@ -8,6 +8,31 @@ import type { StoredPosition } from "../db/store.js";
 
 const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-db-tests";
 
+// Helper to create a minimal StoredPosition stub
+function minimalPosition(
+  tokenId: string,
+  overrides?: Partial<StoredPosition>,
+): Omit<StoredPosition, "created_at"> {
+  return {
+    token_id: tokenId,
+    token0: "0x" + "a".repeat(40),
+    token1: "0x" + "b".repeat(40),
+    token0_symbol: "TKN0",
+    token1_symbol: "TKN1",
+    token0_decimals: 18,
+    token1_decimals: 6,
+    fee: 3000,
+    tick_lower: -887272,
+    tick_upper: 887272,
+    entry_sqrt_price_x96: "1461446703485210103287273052203988822378723720",
+    entry_block: 100,
+    entry_amount0: "1000000000000000000",
+    entry_amount1: "1000000",
+    entry_liquidity: "1000000000000000000",
+    ...overrides,
+  };
+}
+
 describe("close_usd_price0 and close_usd_price1 — extreme and invalid values", () => {
   beforeEach(() => {
     mkdirSync(TMP, { recursive: true });
@@ -19,31 +44,6 @@ describe("close_usd_price0 and close_usd_price1 — extreme and invalid values",
     resetDb();
     if (existsSync(TMP)) rmSync(TMP, { recursive: true, force: true });
   });
-
-  // Helper to create a minimal StoredPosition stub
-  function minimalPosition(
-    tokenId: string,
-    overrides?: Partial<StoredPosition>,
-  ): Omit<StoredPosition, "created_at"> {
-    return {
-      token_id: tokenId,
-      token0: "0x" + "a".repeat(40),
-      token1: "0x" + "b".repeat(40),
-      token0_symbol: "TKN0",
-      token1_symbol: "TKN1",
-      token0_decimals: 18,
-      token1_decimals: 6,
-      fee: 3000,
-      tick_lower: -887272,
-      tick_upper: 887272,
-      entry_sqrt_price_x96: "1461446703485210103287273052203988822378723720",
-      entry_block: 100,
-      entry_amount0: "1000000000000000000",
-      entry_amount1: "1000000",
-      entry_liquidity: "1000000000000000000",
-      ...overrides,
-    };
-  }
 
   it("1. Zero price — close_usd_price0: 0.0 is stored and read back as 0 (not null, not undefined)", () => {
     process.env.LP_TRACKER_DATA_DIR = join(TMP, "zero-price");

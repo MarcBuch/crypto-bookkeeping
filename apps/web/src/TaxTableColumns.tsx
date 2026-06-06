@@ -33,15 +33,16 @@ const numericStringSortingFn: SortingFn<TaxTableRow> = (rowA, rowB, columnId) =>
 
 // Sort for time_stamp — handles both ISO 8601 strings ("2026-05-30T12:00:00.000Z")
 // and legacy Unix epoch-second strings ("1760000000").
+function parseTimestamp(v: unknown): number {
+  if (v == null || v === "") return Number.NEGATIVE_INFINITY;
+  const s = String(v);
+  const n = Number(s);
+  const ms = Number.isFinite(n) ? n * 1000 : new Date(s).getTime();
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+}
+
 const timestampSortingFn: SortingFn<TaxTableRow> = (rowA, rowB, columnId) => {
-  const parse = (v: unknown): number => {
-    if (v == null || v === "") return Number.NEGATIVE_INFINITY;
-    const s = String(v);
-    const n = Number(s);
-    const ms = Number.isFinite(n) ? n * 1000 : new Date(s).getTime();
-    return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
-  };
-  return parse(rowA.getValue(columnId)) - parse(rowB.getValue(columnId));
+  return parseTimestamp(rowA.getValue(columnId)) - parseTimestamp(rowB.getValue(columnId));
 };
 
 const columnHelper = createColumnHelper<TaxTableRow>();
@@ -54,7 +55,7 @@ export const taxTableColumns = [
     size: 11,
     enableSorting: false,
     cell: ({ row }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
 
       if (groupData) {
         const hash = row.original.hash;
@@ -117,7 +118,7 @@ export const taxTableColumns = [
     enableSorting: true,
     cell: ({ row, table }) => {
       const meta = table.options.meta as TableMeta;
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
 
       if (groupData) {
         return (
@@ -161,7 +162,7 @@ export const taxTableColumns = [
     size: 7,
     enableSorting: false,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "incoming_quantity")
         : formatTaxLedgerValue(getValue());
@@ -176,7 +177,7 @@ export const taxTableColumns = [
     size: 7,
     enableSorting: false,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "incoming_asset")
         : formatTaxLedgerValue(getValue());
@@ -191,7 +192,7 @@ export const taxTableColumns = [
     size: 7,
     enableSorting: false,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "outgoing_quantity")
         : formatTaxLedgerValue(getValue());
@@ -206,7 +207,7 @@ export const taxTableColumns = [
     size: 7,
     enableSorting: false,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "outgoing_asset")
         : formatTaxLedgerValue(getValue());
@@ -222,7 +223,7 @@ export const taxTableColumns = [
     enableSorting: true,
     sortingFn: numericStringSortingFn,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       let content: string;
       if (groupData) {
         content = formatGroupFee(groupData);
@@ -243,7 +244,7 @@ export const taxTableColumns = [
     enableSorting: true,
     sortingFn: numericStringSortingFn,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "cost_eur")
         : formatTaxLedgerValue(getValue());
@@ -259,7 +260,7 @@ export const taxTableColumns = [
     enableSorting: true,
     sortingFn: numericStringSortingFn,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "proceeds_eur")
         : formatTaxLedgerValue(getValue());
@@ -275,7 +276,7 @@ export const taxTableColumns = [
     enableSorting: true,
     sortingFn: numericStringSortingFn,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "gain_eur")
         : formatTaxLedgerValue(getValue());
@@ -291,7 +292,7 @@ export const taxTableColumns = [
     enableSorting: true,
     sortingFn: numericStringSortingFn,
     cell: ({ row, getValue }) => {
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
       const content = groupData
         ? mixedTaxField(groupData, "holding_duration_days")
         : formatTaxLedgerValue(getValue());
@@ -307,7 +308,7 @@ export const taxTableColumns = [
     enableSorting: false,
     cell: ({ row, table }) => {
       const meta = table.options.meta as TableMeta;
-      const groupData: TaxTransactionGroup | undefined = row.original._groupData;
+      const groupData: TaxTransactionGroup | undefined = row.original.groupData;
 
       if (groupData) {
         return (

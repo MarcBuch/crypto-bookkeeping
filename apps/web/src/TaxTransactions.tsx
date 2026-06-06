@@ -54,13 +54,13 @@ export type TaxTableRow = TaxTransaction & {
    * Provides the full TaxTransactionGroup context for group-specific cell rendering
    * (e.g. "N parts" badge, "Applies to all parts" hint, mixed-value display).
    */
-  _groupData?: TaxTransactionGroup;
+  groupData?: TaxTransactionGroup;
   /**
    * Set only on group header rows. Contains the individual child transactions
-   * as TaxTableRow entries (without their own _subRows or _groupData).
+   * as TaxTableRow entries (without their own subRows or groupData).
    * Used by TanStack Table's getSubRows to produce expandable sub-rows.
    */
-  _subRows?: TaxTableRow[];
+  subRows?: TaxTableRow[];
 };
 
 export function buildTableRows(transactions: TaxTransaction[]): TaxTableRow[] {
@@ -71,8 +71,8 @@ export function buildTableRows(transactions: TaxTransaction[]): TaxTableRow[] {
     }
     return {
       ...group.primary,
-      _groupData: group,
-      _subRows: group.transactions.map((tx) => ({ ...tx })),
+      groupData: group,
+      subRows: group.transactions.map((tx) => ({ ...tx })),
     };
   });
 }
@@ -586,8 +586,8 @@ export function TaxTransactionLedger({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    getSubRows: (row) => row._subRows,
-    getRowId: (row) => (row._groupData ? `hash:${row.hash}` : row.id),
+    getSubRows: (row) => row.subRows,
+    getRowId: (row) => (row.groupData ? `hash:${row.hash}` : row.id),
     meta: { updateTransaction, isUpdating } satisfies TableMeta,
   });
 

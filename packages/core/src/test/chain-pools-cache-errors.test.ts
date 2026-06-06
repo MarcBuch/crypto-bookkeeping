@@ -40,16 +40,17 @@ const T0 = "0xb000000000000000000000000000000000000001" as Address;
 const T1 = "0xb000000000000000000000000000000000000002" as Address;
 const POOL = "0x0000000000000000000000000000000000009910" as Address;
 
+const alwaysThrowReadContract = async (): Promise<Address> => {
+  throw new Error("network error");
+};
+
 describe("poolAddressCache — error cases", () => {
   it("RPC error propagates and does not cache the failed lookup", async () => {
     const cache = new Map<string, Address>();
-    const readContract = async (): Promise<Address> => {
-      throw new Error("network error");
-    };
 
-    await expect(getPoolAddressWithCache(readContract, T0, T1, 500, cache)).rejects.toThrow(
-      "network error",
-    );
+    await expect(
+      getPoolAddressWithCache(alwaysThrowReadContract, T0, T1, 500, cache),
+    ).rejects.toThrow("network error");
 
     // Cache must remain empty — no poisoned entry
     const cacheKey = buildPoolCacheKey(T0, T1, 500);

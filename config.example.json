@@ -26,6 +26,10 @@
       "0xTOKEN_ADDRESS_OR_PROJECTX_WRAPPED_TOKEN": "coingecko-token-id"
     }
   },
+  "hyperSync": {
+    "url": "https://hyperliquid.hypersync.xyz",
+    "apiToken": "YOUR_HYPERSYNC_API_TOKEN"
+  },
   "tax": {
     "hyperSyncUrl": "https://hyperliquid.hypersync.xyz",
     "hyperSyncApiToken": "YOUR_HYPERSYNC_API_TOKEN",

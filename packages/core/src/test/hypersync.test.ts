@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+  fetchLogsByAddressAndTopics,
   fetchTokenTransfersByAddress,
   fetchTransactionsByAddress,
   padAddress,
@@ -530,5 +531,143 @@ describe("fetchTokenTransfersByAddress — normalization and deduplication", () 
     const client = mockClient([singlePageLogResponse([log1])]);
     const results = await fetchTokenTransfersByAddress(client, WALLET, 0);
     expect(results).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Suite 6: fetchLogsByAddressAndTopics — pagination and termination
+// ===========================================================================
+
+describe("fetchLogsByAddressAndTopics — pagination and termination", () => {
+  it("Scenario 1: Empty range — no logs returned, no second call", async () => {
+    const page: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 1000, // >= archiveHeight → terminates
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [], traces: [] },
+    };
+    const client = mockClient([page]);
+    const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0);
+    expect(results).toHaveLength(0);
+  });
+
+  it("Scenario 2: Single page exhausts range (pagination terminates correctly)", async () => {
+    const log1 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+      logIndex: 0,
+    });
+    const log2 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000002",
+      logIndex: 0,
+    });
+    const page: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 501, // > toBlock=500 → terminates
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [log1, log2], traces: [] },
+    };
+    const client = mockClient([page]);
+    const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0, 500);
+    expect(results).toHaveLength(2);
+  });
+
+  it("Scenario 3: Multi-page accumulation", async () => {
+    const log1 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+      logIndex: 0,
+    });
+    const log2 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000002",
+      logIndex: 0,
+    });
+
+    const page1: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 500, // < toBlock=1000 → continue
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [log1], traces: [] },
+    };
+    const page2: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 1000, // >= toBlock=1000 → stop
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [log2], traces: [] },
+    };
+
+    let callCount = 0;
+    const client = {
+      get: async (_query: unknown) => {
+        callCount++;
+        if (callCount === 1) return page1;
+        if (callCount === 2) return page2;
+        throw new Error("Unexpected third call to client.get()");
+      },
+    } as unknown as HypersyncClient;
+
+    const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0, 1000);
+    expect(callCount).toBe(2);
+    expect(results).toHaveLength(2);
+  });
+
+  it("Scenario 4: Duplicate log across pages (dedup by txHash:logIndex)", async () => {
+    const log1 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+      logIndex: 0,
+    });
+    // Identical log (same txHash and logIndex)
+    const log1Duplicate = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+      logIndex: 0,
+    });
+
+    const page1: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 500,
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [log1], traces: [] },
+    };
+    const page2: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 1000,
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [log1Duplicate], traces: [] },
+    };
+
+    let callCount = 0;
+    const client = {
+      get: async (_query: unknown) => {
+        callCount++;
+        if (callCount === 1) return page1;
+        if (callCount === 2) return page2;
+        throw new Error("Unexpected third call to client.get()");
+      },
+    } as unknown as HypersyncClient;
+
+    const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0, 1000);
+    expect(callCount).toBe(2);
+    expect(results).toHaveLength(1); // Only one unique log
+  });
+
+  it("Scenario 5: Log with undefined blockNumber is skipped", async () => {
+    const log1 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000001",
+      logIndex: 0,
+      blockNumber: 200,
+    });
+    const log2 = makeLog({
+      transactionHash: "0xbbbb000000000000000000000000000000000000000000000000000000000002",
+      logIndex: 0,
+      blockNumber: undefined,
+    });
+    const page: MockQueryResponse = {
+      archiveHeight: 1000,
+      nextBlock: 1000,
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [log1, log2], traces: [] },
+    };
+    const client = mockClient([page]);
+    const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0);
+    expect(results).toHaveLength(1); // Only log1 with valid blockNumber
+    expect(results[0].transactionHash).toBe(log1.transactionHash!.toLowerCase());
   });
 });

@@ -1,4 +1,5 @@
 import { createClient } from "../chain/client.js";
+import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
 import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
@@ -91,6 +92,13 @@ export async function getPnLView(
 ): Promise<PnLView[]> {
   const client = createClient(config);
 
+  const hyperSyncClient = config.hyperSync?.apiToken
+    ? createHyperSyncClient({
+        url: config.hyperSync.url ?? DEFAULT_HYPERSYNC_URL,
+        apiToken: config.hyperSync.apiToken,
+      })
+    : undefined;
+
   const positions =
     rawPositions ??
     (await getAllPositions(client, config.contracts.positionManager, config.wallet));
@@ -162,6 +170,7 @@ export async function getPnLView(
         undefined, // fromBlock — let the window default apply
         logsWindowBlocks, // windowBlocks from config
         latestBlock,
+        hyperSyncClient,
       );
 
       if (openResult.status === "rpc_error") {
@@ -233,6 +242,7 @@ export async function getPnLView(
         undefined, // fromBlock — let the window default apply
         logsWindowBlocks, // windowBlocks from config
         latestBlock,
+        hyperSyncClient,
       );
 
       if (openResult.status === "rpc_error") {
@@ -367,6 +377,7 @@ export async function getPnLView(
           entryBlock, // explicit fromBlock when known — wins over window
           logsWindowBlocks, // windowBlocks fallback when entryBlock undefined
           latestBlock,
+          hyperSyncClient,
         );
 
         if (closeResult.status === "rpc_error") {

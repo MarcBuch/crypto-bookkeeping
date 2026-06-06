@@ -65,7 +65,7 @@ interface ExplorerEnvelope {
 type ExplorerTransaction = Record<string, unknown>;
 
 export async function syncTaxTransactions(
-  config: Pick<Config, "wallet" | "tax" | "pricing" | "rpc" | "logsRpc" | "contracts" | "chainId">,
+  config: Pick<Config, "wallet" | "tax" | "hyperSync" | "pricing" | "rpc" | "logsRpc" | "contracts" | "chainId">,
   options: SyncTaxTransactionsOptions = {},
 ): Promise<SyncTaxTransactionsSummary> {
   const wallet = config.wallet;
@@ -80,8 +80,13 @@ export async function syncTaxTransactions(
   let latestBlockNumber: number | null = null;
 
   // ── HyperSync path: txlist + tokentx + tokennfttx ─────────────────────────
-  const hyperSyncUrl = config.tax?.hyperSyncUrl ?? "https://hyperliquid.hypersync.xyz";
-  const hyperSyncApiToken = normalizedHyperSyncApiToken(config.tax?.hyperSyncApiToken);
+  const hyperSyncUrl =
+    config.tax?.hyperSyncUrl ??
+    config.hyperSync?.url ??
+    "https://hyperliquid.hypersync.xyz";
+  const hyperSyncApiToken =
+    normalizedHyperSyncApiToken(config.tax?.hyperSyncApiToken) ??
+    normalizedHyperSyncApiToken(config.hyperSync?.apiToken);
 
   if (!options.hyperSyncClient && !hyperSyncApiToken) {
     throw new Error(

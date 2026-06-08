@@ -1,14 +1,12 @@
 import { createClient } from "../chain/client.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
 import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
+import { getPoolAddress, getPoolState, getTokenInfo, computeUnclaimedFees } from "../chain/pools.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
 import { withRetry } from "../chain/rpc.js";
 import type { Config } from "../config.js";
 import { upsertPosition, getPosition } from "../db/store.js";
 import {
-  calculateFeeGrowthInside,
-  calculateUnclaimedFees,
   calculateFullPnL,
   deriveEntryPriceFromAmounts,
   getTokenAmounts,
@@ -309,41 +307,16 @@ export async function getPnLView(
       exitAmount1 = currentAmounts.amount1;
 
       // Calculate uncollected fees
-      try {
-        const [tickLowerData, tickUpperData] = await Promise.all([
-          getTickData(client, poolAddress, pos.tickLower),
-          getTickData(client, poolAddress, pos.tickUpper),
-        ]);
-
-        const feeGrowthInside = calculateFeeGrowthInside(
-          pos.tickLower,
-          pos.tickUpper,
-          poolState.tick,
-          poolState.feeGrowthGlobal0X128,
-          poolState.feeGrowthGlobal1X128,
-          tickLowerData.feeGrowthOutside0X128,
-          tickLowerData.feeGrowthOutside1X128,
-          tickUpperData.feeGrowthOutside0X128,
-          tickUpperData.feeGrowthOutside1X128,
-        );
-
-        const feeResult = calculateUnclaimedFees(
-          pos.liquidity,
-          pos.feeGrowthInside0LastX128,
-          pos.feeGrowthInside1LastX128,
-          feeGrowthInside.feeGrowthInside0X128,
-          feeGrowthInside.feeGrowthInside1X128,
-          pos.tokensOwed0,
-          pos.tokensOwed1,
-          token0Info.decimals,
-          token1Info.decimals,
-        );
-
-        feesCollected0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
-        feesCollected1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
-      } catch {
-        // Fees calculation may fail — leave as 0
-      }
+      const feeResult = await computeUnclaimedFees(
+        client,
+        poolAddress,
+        pos,
+        poolState,
+        token0Info.decimals,
+        token1Info.decimals,
+      );
+      feesCollected0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
+      feesCollected1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
     } else {
       // Closed position: use cached exit data if available (m2t5 fast path)
       const hasCachedExit =

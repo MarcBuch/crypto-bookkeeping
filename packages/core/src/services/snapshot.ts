@@ -1,13 +1,11 @@
 import { createClient } from "../chain/client.js";
 import { findOpenEvent } from "../chain/events.js";
 import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import { getPoolAddress, getPoolState, getTickData, getTokenInfo } from "../chain/pools.js";
+import { computeUnclaimedFees, getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import { upsertPosition, getPosition, insertSnapshot } from "../db/store.js";
 import {
-  calculateFeeGrowthInside,
-  calculateUnclaimedFees,
   deriveEntryPriceFromAmounts,
   getTokenAmounts,
   sqrtPriceX96ToPrice,
@@ -167,43 +165,14 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
     const divergenceLoss = valueHold > 0 ? (valueLp - valueHold) / valueHold : 0;
 
     // Calculate fees
-    let fees0 = 0;
-    let fees1 = 0;
-    try {
-      const [tickLowerData, tickUpperData] = await Promise.all([
-        getTickData(client, poolAddress, pos.tickLower),
-        getTickData(client, poolAddress, pos.tickUpper),
-      ]);
-
-      const feeGrowthInside = calculateFeeGrowthInside(
-        pos.tickLower,
-        pos.tickUpper,
-        poolState.tick,
-        poolState.feeGrowthGlobal0X128,
-        poolState.feeGrowthGlobal1X128,
-        tickLowerData.feeGrowthOutside0X128,
-        tickLowerData.feeGrowthOutside1X128,
-        tickUpperData.feeGrowthOutside0X128,
-        tickUpperData.feeGrowthOutside1X128,
-      );
-
-      const feeResult = calculateUnclaimedFees(
-        pos.liquidity,
-        pos.feeGrowthInside0LastX128,
-        pos.feeGrowthInside1LastX128,
-        feeGrowthInside.feeGrowthInside0X128,
-        feeGrowthInside.feeGrowthInside1X128,
-        pos.tokensOwed0,
-        pos.tokensOwed1,
-        token0Info.decimals,
-        token1Info.decimals,
-      );
-
-      fees0 = feeResult.fees0;
-      fees1 = feeResult.fees1;
-    } catch {
-      // Fees calculation may fail — leave as 0
-    }
+    const { fees0, fees1 } = await computeUnclaimedFees(
+      client,
+      poolAddress,
+      pos,
+      poolState,
+      token0Info.decimals,
+      token1Info.decimals,
+    );
 
     const feesValue = fees0 * exitPrice + fees1;
     const netPnl = valueLp - valueHold + feesValue;

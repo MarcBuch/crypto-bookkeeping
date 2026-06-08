@@ -3,6 +3,7 @@ import type { Address } from "viem";
 import { factoryAbi, poolAbi, erc20Abi } from "./abis";
 import type { Client } from "./client";
 import { withRetry } from "./rpc";
+import { calculateFeeGrowthInside, calculateUnclaimedFees } from "../math/divergence-loss.js";
 
 export interface Slot0 {
   address: Address;
@@ -140,6 +141,69 @@ export async function getTickData(
     feeGrowthOutside0X128: BigInt(result[2]),
     feeGrowthOutside1X128: BigInt(result[3]),
   };
+}
+
+/**
+ * Compute unclaimed fees for a position.
+ *
+ * Fetches tick data for the position's lower and upper ticks, calculates
+ * fee growth inside the range, and returns the unclaimed fees in human-readable
+ * format (float, not bigint).
+ *
+ * On any error (RPC failure, calculation error, etc.), silently returns
+ * { fees0: 0, fees1: 0 } to match the behavior of existing call sites.
+ */
+export async function computeUnclaimedFees(
+  client: Client,
+  poolAddress: Address,
+  pos: {
+    tickLower: number;
+    tickUpper: number;
+    liquidity: bigint;
+    feeGrowthInside0LastX128: bigint;
+    feeGrowthInside1LastX128: bigint;
+    tokensOwed0: bigint;
+    tokensOwed1: bigint;
+  },
+  poolState: PoolState,
+  token0Decimals: number,
+  token1Decimals: number,
+): Promise<{ fees0: number; fees1: number }> {
+  try {
+    const [tickLowerData, tickUpperData] = await Promise.all([
+      getTickData(client, poolAddress, pos.tickLower),
+      getTickData(client, poolAddress, pos.tickUpper),
+    ]);
+
+    const feeGrowthInside = calculateFeeGrowthInside(
+      pos.tickLower,
+      pos.tickUpper,
+      poolState.tick,
+      poolState.feeGrowthGlobal0X128,
+      poolState.feeGrowthGlobal1X128,
+      tickLowerData.feeGrowthOutside0X128,
+      tickLowerData.feeGrowthOutside1X128,
+      tickUpperData.feeGrowthOutside0X128,
+      tickUpperData.feeGrowthOutside1X128,
+    );
+
+    const feeResult = calculateUnclaimedFees(
+      pos.liquidity,
+      pos.feeGrowthInside0LastX128,
+      pos.feeGrowthInside1LastX128,
+      feeGrowthInside.feeGrowthInside0X128,
+      feeGrowthInside.feeGrowthInside1X128,
+      pos.tokensOwed0,
+      pos.tokensOwed1,
+      token0Decimals,
+      token1Decimals,
+    );
+
+    return feeResult;
+  } catch {
+    // Fees calculation may fail — leave as 0
+    return { fees0: 0, fees1: 0 };
+  }
 }
 
 export async function getTokenInfo(client: Client, tokenAddress: Address): Promise<TokenInfo> {

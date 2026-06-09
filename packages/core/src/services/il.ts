@@ -4,7 +4,7 @@ import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync
 import { computeUnclaimedFees, getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
-import { upsertPosition, getPosition } from "../db/store.js";
+import { getPosition } from "../db/store.js";
 import {
   calculateDivergenceLoss,
   deriveEntryPriceFromAmounts,
@@ -12,6 +12,7 @@ import {
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
+import { persistPositionEntry } from "./position-entry.js";
 
 export interface ILView {
   tokenId: string;
@@ -115,38 +116,22 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         );
         continue;
       }
-      if (openResult.status === "found") {
-        const openEvent = openResult.event;
-        entryAmount0 = openEvent.amount0;
-        entryAmount1 = openEvent.amount1;
-        // Derive entry price from actual deposit amounts (most accurate)
-        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-          openEvent.amount0,
-          openEvent.amount1,
-          openEvent.liquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
+       if (openResult.status === "found") {
+         const openEvent = openResult.event;
+         entryAmount0 = openEvent.amount0;
+         entryAmount1 = openEvent.amount1;
+         // Derive entry price from actual deposit amounts (most accurate)
+         entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
+           openEvent.amount0,
+           openEvent.amount1,
+           openEvent.liquidity,
+           pos.tickLower,
+           pos.tickUpper,
+         );
 
-        // Store for future use
-        upsertPosition({
-          token_id: pos.tokenId.toString(),
-          token0: pos.token0,
-          token1: pos.token1,
-          token0_symbol: token0Info.symbol,
-          token1_symbol: token1Info.symbol,
-          token0_decimals: token0Info.decimals,
-          token1_decimals: token1Info.decimals,
-          fee: pos.fee,
-          tick_lower: pos.tickLower,
-          tick_upper: pos.tickUpper,
-          entry_sqrt_price_x96: entrySqrtPriceX96.toString(),
-          entry_block: Number(openEvent.blockNumber),
-          entry_amount0: entryAmount0.toString(),
-          entry_amount1: entryAmount1.toString(),
-          entry_liquidity: openEvent.liquidity.toString(),
-        });
-      } else {
+         // Store for future use
+         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+       } else {
         // not_found — could not find entry — skip this position
         continue;
       }

@@ -4,12 +4,13 @@ import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync
 import { computeUnclaimedFees, getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
-import { upsertPosition, getPosition, insertSnapshot } from "../db/store.js";
+import { getPosition, insertSnapshot } from "../db/store.js";
 import {
   deriveEntryPriceFromAmounts,
   getTokenAmounts,
   sqrtPriceX96ToPrice,
 } from "../math/divergence-loss.js";
+import { persistPositionEntry } from "./position-entry.js";
 
 export interface SnapshotResult {
   tokenId: string;
@@ -99,36 +100,20 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         );
         continue;
       }
-      if (openResult.status === "found") {
-        const openEvent = openResult.event;
-        entryAmount0 = openEvent.amount0;
-        entryAmount1 = openEvent.amount1;
-        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-          openEvent.amount0,
-          openEvent.amount1,
-          openEvent.liquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
+       if (openResult.status === "found") {
+         const openEvent = openResult.event;
+         entryAmount0 = openEvent.amount0;
+         entryAmount1 = openEvent.amount1;
+         entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
+           openEvent.amount0,
+           openEvent.amount1,
+           openEvent.liquidity,
+           pos.tickLower,
+           pos.tickUpper,
+         );
 
-        upsertPosition({
-          token_id: pos.tokenId.toString(),
-          token0: pos.token0,
-          token1: pos.token1,
-          token0_symbol: token0Info.symbol,
-          token1_symbol: token1Info.symbol,
-          token0_decimals: token0Info.decimals,
-          token1_decimals: token1Info.decimals,
-          fee: pos.fee,
-          tick_lower: pos.tickLower,
-          tick_upper: pos.tickUpper,
-          entry_sqrt_price_x96: entrySqrtPriceX96.toString(),
-          entry_block: Number(openEvent.blockNumber),
-          entry_amount0: entryAmount0.toString(),
-          entry_amount1: entryAmount1.toString(),
-          entry_liquidity: openEvent.liquidity.toString(),
-        });
-      } else {
+         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+       } else {
         // not_found — use current price as fallback (matching original behavior)
         entrySqrtPriceX96 = poolState.sqrtPriceX96;
         const currentAmounts = getTokenAmounts(

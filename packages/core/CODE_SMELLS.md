@@ -1,6 +1,6 @@
 # Code Smell Analysis — `packages/core/src`
 
-> Generated: 2026-06-08 · Last audited: 2026-06-09
+> Generated: 2026-06-08 · Last audited: 2026-06-09 (updated 2026-06-09 post-refactor)
 
 ---
 
@@ -19,7 +19,7 @@ Entry resolution, exit resolution, fee calculation, USD pricing (with 2-level fa
 | 1 | HyperSync client construction block (6 lines, verbatim) | `il.ts:41`, `pnl.ts:95`, `snapshot.ts:25` |
 | 2 | `logsWindowBlocks` derivation | same 3 files |
 | 3 | `findOpenEvent` + error handling + `upsertPosition` block | `il.ts`, `pnl.ts` (3×), `snapshot.ts` |
-| 4 | `getHistoricalEurPrice` ≈ `getHistoricalUsdPrice` (~95% identical) | `pricing.ts:164–279` |
+| ~~4~~ | ~~`getHistoricalEurPrice` ≈ `getHistoricalUsdPrice` (~95% identical)~~ | **FIXED** — unified into `getHistoricalPrice(currency)` |
 | 5 | HyperSync pagination loop (paginate + timestamp join + dedup) | `hypersync.ts` × 3 functions |
 | 6 | LP entry builder token-field selection block | `tax-transactions.ts:241`, `291`, `341` |
 | 7 | `buildLpWithdrawalEntry` ≈ `buildLpFeeEntry` (~90% identical) | `tax-transactions.ts:283`, `333` |
@@ -79,9 +79,9 @@ This runs the moment any consumer imports `client.ts`, disabling TLS verificatio
 
 The "exit" prefix implies closure. For open positions these hold the *current* pool amounts.
 
-### Ticket IDs in production comments
+### ~~Ticket IDs in production comments~~
 
-`pnl.ts:321,424` contain `// (m2t5 fast path)` and `// (m2t4)`. These internal development ticket references are meaningless without an issue tracker and will confuse future maintainers.
+**FIXED** — `(m2t5 fast path)` and `(m2t4)` removed from `pnl.ts`.
 
 ---
 
@@ -104,9 +104,9 @@ The "exit" prefix implies closure. For open positions these hold the *current* p
 
 ## Medium — Inconsistent Patterns
 
-### Nullish checks
+### ~~Nullish checks~~
 
-`services/il.ts:67`, `pnl.ts:123`, `snapshot.ts:43` use `!== undefined && !== null`. The idiomatic equivalent is `!= null`. Other parts of the codebase use `?? null` correctly.
+~~`services/il.ts:67`, `pnl.ts:123`, `snapshot.ts:43` use `!== undefined && !== null`.~~ **FIXED** — all three sites now use `!= null`.
 
 ### Error logging prefix
 
@@ -122,7 +122,7 @@ Service files use `[lp-tracker]` prefix. `chain/events.ts` uses 4-space indent w
 
 | Issue | Location |
 |---|---|
-| `getHistoricalEurPrice`/`UsdPrice` write negative-cache in 3 separate branches per function | `pricing.ts:186–219` |
+| `getHistoricalPrice` writes negative-cache in 3 separate branches | `pricing.ts` |
 | `syncLpTaxFlows` silently converts RPC failures to `null` timestamps | `tax-transactions.ts:96–102` |
 | Some positions throw `NotFoundError`, others silently `continue` on `findOpenEvent` `not_found` — callers cannot predict which | `il.ts:59` vs `pnl.ts` |
 
@@ -137,7 +137,7 @@ Three levels of nesting with double try/catch:
 if (closed)
   if (usd prices stored) → use them
   else
-    try { getHistoricalUsdPrice } catch {}
+    try { getHistoricalPrice(..., "usd") } catch {}
     if (still null) try { getUsdPrices } catch {}
 else (active)
   try { getUsdPrices } catch {}
@@ -183,7 +183,7 @@ Fast-path and slow-path each branch again on `hyperSyncClient` presence, giving:
 | `-32005` | RPC rate-limit error code | `rpc.ts:51,54,68` |
 | `-32099` | RPC timeout error code | `client.ts:68` |
 | `30_000` | Transport timeout ms | `client.ts:32`, `hypersync.ts:38` (defined independently) |
-| `"https://hyperliquid.hypersync.xyz"` | HyperSync URL | `tax-transactions.ts:402` (should import `DEFAULT_HYPERSYNC_URL`) |
+| ~~`"https://hyperliquid.hypersync.xyz"`~~ | ~~HyperSync URL~~ | **FIXED** — `tax-transactions.ts` now imports `DEFAULT_HYPERSYNC_URL` |
 | `"YOUR_HYPERSYNC_API_TOKEN"` / `"YOUR_ETHERSCAN_API_KEY"` | Sentinel strings for unconfigured keys | `tax-transactions.ts:1045,1052–1053` |
 | `"ProjectX"` | Stale placeholder name in display output | `display/table.ts:83` |
 
@@ -194,10 +194,9 @@ Fast-path and slow-path each branch again on `hyperSyncClient` presence, giving:
 Listed by ROI (impact vs. effort):
 
 1. **Extract `persistPositionEntry(pos, openEvent, tokens)`** — eliminates 5 near-identical `upsertPosition` call sites
-2. **Unify `getHistoricalEurPrice` / `getHistoricalUsdPrice`** into `getHistoricalPrice(currency: "eur" | "usd")`
-3. **Extract `paginateHyperSync<T>()`** generic wrapper in `hypersync.ts` — removes ~100 lines
-4. **Decompose `getPnLView`** into `resolveEntryData`, `resolveExitData`, `resolveUsdPrices`
-5. **Add `toHumanAmount(raw, decimals)`** utility and `TICK_BASE` / `tickToAdjustedPrice` to math module
-6. **Split `db/store.ts`** into domain-scoped modules (`positions`, `snapshots`, `tax-transactions`, `caches`, `sync-state`)
-7. **Split `tax-transactions.ts`** into `lp-flows.ts`, `hypersync-normaliser.ts`, `explorer-sync.ts`, `eur-enrichment.ts`
-8. **Remove or gate the TLS-disable side effect** in `client.ts:9`
+2. **Extract `paginateHyperSync<T>()`** generic wrapper in `hypersync.ts` — removes ~100 lines
+3. **Decompose `getPnLView`** into `resolveEntryData`, `resolveExitData`, `resolveUsdPrices`
+4. **Add `toHumanAmount(raw, decimals)`** utility and `TICK_BASE` / `tickToAdjustedPrice` to math module
+5. **Split `db/store.ts`** into domain-scoped modules (`positions`, `snapshots`, `tax-transactions`, `caches`, `sync-state`)
+6. **Split `tax-transactions.ts`** into `lp-flows.ts`, `hypersync-normaliser.ts`, `explorer-sync.ts`, `eur-enrichment.ts`
+7. **Remove or gate the TLS-disable side effect** in `client.ts:9`

@@ -12,6 +12,7 @@ import {
   getTokenAmounts,
 } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
+import { persistPositionEntry } from "./position-entry.js";
 import { getHistoricalPrice, getUsdPrices } from "./pricing.js";
 
 export interface PnLView {
@@ -185,33 +186,9 @@ export async function getPnLView(
         entryLiquidity = openEvent.liquidity;
 
         // Persist entry data + open_tx if not already stored
-        if (!hasStoredEntry || !storedPos?.open_tx) {
-          const entrySqrtPrice = deriveEntryPriceFromAmounts(
-            entryAmount0,
-            entryAmount1,
-            entryLiquidity,
-            pos.tickLower,
-            pos.tickUpper,
-          );
-          upsertPosition({
-            token_id: pos.tokenId.toString(),
-            token0: pos.token0,
-            token1: pos.token1,
-            token0_symbol: token0Info.symbol,
-            token1_symbol: token1Info.symbol,
-            token0_decimals: token0Info.decimals,
-            token1_decimals: token1Info.decimals,
-            fee: pos.fee,
-            tick_lower: pos.tickLower,
-            tick_upper: pos.tickUpper,
-            entry_sqrt_price_x96: entrySqrtPrice.toString(),
-            entry_block: Number(openEvent.blockNumber),
-            entry_amount0: entryAmount0.toString(),
-            entry_amount1: entryAmount1.toString(),
-            entry_liquidity: entryLiquidity.toString(),
-            open_tx: openEvent.transactionHash,
-          });
-        }
+         if (!hasStoredEntry || !storedPos?.open_tx) {
+           persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+         }
       } else {
         // not_found — could not resolve entry from config tx — skip this position
         continue;
@@ -257,31 +234,7 @@ export async function getPnLView(
         entryLiquidity = openEvent.liquidity;
 
         // Store entry data + open_tx for future use
-        const entrySqrtPrice = deriveEntryPriceFromAmounts(
-          entryAmount0,
-          entryAmount1,
-          entryLiquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
-        upsertPosition({
-          token_id: pos.tokenId.toString(),
-          token0: pos.token0,
-          token1: pos.token1,
-          token0_symbol: token0Info.symbol,
-          token1_symbol: token1Info.symbol,
-          token0_decimals: token0Info.decimals,
-          token1_decimals: token1Info.decimals,
-          fee: pos.fee,
-          tick_lower: pos.tickLower,
-          tick_upper: pos.tickUpper,
-          entry_sqrt_price_x96: entrySqrtPrice.toString(),
-          entry_block: Number(openEvent.blockNumber),
-          entry_amount0: entryAmount0.toString(),
-          entry_amount1: entryAmount1.toString(),
-          entry_liquidity: entryLiquidity.toString(),
-          open_tx: openEvent.transactionHash,
-        });
+         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
       } else {
         // not_found — could not find entry — skip this position
         continue;

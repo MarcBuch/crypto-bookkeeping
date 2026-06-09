@@ -3,6 +3,7 @@ import type { HypersyncClient } from "@envio-dev/hypersync-client";
 import { createClient, type Client } from "../chain/client.js";
 import {
   createHyperSyncClient,
+  DEFAULT_HYPERSYNC_URL,
   fetchTransactionsByAddress,
   fetchTokenTransfersByAddress,
   type HyperSyncTransaction,
@@ -20,7 +21,7 @@ import {
   type StoredPosition,
   type SyncedTaxTransaction,
 } from "../db/store.js";
-import { getHistoricalEurPrice } from "./pricing.js";
+import { getHistoricalPrice } from "./pricing.js";
 
 const DEFAULT_EXPLORER_API_URL = "https://www.hyperscan.com/api";
 const DEFAULT_EXPLORER_CHAIN_ID = 999;
@@ -399,7 +400,7 @@ export async function syncTaxTransactions(
 
   // ── HyperSync path: txlist + tokentx + tokennfttx ─────────────────────────
   const hyperSyncUrl =
-    config.tax?.hyperSyncUrl ?? config.hyperSync?.url ?? "https://hyperliquid.hypersync.xyz";
+    config.tax?.hyperSyncUrl ?? config.hyperSync?.url ?? DEFAULT_HYPERSYNC_URL;
   const hyperSyncApiToken =
     normalizedHyperSyncApiToken(config.tax?.hyperSyncApiToken) ??
     normalizedHyperSyncApiToken(config.hyperSync?.apiToken);
@@ -683,7 +684,7 @@ export async function enrichTaxTransactionsEurValues(
         continue;
       }
 
-      const price = await getHistoricalEurPrice(config, asset, row.timestamp);
+      const price = await getHistoricalPrice(config, asset, row.timestamp, "eur");
 
       if (price === null) {
         skipped += 1;
@@ -732,7 +733,7 @@ async function enrichTaxTransactionsWithEurValues(
       const sep = key.indexOf("\0");
       const asset = key.slice(0, sep);
       const timestamp = key.slice(sep + 1);
-      const price = await getHistoricalEurPrice(config, asset, timestamp);
+      const price = await getHistoricalPrice(config, asset, timestamp, "eur");
       priceMap.set(key, price);
     }),
   );

@@ -14,11 +14,11 @@ import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
 // ---------------------------------------------------------------------------
 
 let mockGetUsdPrices: (..._args: unknown[]) => unknown = async () => ({});
-let mockGetHistoricalUsdPrice: (..._args: unknown[]) => unknown = async () => null;
+let mockGetHistoricalPrice: (..._args: unknown[]) => unknown = async () => null;
 
 mock.module("../services/pricing.js", () => ({
   getUsdPrices: (...args: unknown[]) => mockGetUsdPrices(...args),
-  getHistoricalUsdPrice: (...args: unknown[]) => mockGetHistoricalUsdPrice(...args),
+  getHistoricalPrice: (...args: unknown[]) => mockGetHistoricalPrice(...args),
 }));
 
 let mockGetBlock: (_args: {
@@ -191,7 +191,7 @@ useTestDb();
 
 beforeEach(() => {
   mockGetUsdPrices = async () => ({});
-  mockGetHistoricalUsdPrice = async () => null;
+  mockGetHistoricalPrice = async () => null;
   mockGetBlock = async () => ({ timestamp: 1700000000n });
 });
 
@@ -217,7 +217,7 @@ describe("active positions → live USD pricing via getUsdPrices", () => {
         [TOKEN1_ADDR.toLowerCase()]: 1.0,
       };
     };
-    mockGetHistoricalUsdPrice = async () => {
+    mockGetHistoricalPrice = async () => {
       historicalCallCount++;
       return 999.0;
     };
@@ -265,7 +265,7 @@ describe("closed positions with close_block → historical USD pricing", () => {
       liveCallCount++;
       return {};
     };
-    mockGetHistoricalUsdPrice = async () => {
+    mockGetHistoricalPrice = async () => {
       historicalCallCount++;
       return 999.0;
     };
@@ -284,7 +284,7 @@ describe("closed positions with close_block → historical USD pricing", () => {
 
     // Timestamp 1700000000 unix → "2023-11-14T22:13:20.000Z"
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       if (symbol === "TKN0") return 100.0;
       if (symbol === "TKN1") return 2.5;
       return null;
@@ -301,7 +301,7 @@ describe("closed positions with close_block → historical USD pricing", () => {
     upsertPosition(storedWithClose); // no close_usd_price0/1
 
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       if (symbol === "TKN0") return 100.0;
       if (symbol === "TKN1") return 2.5;
       return null;
@@ -319,7 +319,7 @@ describe("closed positions with close_block → historical USD pricing", () => {
 
     let historicalCallCount = 0;
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       historicalCallCount++;
       if (symbol === "TKN0") return 100.0;
       if (symbol === "TKN1") return 2.5;
@@ -357,7 +357,7 @@ describe("closed positions with close_block → historical USD pricing", () => {
     upsertPosition(storedWithClose);
 
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async () => null;
+    mockGetHistoricalPrice = async () => null;
 
     const result = await getPnLView(baseConfig, undefined, [fakeClosedPos]);
 
@@ -391,9 +391,9 @@ describe("closed positions without close_block → live pricing fallback", () =>
       liveCallCount++;
       return {};
     };
-    mockGetHistoricalUsdPrice = async () => {
+    mockGetHistoricalPrice = async () => {
       historicalCallCount++;
-      return 99.0;
+      return 999.0;
     };
 
     await getPnLView(baseConfig, undefined, [fakeClosedPos]);
@@ -419,7 +419,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
     let historicalCallCount = 0;
 
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       historicalCallCount++;
       if (symbol === "TKN0") return 100.0;
       if (symbol === "TKN1") return 2.5;
@@ -454,7 +454,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
         [TOKEN1_ADDR.toLowerCase()]: 999.0,
       };
     };
-    mockGetHistoricalUsdPrice = async () => {
+    mockGetHistoricalPrice = async () => {
       historicalCallCount++;
       return 999.0;
     };
@@ -486,7 +486,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
         [TOKEN1_ADDR.toLowerCase()]: 1.0,
       };
     };
-    mockGetHistoricalUsdPrice = async () => {
+    mockGetHistoricalPrice = async () => {
       historicalCallCount++;
       return 999.0;
     };
@@ -519,7 +519,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
         [TOKEN1_ADDR.toLowerCase()]: 999.0,
       };
     };
-    mockGetHistoricalUsdPrice = async () => {
+    mockGetHistoricalPrice = async () => {
       historicalCallCount++;
       return 999.0;
     };
@@ -545,7 +545,7 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
     upsertPosition(storedWithClose);
 
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       if (symbol === "TKN0") return null; // token0 price is null
       if (symbol === "TKN1") return 3.14; // token1 price is valid
       return null;
@@ -564,7 +564,7 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
     upsertPosition(storedWithClose);
 
     mockGetBlock = async () => ({ timestamp: 1700000000n });
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       if (symbol === "TKN0") return 100.0;
       if (symbol === "TKN1") return 2.5;
       return null;
@@ -584,7 +584,7 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
     upsertPosition(storedWithClose);
 
     mockGetBlock = async () => ({ timestamp: 0n });
-    mockGetHistoricalUsdPrice = async (_config, symbol, isoTimestamp) => {
+    mockGetHistoricalPrice = async (_config, symbol, isoTimestamp) => {
       // Verify the ISO timestamp is well-formed (not crashing)
       expect(isoTimestamp).toBe("1970-01-01T00:00:00.000Z");
       if (symbol === "TKN0") return 50.0;
@@ -614,7 +614,7 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
       getBlockBlockNumber = args.blockNumber;
       return { timestamp: 1700000000n };
     };
-    mockGetHistoricalUsdPrice = async (_config, symbol) => {
+    mockGetHistoricalPrice = async (_config, symbol) => {
       if (symbol === "TKN0") return 75.0;
       if (symbol === "TKN1") return 2.0;
       return null;

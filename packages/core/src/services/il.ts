@@ -62,7 +62,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
   // Number of blocks to scan back when discovering events (window size).
   // undefined → findOpenEvent/findCloseEvent use their 30-day default.
   const logsWindowBlocks =
-    config.logsFromBlock !== undefined && config.logsFromBlock !== null
+    config.logsFromBlock != null
       ? BigInt(config.logsFromBlock)
       : undefined;
 

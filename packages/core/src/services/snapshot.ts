@@ -38,7 +38,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
   // Number of blocks to scan back when discovering events (window size).
   // undefined → findOpenEvent uses its 30-day default.
   const logsWindowBlocks =
-    config.logsFromBlock !== undefined && config.logsFromBlock !== null
+    config.logsFromBlock != null
       ? BigInt(config.logsFromBlock)
       : undefined;
 

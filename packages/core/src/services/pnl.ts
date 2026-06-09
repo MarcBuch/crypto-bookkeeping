@@ -12,7 +12,7 @@ import {
   getTokenAmounts,
 } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-import { getHistoricalUsdPrice, getUsdPrices } from "./pricing.js";
+import { getHistoricalPrice, getUsdPrices } from "./pricing.js";
 
 export interface PnLView {
   tokenId: string;
@@ -118,7 +118,7 @@ export async function getPnLView(
   // logsFromBlock is the number of blocks to scan back (window size), matching
   // the events.ts windowBlocks parameter. undefined → events.ts uses its default.
   const logsWindowBlocks =
-    config.logsFromBlock !== undefined && config.logsFromBlock !== null
+    config.logsFromBlock != null
       ? BigInt(config.logsFromBlock)
       : undefined;
 
@@ -318,7 +318,7 @@ export async function getPnLView(
       feesCollected0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
       feesCollected1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
     } else {
-      // Closed position: use cached exit data if available (m2t5 fast path)
+      // Closed position: use cached exit data if available
       const hasCachedExit =
         storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
 
@@ -421,8 +421,8 @@ export async function getPnLView(
             }
           }
 
-          // Persist close data for future fast-path use (m2t4)
-          upsertPosition({
+           // Persist close data for future fast-path use
+           upsertPosition({
             token_id: pos.tokenId.toString(),
             token0: pos.token0,
             token1: pos.token1,
@@ -486,10 +486,10 @@ export async function getPnLView(
         try {
           const block = await client.getBlock({ blockNumber: BigInt(storedPos!.close_block!) });
           const isoTimestamp = new Date(Number(block.timestamp * 1000n)).toISOString();
-          [token0UsdPrice, token1UsdPrice] = await Promise.all([
-            getHistoricalUsdPrice(config, t0sym, isoTimestamp),
-            getHistoricalUsdPrice(config, t1sym, isoTimestamp),
-          ]);
+           [token0UsdPrice, token1UsdPrice] = await Promise.all([
+             getHistoricalPrice(config, t0sym, isoTimestamp, "usd"),
+             getHistoricalPrice(config, t1sym, isoTimestamp, "usd"),
+           ]);
           // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
           upsertPosition({
             ...storedPos!,

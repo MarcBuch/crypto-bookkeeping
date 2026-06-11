@@ -278,8 +278,8 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
       <DarkStat label="Balance" value={balance == null ? "USD unavailable" : formatUsd(balance)} />
       <DarkStat
         label="Pending Earnings"
-        value={formatUsdFeeValue(pnl?.feesValueUsd)}
-        detail={pnl ? `Fees ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}` : undefined}
+        value={pnl ? `${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
+        detail={pnl?.feesValueUsd != null ? formatUsdFeeValue(pnl.feesValueUsd) : undefined}
       />
       <DarkStat
         label="ROI"

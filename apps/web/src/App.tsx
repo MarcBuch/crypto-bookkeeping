@@ -285,18 +285,14 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         label="ROI"
         value={pnl ? formatPercent(pnl.absolutePnlPercent) : "n/a"}
         valueClassName={pnl ? darkToneClass(pnl.absolutePnlPercent) : undefined}
-        tooltip={
+        detail={
           pnl
-            ? [
-                `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`,
-                pnl.token1UsdPrice != null
-                  ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)
-                  : null,
-              ]
-                .filter(Boolean)
-                .join("\n")
+            ? pnl.token1UsdPrice != null
+              ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)
+              : `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`
             : undefined
         }
+        tooltip={pnl ? "Gain/loss vs entry value, fees included." : undefined}
       />
 
       <div className="min-w-0 font-mono text-xs font-bold">

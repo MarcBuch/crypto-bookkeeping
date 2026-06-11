@@ -1,0 +1,51 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "litellm/claude-sonnet-4.6",
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
+      "options": {
+        "baseURL": "http://localhost:8787/v1",
+        "apiKey": "smallweiner"
+      },
+      "models": {
+        "gpt-4o": {
+          "name": "GPT-4o",
+          "tool_call": true,
+          "attachment": true
+        },
+        "gpt-4.1": {
+          "name": "GPT-4.1",
+          "tool_call": true,
+          "attachment": true
+        },
+        "claude-sonnet-4": {
+          "name": "Claude Sonnet 4",
+          "tool_call": true,
+          "attachment": true
+        },
+        "claude-sonnet-4.5": {
+          "name": "Claude Sonnet 4.5",
+          "tool_call": true,
+          "attachment": true
+        },
+        "claude-sonnet-4.6": {
+          "name": "Claude Sonnet 4.6",
+          "tool_call": true,
+          "attachment": true
+        },
+        "claude-haiku-4.5": {
+          "name": "Claude Haiku 4.5",
+          "tool_call": true,
+          "attachment": true
+        },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro",
+          "tool_call": true,
+          "attachment": true
+        }
+      }
+    }
+  }
+}

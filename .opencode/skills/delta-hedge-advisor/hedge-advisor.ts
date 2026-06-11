@@ -91,8 +91,11 @@ interface HedgeReport {
   annualizedFeeYield: number; // as decimal
 
   // Delta
-  hypeExposure: number; // in HYPE tokens
+  hypeExposure: number;             // current HYPE in LP
   hypeNotionalUsd: number;
+  liquidityConstant: number;        // V3 L — used for gamma-aware sizing
+  hypeExposureAtLowerBound: number; // max HYPE if price reaches lower bound
+  hypeExposureAtUpperBound: number; // min HYPE if price reaches upper bound (= 0)
 
   // Funding
   hourlyFundingRate: number;
@@ -105,10 +108,35 @@ interface HedgeReport {
   driftVolRatio: number;
   regime: string;
 
-  // Verdict
+  // Verdict (fee-optimisation framing)
   verdict: "no-hedge" | "consider-hedge" | "hedge-recommended";
   verdictReason: string;
   hedgeBreakEvenDays: number | null;
+
+  // Capital preservation framing
+  dailyIlRate: number;                // USD of IL accumulating per day
+  hedgeCostToIlRatio: number;         // daily hedge cost / daily IL rate  (<1 means hedge is cheap vs IL)
+  downsideScenarios: {
+    dropPct: number;                  // e.g. 0.10 = 10% drop
+    deltaLossUsd: number;             // directional loss on HYPE notional
+    hedgeCarryToDateUsd: number;      // cost of hedge to reach that scenario (assume 7 days)
+  }[];
+  upsideScenarios: {
+    risePct: number;                  // e.g. 0.10 = 10% rise
+    newPrice: number;
+    lpHypeAtPrice: number;            // HYPE remaining in LP at that price (V3 gamma)
+    shortLossUsd: number;             // mark-to-market loss on recommended short
+    overhedgeHype: number;            // how many HYPE the short exceeds LP delta
+    fees7dUsd: number;                // 7d fee income
+    net7dUsd: number;                 // fees7d - shortLoss (+ funding)
+  }[];
+  recommendedHedgeHype: number;       // suggested short size (V3-aware)
+  recommendedHedgeReason: string;
+  hedgeCloseTriggerPrice: number;     // close short if price reaches this
+  hedgeReduceTriggerPrice: number;    // reduce to 50% if price reaches this
+  hedgeCloseTriggerReason: string;
+  capitalPreservationVerdict: "no-hedge" | "consider-hedge" | "hedge-recommended";
+  capitalPreservationReason: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -147,7 +175,7 @@ async function fetchFundingRate(coin: string): Promise<number> {
   return parseFloat(data[1][idx].funding);
 }
 
-async function fetchDriftVolRatio(coinId: string): Promise<{ ratio: number; regime: string }> {
+async function fetchDriftVolRatio(coinId: string): Promise<{ ratio: number; regime: string; pct7dChange: number }> {
   const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=31&interval=daily`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
@@ -162,7 +190,14 @@ async function fetchDriftVolRatio(coinId: string): Promise<{ ratio: number; regi
   const vol = Math.sqrt(variance);
   const ratio = vol > 0 ? Math.abs(mean) / vol : 0;
   const regime = ratio < 0.5 ? "range-bound" : ratio <= 1.0 ? "mild-trend" : "strong-trend";
-  return { ratio, regime };
+
+  // 7-day price change from last 8 prices
+  const last8 = prices.slice(-8);
+  const pct7dChange = last8.length >= 2
+    ? ((last8[last8.length - 1] - last8[0]) / last8[0]) * 100
+    : 0;
+
+  return { ratio, regime, pct7dChange };
 }
 
 async function fetchOpenTimestamp(tokenId: string): Promise<number | null> {
@@ -253,6 +288,170 @@ function verdictFromSignals(
   };
 }
 
+/**
+ * Capital preservation verdict — asks whether downside delta risk justifies hedge carry cost.
+ *
+ * Logic:
+ *   - If a -20% HYPE move would cost >10× the 7-day hedge carry → hedge is cheap insurance → recommend
+ *   - If hedge cost < daily IL accumulation rate → hedge is cheaper per day than the IL you're already taking → recommend
+ *   - If 7d price trend is bearish (pct7d < -5%) AND notional > $500 → consider
+ *   - Otherwise no-hedge
+ */
+function capitalPreservationVerdictFn(
+  hypeNotionalUsd: number,
+  dailyFundingCost: number,
+  dailyIlRate: number,
+  pct7dChange: number,
+  downsideScenarios: HedgeReport["downsideScenarios"],
+): { verdict: HedgeReport["capitalPreservationVerdict"]; reason: string } {
+  const scenario20 = downsideScenarios.find((s) => s.dropPct === 0.20);
+  const hedgeCarry7d = dailyFundingCost * 7;
+
+  // Hedge is trivially cheap: 7-day carry covers less than 10% of a -20% scenario loss
+  if (scenario20 && hedgeCarry7d > 0 && scenario20.deltaLossUsd / hedgeCarry7d > 10) {
+    return {
+      verdict: "hedge-recommended",
+      reason:
+        `A -20% HYPE drop would cost ${usdFmt(scenario20.deltaLossUsd)} vs ${usdFmt(hedgeCarry7d)} hedge carry over 7 days ` +
+        `(${(scenario20.deltaLossUsd / hedgeCarry7d).toFixed(0)}× ratio). Hedge is cheap insurance for capital preservation.`,
+    };
+  }
+
+  // Hedge costs less per day than IL is already accumulating
+  if (dailyIlRate > 0 && dailyFundingCost < dailyIlRate) {
+    return {
+      verdict: "hedge-recommended",
+      reason:
+        `Daily hedge carry (${usdFmt(dailyFundingCost)}) < daily IL rate (${usdFmt(dailyIlRate)}). ` +
+        `Hedge is cheaper per day than the divergence loss already accumulating.`,
+    };
+  }
+
+  // Bearish 7d momentum + meaningful notional
+  if (pct7dChange < -5 && hypeNotionalUsd > 500) {
+    return {
+      verdict: "consider-hedge",
+      reason:
+        `HYPE is down ${Math.abs(pct7dChange).toFixed(1)}% over 7 days with ${usdFmt(hypeNotionalUsd)} notional at risk. ` +
+        `Consider a 50% delta short to limit downside without fully paying hedge carry.`,
+    };
+  }
+
+  return {
+    verdict: "no-hedge",
+    reason:
+      `Downside scenarios are within acceptable range relative to hedge carry cost. ` +
+      `No capital preservation case for hedge at this time.`,
+  };
+}
+
+// Formatting helper used inside verdict functions (defined early for reuse)
+function usdFmt(n: number): string {
+  return "$" + n.toFixed(2);
+}
+
+// ─── V3 Gamma helpers ────────────────────────────────────────────────────────
+
+/**
+ * Compute V3 liquidity constant L from current HYPE amount and price bounds.
+ *   amount0 = L * (1/sqrt(P) - 1/sqrt(Pb))
+ *   → L = amount0 / (1/sqrt(P) - 1/sqrt(Pb))
+ */
+function v3Liquidity(amount0: number, P: number, Pb: number): number {
+  return amount0 / (1 / Math.sqrt(P) - 1 / Math.sqrt(Pb));
+}
+
+/**
+ * HYPE amount in LP at a given price (still in range: Pa < P < Pb).
+ *   amount0 = L * (1/sqrt(P) - 1/sqrt(Pb))
+ * Returns 0 if price is at or above upper bound.
+ */
+function v3HypeAtPrice(L: number, P: number, Pa: number, Pb: number): number {
+  if (P >= Pb) return 0;
+  if (P <= Pa) return L * (1 / Math.sqrt(Pa) - 1 / Math.sqrt(Pb));
+  return L * (1 / Math.sqrt(P) - 1 / Math.sqrt(Pb));
+}
+
+/**
+ * Recommended hedge size: largest short where the close trigger (price at which
+ * 7-day fees+funding = total short loss) is at or above the LP entry price.
+ *
+ * Logic:
+ *   close trigger = currentPrice + (dailyIncome7d / hedgeHype)
+ *   We want: closeTrigger >= entryPrice
+ *   → hedgeHype <= dailyIncome7d / (entryPrice - currentPrice)
+ *
+ * If entryPrice <= currentPrice (price has risen above entry), fall back to
+ * 50% of current delta as a conservative floor.
+ *
+ * Also caps at 50% of lower-bound exposure to avoid over-hedging the gamma.
+ */
+function recommendedHedgeSize(
+  hypeAtLower: number,
+  currentHype: number,
+  currentPrice: number,
+  entryPrice: number,
+  dailyFeeUsd: number,
+  dailyFundingRate: number,
+): { hype: number; reason: string } {
+  const income7d = (dailyFeeUsd + currentHype * currentPrice * dailyFundingRate) * 7;
+  const priceGapToEntry = entryPrice - currentPrice;
+
+  let target: number;
+  let reason: string;
+
+  if (priceGapToEntry > 0) {
+    // Size so that close trigger lands at LP entry price
+    const maxByUpside = income7d / priceGapToEntry;
+    const maxByGamma = hypeAtLower * 0.5;
+    target = Math.min(maxByUpside, maxByGamma);
+    reason =
+      `Sized so close trigger falls at LP entry price ${usdFmt(entryPrice)} — the natural "thesis invalidated" level. ` +
+      `Max by upside constraint: ${maxByUpside.toFixed(1)} HYPE. ` +
+      `Max by gamma (50% of lower-bound exposure ${hypeAtLower.toFixed(1)} HYPE): ${maxByGamma.toFixed(1)} HYPE. ` +
+      `Using the smaller: ${Math.round(target * 10) / 10} HYPE.`;
+  } else {
+    // Price already above entry — use conservative 30% of current delta
+    target = currentHype * 0.3;
+    reason =
+      `Price is above LP entry — upside trend may be resuming. ` +
+      `Conservative 30% of current delta (${currentHype.toFixed(1)} HYPE) = ${target.toFixed(1)} HYPE.`;
+  }
+
+  return {
+    hype: Math.round(Math.max(target, 1) * 10) / 10,
+    reason,
+  };
+}
+
+/**
+ * Hedge close trigger: price at which 7-day fees+funding = total short loss.
+ * Beyond this price the short is draining more than income can recover in a week.
+ * Also returns a reduce trigger at half that distance.
+ */
+function hedgeTriggers(
+  currentPrice: number,
+  recommendedHype: number,
+  dailyFeeUsd: number,
+  dailyFundingRate: number,
+): { closePrice: number; reducePrice: number; reason: string } {
+  const notional = recommendedHype * currentPrice;
+  const dailyIncome = dailyFeeUsd + notional * dailyFundingRate;
+  const income7d = dailyIncome * 7;
+  // income7d = notional * movePct → movePct = income7d / notional
+  const closeMovePct = income7d / notional;
+  const closePrice = currentPrice * (1 + closeMovePct);
+  const reducePrice = currentPrice * (1 + closeMovePct / 2);
+  return {
+    closePrice: Math.round(closePrice * 100) / 100,
+    reducePrice: Math.round(reducePrice * 100) / 100,
+    reason:
+      `Close at ${usdFmt(closePrice)} (+${(closeMovePct * 100).toFixed(1)}% from current): ` +
+      `7-day income (${usdFmt(income7d)}) equals total short loss at that price. ` +
+      `Reduce to 50% at ${usdFmt(reducePrice)} (+${(closeMovePct / 2 * 100).toFixed(1)}%).`,
+  };
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -270,7 +469,7 @@ async function main() {
   const perpSymbol = pos.token0Symbol.replace(/^W/, "");
   const cgId = perpSymbol === "HYPE" ? "hyperliquid" : perpSymbol.toLowerCase();
 
-  const [fundingRate, { ratio: driftVolRatio, regime }, openTs] = await Promise.all([
+  const [fundingRate, { ratio: driftVolRatio, regime, pct7dChange }, openTs] = await Promise.all([
     fetchFundingRate(perpSymbol),
     fetchDriftVolRatio(cgId),
     fetchOpenTimestamp(pos.tokenId),
@@ -283,6 +482,11 @@ async function main() {
   const currentPrice = pos.exitPrice;
   const hypeExposure = pos.exitAmount0;
   const hypeNotionalUsd = hypeExposure * currentPrice;
+
+  // V3 liquidity constant and gamma-aware exposure bounds
+  const liquidityConstant = v3Liquidity(hypeExposure, currentPrice, pos.priceUpper);
+  const hypeExposureAtLowerBound = v3HypeAtPrice(liquidityConstant, pos.priceLower, pos.priceLower, pos.priceUpper);
+  const hypeExposureAtUpperBound = 0; // all HYPE sold by the time price reaches upper bound
 
   // IL in USD (opportunity cost)
   const ilUsd = Math.abs(pos.opportunityCostInToken1);
@@ -307,6 +511,57 @@ async function main() {
   // Hedge break-even: how many days until funding earned = IL
   const hedgeBreakEvenDays =
     dailyFundingEarned > 0 ? ilUsd / dailyFundingEarned : null;
+
+  // ── Capital preservation metrics ──────────────────────────────────────────
+  // Daily IL rate: IL accumulated per day (not the same as fee run rate)
+  const dailyIlRate = daysOpen && daysOpen > 0 ? ilUsd / daysOpen : 0;
+
+  // Daily funding cost of a FULL delta hedge.
+  // When funding is positive (longs pay shorts), a short position *earns* funding —
+  // so the carry "cost" is actually negative (the hedge pays you).
+  // We use dailyFundingEarned as the carry figure; it becomes the cost only if
+  // funding flips negative (shorts pay longs). The capital preservation logic below
+  // assumes positive funding; if annualizedFundingRate turns negative the hedge carry
+  // flips sign and the recommendations should be treated as conservative.
+  const dailyHedgeCost = dailyFundingEarned; // symmetric — earn funding while short (positive-funding assumption)
+
+  const hedgeCostToIlRatio = dailyIlRate > 0 ? dailyHedgeCost / dailyIlRate : Infinity;
+
+  // Downside scenarios: how much notional delta loss at -10%, -20%, -30%
+  const SCENARIO_DROPS = [0.10, 0.20, 0.30];
+  const downsideScenarios = SCENARIO_DROPS.map((dropPct) => ({
+    dropPct,
+    deltaLossUsd: hypeNotionalUsd * dropPct,
+    hedgeCarryToDateUsd: dailyHedgeCost * 7, // 7-day carry as reference horizon
+  }));
+
+  // Upside scenarios: LP sheds HYPE as price rises — short becomes overhedged
+  const { hype: recommendedHedgeHype, reason: recommendedHedgeReason } =
+    recommendedHedgeSize(hypeExposureAtLowerBound, hypeExposure, currentPrice, pos.entryPrice, dailyFeeUsd ?? 0, dailyFundingRate);
+
+  const SCENARIO_RISES = [0.05, 0.10, 0.15, 0.20];
+  const upsideScenarios = SCENARIO_RISES.map((risePct) => {
+    const newPrice = currentPrice * (1 + risePct);
+    const lpHypeAtPrice = v3HypeAtPrice(liquidityConstant, newPrice, pos.priceLower, pos.priceUpper);
+    const shortLossUsd = recommendedHedgeHype * currentPrice * risePct;
+    const overhedgeHype = recommendedHedgeHype - lpHypeAtPrice;
+    const fees7dUsd = (dailyFeeUsd ?? 0) * 7;
+    const funding7dUsd = recommendedHedgeHype * currentPrice * dailyFundingRate * 7;
+    const net7dUsd = fees7dUsd + funding7dUsd - shortLossUsd;
+    return { risePct, newPrice, lpHypeAtPrice, shortLossUsd, overhedgeHype, fees7dUsd, net7dUsd };
+  });
+
+  const { closePrice: hedgeCloseTriggerPrice, reducePrice: hedgeReduceTriggerPrice, reason: hedgeCloseTriggerReason } =
+    hedgeTriggers(currentPrice, recommendedHedgeHype, dailyFeeUsd ?? 0, dailyFundingRate);
+
+  const { verdict: capitalPreservationVerdict, reason: capitalPreservationReason } =
+    capitalPreservationVerdictFn(
+      hypeNotionalUsd,
+      dailyHedgeCost,
+      dailyIlRate,
+      pct7dChange,
+      downsideScenarios,
+    );
 
   const { verdict, reason: verdictReason } = verdictFromSignals(
     ilUsd,
@@ -335,6 +590,9 @@ async function main() {
     annualizedFeeYield,
     hypeExposure,
     hypeNotionalUsd,
+    liquidityConstant,
+    hypeExposureAtLowerBound,
+    hypeExposureAtUpperBound,
     hourlyFundingRate: fundingRate,
     dailyFundingRate,
     annualizedFundingRate,
@@ -345,6 +603,17 @@ async function main() {
     verdict,
     verdictReason,
     hedgeBreakEvenDays,
+    dailyIlRate,
+    hedgeCostToIlRatio,
+    downsideScenarios,
+    upsideScenarios,
+    recommendedHedgeHype,
+    recommendedHedgeReason,
+    hedgeCloseTriggerPrice,
+    hedgeReduceTriggerPrice,
+    hedgeCloseTriggerReason,
+    capitalPreservationVerdict,
+    capitalPreservationReason,
   };
 
   if (jsonMode) {
@@ -378,9 +647,15 @@ async function main() {
     );
   }
 
-  console.log("\n### Delta Exposure");
+  console.log("\n### Delta Exposure (V3 gamma-aware)");
   console.log(
-    `  ${perpSymbol} in LP:   ${report.hypeExposure.toFixed(2)} ${perpSymbol}  (${usd(report.hypeNotionalUsd)})`,
+    `  ${perpSymbol} now:          ${report.hypeExposure.toFixed(2)} ${perpSymbol}  (${usd(report.hypeNotionalUsd)})`,
+  );
+  console.log(
+    `  ${perpSymbol} at lower bound: ${report.hypeExposureAtLowerBound.toFixed(2)} ${perpSymbol}  (max exposure if price falls to ${usd(pos.priceLower)})`,
+  );
+  console.log(
+    `  ${perpSymbol} at upper bound: 0.00 ${perpSymbol}  (LP fully converted to USDC at ${usd(pos.priceUpper)})`,
   );
 
   console.log("\n### Funding Rate (Hyperliquid Perps)");
@@ -403,10 +678,51 @@ async function main() {
     console.log("  N/A");
   }
 
-  console.log("\n### Verdict");
+  console.log("\n### Capital Preservation");
+  console.log(`  Daily IL rate:         ${usd(report.dailyIlRate)}/day`);
+  console.log(`  Daily hedge carry:     ${usd(dailyHedgeCost)}/day`);
+  console.log(
+    `  Hedge cost / IL rate:  ${(report.hedgeCostToIlRatio * 100).toFixed(1)}%  ` +
+      `(${report.hedgeCostToIlRatio < 1 ? "hedge cheaper than IL" : "hedge costs more than IL"})`,
+  );
+
+  console.log(`\n  Downside scenarios (full delta at current ${hypeExposure.toFixed(1)} HYPE):`);
+  for (const s of report.downsideScenarios) {
+    console.log(
+      `    -${(s.dropPct * 100).toFixed(0)}%  →  delta loss ${usd(s.deltaLossUsd)}` +
+        `  vs  7-day carry ${usd(s.hedgeCarryToDateUsd)}` +
+        `  (${(s.deltaLossUsd / s.hedgeCarryToDateUsd).toFixed(0)}× ratio)`,
+    );
+  }
+
+  console.log(`\n  Recommended hedge: ${report.recommendedHedgeHype} ${perpSymbol} short`);
+  console.log(`  ${report.recommendedHedgeReason}`);
+
+  console.log(`\n  Upside scenarios (recommended ${report.recommendedHedgeHype} ${perpSymbol} short):`);
+  console.log(`  ${"rise".padEnd(6)}  ${"new price".padEnd(10)}  ${"LP HYPE".padEnd(9)}  ${"overhedge".padEnd(11)}  ${"short loss".padEnd(11)}  net (7d fees+funding-loss)`);
+  for (const s of report.upsideScenarios) {
+    console.log(
+      `  +${(s.risePct * 100).toFixed(0)}%`.padEnd(7) +
+      `  ${usd(s.newPrice).padEnd(10)}` +
+      `  ${s.lpHypeAtPrice.toFixed(1).padEnd(9)}` +
+      `  ${s.overhedgeHype.toFixed(1).padEnd(11)}` +
+      `  ${("-" + usd(s.shortLossUsd)).padEnd(11)}` +
+      `  ${s.net7dUsd >= 0 ? "+" : ""}${usd(s.net7dUsd)}`,
+    );
+  }
+
+  console.log(`\n  Close trigger:  ${usd(report.hedgeCloseTriggerPrice)}`);
+  console.log(`  Reduce trigger: ${usd(report.hedgeReduceTriggerPrice)}`);
+  console.log(`  ${report.hedgeCloseTriggerReason}`);
+
+  console.log("\n### Verdict (fee-optimisation)");
   const icons = { "no-hedge": "✗", "consider-hedge": "△", "hedge-recommended": "✓" };
   console.log(`  ${icons[verdict]}  ${verdict.toUpperCase()}`);
   console.log(`  ${verdictReason}`);
+
+  console.log("\n### Verdict (capital preservation)");
+  console.log(`  ${icons[report.capitalPreservationVerdict]}  ${report.capitalPreservationVerdict.toUpperCase()}`);
+  console.log(`  ${report.capitalPreservationReason}`);
   console.log();
 }
 

@@ -15,8 +15,10 @@ Combines all inputs needed to decide whether to place a delta hedge on an active
 Decision equation:
 ```
 Hedge worthwhile if:
-  expected_additional_IL > (funding_rate × notional × horizon) + friction
+  expected_additional_IL > (funding_rate × notional × horizon) + slippage_and_margin_cost
 ```
+In practice the script uses a signal table (regime + range proximity + IL/fee ratio) rather
+than solving this inequality directly — the equation is the conceptual frame.
 
 ## When to use
 
@@ -45,54 +47,128 @@ bun "$SKILL_DIR/hedge-advisor.ts" 484645 --json 2>/dev/null
   "tokenId": "484645",
   "pair": "WHYPE/USDC",
   "fetchedAt": "2026-06-11T09:00:00.000Z",
+
+  // Position
   "entryPrice": 59.52,
   "currentPrice": 56.08,
   "priceLower": 36.13,
   "priceUpper": 74.31,
-  "pctToLowerBound": 35.6,
-  "pctToUpperBound": 32.5,
-  "ilPercent": 0.0026,
+  "pctToLowerBound": 35.6,          // % above lower bound
+  "pctToUpperBound": 32.5,          // % below upper bound
+
+  // IL & fees
+  "ilPercent": 0.0026,              // divergence loss as decimal
   "ilUsd": 6.32,
   "feesUsd": 27.53,
   "netVsHodlUsd": 21.22,
   "daysOpen": 5.24,
   "dailyFeeUsd": 5.26,
-  "annualizedFeeYield": 0.80,
-  "hypeExposure": 17.07,
+  "annualizedFeeYield": 0.80,       // as decimal (0.80 = 80%)
+
+  // Delta exposure (V3 gamma-aware)
+  "hypeExposure": 17.07,            // HYPE currently in LP
   "hypeNotionalUsd": 957.0,
+  "liquidityConstant": 1234.5,      // V3 L value — used for gamma-aware sizing
+  "hypeExposureAtLowerBound": 28.4, // max HYPE if price falls to lower bound
+  "hypeExposureAtUpperBound": 0,    // always 0 — LP is fully USDC at upper bound
+
+  // Funding (from Hyperliquid perps API)
   "hourlyFundingRate": 0.0000125,
   "dailyFundingRate": 0.0003,
   "annualizedFundingRate": 0.1095,
-  "dailyFundingEarned": 0.29,
-  "fundingAsPctOfFees": 0.054,
-  "driftVolRatio": 0.137,
-  "regime": "range-bound",
-  "verdict": "no-hedge",
+  "dailyFundingEarned": 0.29,       // USD earned per day if short placed (positive = funding favors shorts)
+  "fundingAsPctOfFees": 0.054,      // dailyFundingEarned / dailyFeeUsd
+
+  // Market regime
+  "driftVolRatio": 0.137,           // |mean daily return| / daily vol (30-day window)
+  "regime": "range-bound",          // "range-bound" | "mild-trend" | "strong-trend"
+
+  // Verdict 1: fee-optimisation (is the hedge cost justified by fee income?)
+  "verdict": "no-hedge",            // "no-hedge" | "consider-hedge" | "hedge-recommended"
   "verdictReason": "Range-bound regime, fees covering IL in 1.2 days, 36% buffer to lower bound. No hedge needed.",
-  "hedgeBreakEvenDays": 22
+  "hedgeBreakEvenDays": 22,         // days until funding earned alone covers current IL (optimistic — ignores future IL)
+
+  // Verdict 2: capital preservation (is the downside delta risk worth hedging regardless of fees?)
+  "capitalPreservationVerdict": "no-hedge",
+  "capitalPreservationReason": "Downside scenarios are within acceptable range relative to hedge carry cost.",
+
+  // Capital preservation detail
+  "dailyIlRate": 1.21,              // USD of IL accumulating per day
+  "hedgeCostToIlRatio": 0.24,       // dailyFundingEarned / dailyIlRate (<1 = hedge cheaper than IL)
+  "downsideScenarios": [
+    { "dropPct": 0.10, "deltaLossUsd": 95.7, "hedgeCarryToDateUsd": 2.03 },
+    { "dropPct": 0.20, "deltaLossUsd": 191.4, "hedgeCarryToDateUsd": 2.03 },
+    { "dropPct": 0.30, "deltaLossUsd": 287.1, "hedgeCarryToDateUsd": 2.03 }
+  ],
+
+  // Sizing
+  "recommendedHedgeHype": 8.5,      // suggested short size (V3-aware, capped at 50% of lower-bound exposure)
+  "recommendedHedgeReason": "Sized so close trigger falls at LP entry price...",
+
+  // Upside risk (LP sheds HYPE as price rises — short becomes overhedged)
+  "upsideScenarios": [
+    {
+      "risePct": 0.05,
+      "newPrice": 58.88,
+      "lpHypeAtPrice": 14.2,        // HYPE remaining in LP at that price
+      "shortLossUsd": 40.4,
+      "overhedgeHype": -5.7,        // negative = short is smaller than LP delta (underhedged)
+      "fees7dUsd": 36.8,
+      "net7dUsd": -3.6              // fees + funding - short loss over 7 days
+    }
+  ],
+
+  // Triggers for managing the short
+  "hedgeCloseTriggerPrice": 61.20,  // close short here — 7-day income equals total short loss
+  "hedgeReduceTriggerPrice": 58.64, // reduce to 50% here
+  "hedgeCloseTriggerReason": "Close at $61.20 (+9.1% from current): 7-day income ($X) equals total short loss at that price."
 }
 ```
 
 ## Verdict Values
 
-| verdict | Meaning |
+Both `verdict` (fee-optimisation) and `capitalPreservationVerdict` use the same three states:
+
+| value | Meaning |
 |---|---|
-| `no-hedge` | IL small, fees dominant, range-bound regime — hold |
-| `consider-hedge` | Mild trend or range proximity risk — partial hedge worth evaluating |
-| `hedge-recommended` | Strong trend regime — LP is underperforming HODL systematically |
+| `no-hedge` | No systematic case for a hedge |
+| `consider-hedge` | Risk is elevated — partial hedge (50% delta) worth evaluating |
+| `hedge-recommended` | Strong case for hedging |
+
+The two verdicts ask different questions:
+- **`verdict` (fee-optimisation):** Is the hedge carry cost justified relative to the current fee run rate and IL level?
+- **`capitalPreservationVerdict` (capital preservation):** Is the downside delta risk large enough that a hedge is cheap insurance, regardless of fees?
+
+Surface both to the user; they can disagree.
 
 ## Decision Logic
 
-| Signal | Hedge? |
+### Verdict 1 — Fee-optimisation (`verdict`)
+
+Evaluated in priority order; first matching rule wins:
+
+| Signal | Result |
 |---|---|
-| Regime = range-bound AND IL covered in <2 days AND >20% to lower | No |
-| Regime = mild-trend OR drift/vol > 0.4 | Consider (50% delta) |
-| Price within 10% of lower bound | Consider |
-| Regime = strong-trend | Recommended — close or full hedge |
+| Regime = strong-trend (drift/vol > 1.0) | `hedge-recommended` — LP selling into directional move |
+| Regime = range-bound AND IL covered in <2 days AND >20% to lower bound | `no-hedge` |
+| Regime = mild-trend OR drift/vol > 0.4 | `consider-hedge` (50% delta) |
+| Price within 10% of lower bound | `consider-hedge` — out-of-range risk elevated |
+| Fallback | `no-hedge` |
+
+### Verdict 2 — Capital preservation (`capitalPreservationVerdict`)
+
+Evaluated in priority order; first matching rule wins:
+
+| Signal | Result |
+|---|---|
+| (−20% HYPE drop loss) / (7-day hedge carry) > 10 | `hedge-recommended` — hedge is cheap insurance |
+| Daily hedge carry < daily IL accumulation rate | `hedge-recommended` — hedge is cheaper per day than existing IL drag |
+| 7-day price change < −5% AND HYPE notional > $500 | `consider-hedge` (50% delta) |
+| Fallback | `no-hedge` |
 
 ## Important Notes
 
 - A short HYPE hedge protects **delta** (directional price exposure), not IL specifically. IL is bidirectional; a short only covers the downside tail.
 - When funding is positive (longs pay shorts), the short **earns carry** — the hedge has negative carry cost.
-- `hedgeBreakEvenDays` = how long before funding alone pays off the current IL. This is a floor estimate — it ignores future IL accumulation.
+- `hedgeBreakEvenDays` = how long before funding alone pays off the current IL. This is an optimistic estimate — it treats current IL as fixed and ignores the additional IL that will accumulate while waiting.
 - HYPE exposure in LP (`hypeExposure`) shifts as price moves. As price rises the LP sells HYPE; as it falls the LP accumulates HYPE. The reported value is the current snapshot.

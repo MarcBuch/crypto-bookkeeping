@@ -25,7 +25,7 @@ SKILL_DIR=$(git rev-parse --show-toplevel)/.opencode/skills/regime-checker
 bun "$SKILL_DIR/check-regime.ts"
 
 # Structured JSON (for programmatic use / agent analysis)
-bun "$SKILL_DIR/check-regime.ts" --json 2>/dev/null
+bun "$SKILL_DIR/check-regime.ts" --json 2>/dev/null  # 2>/dev/null suppresses progress output
 
 # Other coins
 bun "$SKILL_DIR/check-regime.ts" bitcoin --json 2>/dev/null
@@ -50,6 +50,8 @@ bun "$SKILL_DIR/check-regime.ts" bitcoin --json 2>/dev/null
   "rerangeGuidance": "Rerange on outer-third trigger at standard ±15–17% width. Every cycle >5 days is profitable."
 }
 ```
+
+Note: `action` and `positionGuidance` are currently identical — both carry the high-level regime action. Use either; prefer `positionGuidance` when combining with `rerangeGuidance` for a complete recommendation.
 
 ## Regime Table (from PLAYBOOK.md)
 
@@ -83,7 +85,7 @@ Parse `ratio` and `regime` from JSON output.
 
 ### Step 2: Cross-reference with position state
 
-Combine regime with LP position data:
+Get current position data by running the lp-tracker skill or reading `config.json`. Combine regime with LP position data:
 
 | Regime | Position in range? | Action |
 |---|---|---|
@@ -91,13 +93,13 @@ Combine regime with LP position data:
 | Range-bound | No (out of range) | Rerange immediately |
 | Mild trend | Yes | Reduce to 50% size on next rerange, widen range |
 | Mild trend | No | Close and sit out, or reopen with 50% capital |
-| Strong trend | Any | Close LP, hold HYPE unencumbered |
+| Strong trend | Any | **Only close LP after ratio > 1.0 for 7+ consecutive days.** A single spike warrants monitoring, not immediate closure. Hold HYPE unencumbered once confirmed. |
 
 ### Step 3: Report to user
 
 Always include:
 - `ratio` value and `regime` label
-- Comparison with previous known ratio (PLAYBOOK.md shows last check was 0.24)
+- Comparison with the previous ratio recorded in PLAYBOOK.md (search for the most recent regime check entry)
 - Playbook action
 - Whether entry/rerange is advisable right now
 

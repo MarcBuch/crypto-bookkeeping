@@ -55,6 +55,14 @@ interface RegimeReport {
   action: string;
   positionGuidance: string;
   rerangeGuidance: string;
+
+  // 7-day window
+  priceChange7d: number;  // percent
+  dailyDrift7d: number;
+  dailyVol7d: number;
+  ratio7d: number;
+  regime7d: Regime;
+  windowsDiverge: boolean; // true when 30d and 7d regimes disagree
 }
 
 // ─── Fetch ─────────────────────────────────────────────────────────────────────
@@ -171,6 +179,16 @@ async function main() {
   const oldPrice = prices[0];
   const priceChange30d = ((currentPrice - oldPrice) / oldPrice) * 100;
 
+  // ── 7-day window (last 8 prices → 7 log returns) ──────────────────────────
+  const prices7d = prices.slice(-8);
+  const returns7d = logReturns(prices7d);
+  const dailyDrift7d = mean(returns7d);
+  const dailyVol7d = stddev(returns7d);
+  const ratio7d = dailyVol7d > 0 ? Math.abs(dailyDrift7d) / dailyVol7d : 0;
+  const regime7d = classify(ratio7d);
+  const priceChange7d = ((prices7d[prices7d.length - 1] - prices7d[0]) / prices7d[0]) * 100;
+  const windowsDiverge = regime !== regime7d;
+
   const report: RegimeReport = {
     coin: coinId,
     symbol,
@@ -186,6 +204,12 @@ async function main() {
     action: REGIME_ACTIONS[regime],
     positionGuidance: REGIME_ACTIONS[regime],
     rerangeGuidance: RERANGE_GUIDANCE[regime],
+    priceChange7d,
+    dailyDrift7d,
+    dailyVol7d,
+    ratio7d,
+    regime7d,
+    windowsDiverge,
   };
 
   if (jsonMode) {
@@ -209,18 +233,41 @@ async function main() {
   console.log("### Price Summary");
   console.log(`  Current:    $${currentPrice.toFixed(2)}`);
   console.log(`  30d change: ${fmtPct(priceChange30d / 100)}`);
+  console.log(`  7d change:  ${fmtPct(priceChange7d / 100)}`);
 
   console.log("\n### Regime Metrics");
-  console.log(`  Daily drift:    ${fmtPct(dailyDrift)}  (avg daily log return)`);
-  console.log(`  Daily vol:      ${fmtPct(dailyVol, false)}  (std dev of daily log returns)`);
-  console.log(`  Drift/vol ratio: ${ratio.toFixed(3)}`);
-  console.log(`  ${bar(ratio)}`);
+  console.log(`  Window        drift       vol         ratio    regime`);
+  console.log(
+    `  30d (${returns.length} days)  ${fmtPct(dailyDrift).padEnd(10)}  ${fmtPct(dailyVol, false).padEnd(10)}  ${ratio.toFixed(3).padEnd(7)}  ${REGIME_LABELS[regime]}`,
+  );
+  console.log(
+    `  7d  (7 days)   ${fmtPct(dailyDrift7d).padEnd(10)}  ${fmtPct(dailyVol7d, false).padEnd(10)}  ${ratio7d.toFixed(3).padEnd(7)}  ${REGIME_LABELS[regime7d]}`,
+  );
+  console.log(`\n  30d bar: ${bar(ratio)}`);
+  console.log(`  7d  bar: ${bar(ratio7d)}`);
 
-  console.log("\n### Regime");
+  if (windowsDiverge) {
+    console.log(
+      `\n  ** DIVERGENCE: 30d is ${REGIME_LABELS[regime].toUpperCase()} but 7d is ${REGIME_LABELS[regime7d].toUpperCase()} **`,
+    );
+    console.log(
+      `  The short-term regime is shifting. Use the 7d reading to inform near-term decisions.`,
+    );
+  }
+
+  console.log("\n### Regime (30d — primary)");
   console.log(`  ${REGIME_LABELS[regime].toUpperCase()}  (ratio = ${ratio.toFixed(3)})`);
 
+  console.log("\n### Regime (7d — near-term)");
+  console.log(`  ${REGIME_LABELS[regime7d].toUpperCase()}  (ratio = ${ratio7d.toFixed(3)})`);
+
   console.log("\n### Playbook Action");
-  console.log(`  ${REGIME_ACTIONS[regime]}`);
+  if (windowsDiverge) {
+    console.log(`  Based on 30d: ${REGIME_ACTIONS[regime]}`);
+    console.log(`  Based on 7d:  ${REGIME_ACTIONS[regime7d]}`);
+  } else {
+    console.log(`  ${REGIME_ACTIONS[regime]}`);
+  }
 
   console.log("\n### Rerange Guidance");
   console.log(`  ${RERANGE_GUIDANCE[regime]}`);

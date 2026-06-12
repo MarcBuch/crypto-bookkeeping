@@ -11,7 +11,10 @@
   "positions": {
     "TOKEN_ID_1": {
       "openTx": "0xOPEN_TX_HASH",
-      "closeTx": "0xCLOSE_TX_HASH"
+      "closeTx": "0xCLOSE_TX_HASH",
+      "hedge": {
+        "coin": "HYPE"
+      }
     },
     "TOKEN_ID_2": {
       "openTx": "0xOPEN_TX_HASH"

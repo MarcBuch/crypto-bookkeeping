@@ -1003,4 +1003,15 @@ describe("POST /tax/transactions/enrich", () => {
     expect(getRes.statusCode).toBe(200);
     expect(getRes.json()).toEqual({ transactions: [fakeTransaction] });
   });
+
+  it("returns a controlled 503 error response when enrich throws", async () => {
+    mockEnrichTaxTransactionsEurValues = async () => {
+      throw new Error("pricing API unavailable");
+    };
+
+    const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
+
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ error: "Failed to enrich tax transactions" });
+  });
 });

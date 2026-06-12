@@ -10,6 +10,7 @@ import {
 } from "../db/store.js";
 import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 import { getPnLView } from "./pnl.js";
+import { getHedgeView, snapshotHedge } from "./hedge.js";
 
 export interface PositionView {
   tokenId: string;
@@ -134,6 +135,20 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
   // Update sync state
   upsertLpSyncState({ wallet: config.wallet, last_synced_at: syncedAt });
 
+  // Snapshot hedges for each position (if configured)
+  for (const position of positions) {
+    const positionConfig = config.positions?.[position.tokenId];
+    if (positionConfig?.hedge) {
+      try {
+        const hedgeView = await getHedgeView(config, position.tokenId);
+        snapshotHedge(hedgeView);
+      } catch (err) {
+        // Log but do NOT re-throw — LP sync must complete even if HL API is down
+        console.warn(`[hedge] Failed to snapshot hedge for ${position.tokenId}:`, err);
+      }
+    }
+  }
+
   return {
     wallet: config.wallet,
     syncedAt,
@@ -182,6 +197,18 @@ export async function syncSinglePosition(
     upsertPnLViewCache(tokenId, pnlView as unknown as Record<string, unknown>, syncedAt);
   }
 
-  // 7. Return summary
+  // 7. Snapshot hedge if configured (swallow errors — LP sync must complete)
+  const positionConfig = config.positions?.[tokenId];
+  if (positionConfig?.hedge) {
+    try {
+      const hedgeView = await getHedgeView(config, tokenId);
+      snapshotHedge(hedgeView);
+    } catch (err) {
+      // Log but do NOT re-throw — LP sync must complete even if HL API is down
+      console.warn(`[hedge] Failed to snapshot hedge for ${tokenId}:`, err);
+    }
+  }
+
+  // 8. Return summary
   return { tokenId, syncedAt };
 }

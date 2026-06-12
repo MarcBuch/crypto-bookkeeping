@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { loadConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { errorHandlerPlugin } from "./plugins/errorHandler.js";
+import { hedgeRoutes } from "./routes/hedge.js";
 import { healthRoutes } from "./routes/health.js";
 import { historyRoutes } from "./routes/history.js";
 import { ilRoutes } from "./routes/il.js";
@@ -31,6 +32,7 @@ export async function buildServer(config?: Config): Promise<FastifyInstance> {
 
   // Register route plugins
   fastify.register(healthRoutes);
+  fastify.register(hedgeRoutes);
   fastify.register(positionsRoutes);
   fastify.register(pnlRoutes);
   fastify.register(ilRoutes);

@@ -269,7 +269,13 @@ program
 
     console.log(`Taking snapshot for ${config.wallet}...`);
 
-    const results = await takeSnapshot(config);
+    let results;
+    try {
+      results = await takeSnapshot(config);
+    } catch (err) {
+      printCommandError(err instanceof Error ? err.message : "Snapshot failed");
+      return;
+    }
 
     if (results.length === 0) {
       console.log("No LP positions found.");

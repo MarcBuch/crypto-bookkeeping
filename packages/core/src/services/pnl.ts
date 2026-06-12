@@ -1,5 +1,11 @@
 import { createClient } from "../chain/client.js";
-import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
+import {
+  findOpenEvent,
+  findCloseEvent,
+  getPoolPriceAtBlock,
+  sumDecreaseLiquidityLogs,
+  sumCollectLogsPublic,
+} from "../chain/events.js";
 import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
 import { getPoolAddress, getPoolState, getTokenInfo, computeUnclaimedFees } from "../chain/pools.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
@@ -37,6 +43,8 @@ export interface PnLView {
   token1UsdPrice: number | null;
   usdPriceSource: "coingecko" | null;
   feesValueInToken1: number;
+  pendingFeesValueInToken1: number;
+  pendingFeesValueUsd: number | null;
   entryValueInToken1: number;
   exitValueInToken1: number;
   holdValueInToken1: number;
@@ -246,6 +254,8 @@ export async function getPnLView(
     let exitAmount1 = 0n;
     let feesCollected0 = 0n;
     let feesCollected1 = 0n;
+    let pendingFees0 = 0n;
+    let pendingFees1 = 0n;
     let exitSqrtPriceX96 = poolState.sqrtPriceX96;
 
     if (isActive) {
@@ -259,7 +269,49 @@ export async function getPnLView(
       exitAmount0 = currentAmounts.amount0;
       exitAmount1 = currentAmounts.amount1;
 
-      // Calculate uncollected fees
+      // Account for partial withdrawals: any DecreaseLiquidity events since
+      // the open block represent capital that was removed from the position.
+      // Without this, reduced capital looks like a loss vs the original entry.
+      const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
+      if (entryBlock !== undefined) {
+        const [withdrawn, alreadyCollected] = await Promise.all([
+          sumDecreaseLiquidityLogs(
+            client,
+            config.contracts.positionManager,
+            pos.tokenId,
+            entryBlock,
+            latestBlock,
+            hyperSyncClient,
+          ),
+          sumCollectLogsPublic(
+            client,
+            config.contracts.positionManager,
+            pos.tokenId,
+            entryBlock,
+            latestBlock,
+            hyperSyncClient,
+          ),
+        ]);
+        // Add withdrawn principal back into exit amounts so P&L isn't distorted
+        exitAmount0 += withdrawn.amount0;
+        exitAmount1 += withdrawn.amount1;
+
+        // Fees already collected in prior Collect txs (not yet in uncollected accrual).
+        // alreadyCollected includes both fees and principal from DecreaseLiquidity,
+        // so subtract the withdrawn principal to isolate fees.
+        const prevFees0 =
+          alreadyCollected.amount0 > withdrawn.amount0
+            ? alreadyCollected.amount0 - withdrawn.amount0
+            : 0n;
+        const prevFees1 =
+          alreadyCollected.amount1 > withdrawn.amount1
+            ? alreadyCollected.amount1 - withdrawn.amount1
+            : 0n;
+        feesCollected0 += prevFees0;
+        feesCollected1 += prevFees1;
+      }
+
+      // Calculate uncollected fees (currently accrued, not yet claimed)
       const feeResult = await computeUnclaimedFees(
         client,
         poolAddress,
@@ -268,8 +320,14 @@ export async function getPnLView(
         token0Info.decimals,
         token1Info.decimals,
       );
-      feesCollected0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
-      feesCollected1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
+      const unclaimedFees0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
+      const unclaimedFees1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
+      // Pending Earnings = only what's currently uncollected on-chain
+      pendingFees0 = unclaimedFees0;
+      pendingFees1 = unclaimedFees1;
+      // Total fees for P&L = previously collected + currently uncollected
+      feesCollected0 += unclaimedFees0;
+      feesCollected1 += unclaimedFees1;
     } else {
       // Closed position: use cached exit data if available
       const hasCachedExit =
@@ -490,6 +548,16 @@ export async function getPnLView(
         token1UsdPrice,
       });
 
+    // Pending Earnings: only the currently uncollected fees (for active positions).
+    // For closed positions pendingFees0/1 stay 0n (nothing left to collect).
+    const pendingFees0Human = Number(pendingFees0) / 10 ** token0Info.decimals;
+    const pendingFees1Human = Number(pendingFees1) / 10 ** token1Info.decimals;
+    const pendingFeesValueInToken1 = pendingFees0Human * pnl.exitPrice + pendingFees1Human;
+    const pendingFeesValueUsd =
+      token0UsdPrice !== null && token1UsdPrice !== null
+        ? pendingFees0Human * token0UsdPrice + pendingFees1Human * token1UsdPrice
+        : null;
+
     result.push({
       tokenId: pos.tokenId.toString(),
       pair: `${t0sym}/${t1sym}`,
@@ -512,6 +580,8 @@ export async function getPnLView(
       token1UsdPrice,
       usdPriceSource,
       feesValueInToken1: pnl.feesValue,
+      pendingFeesValueInToken1,
+      pendingFeesValueUsd,
       entryValueInToken1: pnl.entryValue,
       exitValueInToken1: pnl.exitValue,
       holdValueInToken1: pnl.holdValue,

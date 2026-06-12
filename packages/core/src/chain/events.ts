@@ -444,6 +444,103 @@ export async function findCloseEventFromTx(
   return extractDecreaseLiquidity(receipt, tokenId);
 }
 
+/**
+ * Sum all DecreaseLiquidity events for a position between two blocks.
+ * Used to account for partial withdrawals on active positions so that
+ * capital removed mid-life is included in the exit-side P&L calculation.
+ */
+export async function sumDecreaseLiquidityLogs(
+  client: Client,
+  positionManager: Address,
+  tokenId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+  hyperSyncClient?: HypersyncClient,
+): Promise<{ amount0: bigint; amount1: bigint }> {
+  let amount0 = 0n;
+  let amount1 = 0n;
+
+  if (hyperSyncClient) {
+    const paddedTokenId = padUint256(tokenId);
+    const rawLogs = await fetchLogsByAddressAndTopics(
+      hyperSyncClient,
+      positionManager,
+      [[DECREASE_LIQUIDITY_TOPIC], [paddedTokenId]],
+      Number(fromBlock),
+      Number(toBlock) + 1,
+    );
+    for (const log of rawLogs) {
+      const decoded = decodeHyperSyncLog(log, eventAbi);
+      if (decoded && decoded.eventName === "DecreaseLiquidity") {
+        const args = decoded.args as any;
+        amount0 += BigInt(args.amount0);
+        amount1 += BigInt(args.amount1);
+      }
+    }
+  } else if (canScanLogs(client)) {
+    for (let lo = fromBlock; lo <= toBlock; lo += LOGS_CHUNK_SIZE) {
+      const hi = lo + LOGS_CHUNK_SIZE - 1n < toBlock ? lo + LOGS_CHUNK_SIZE - 1n : toBlock;
+      const logs = await withRetry(() =>
+        client.getLogs({
+          address: positionManager,
+          event: parseAbiItem(
+            "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+          ),
+          args: { tokenId },
+          fromBlock: lo,
+          toBlock: hi,
+        }),
+      );
+      for (const log of logs) {
+        const args = log.args as any;
+        amount0 += BigInt(args.amount0);
+        amount1 += BigInt(args.amount1);
+      }
+    }
+  }
+
+  return { amount0, amount1 };
+}
+
+/**
+ * Sum all Collect events for a position between two blocks.
+ * Exported so callers can account for fees already claimed on active positions.
+ */
+export async function sumCollectLogsPublic(
+  client: Client,
+  positionManager: Address,
+  tokenId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+  hyperSyncClient?: HypersyncClient,
+): Promise<{ amount0: bigint; amount1: bigint }> {
+  if (hyperSyncClient) {
+    const paddedTokenId = padUint256(tokenId);
+    const rawLogs = await fetchLogsByAddressAndTopics(
+      hyperSyncClient,
+      positionManager,
+      [[COLLECT_TOPIC], [paddedTokenId]],
+      Number(fromBlock),
+      Number(toBlock) + 1,
+    );
+    let amount0 = 0n;
+    let amount1 = 0n;
+    for (const log of rawLogs) {
+      const decoded = decodeHyperSyncLog(log, eventAbi);
+      if (decoded && decoded.eventName === "Collect") {
+        const args = decoded.args as any;
+        amount0 += BigInt(args.amount0Collect);
+        amount1 += BigInt(args.amount1Collect);
+      }
+    }
+    return { amount0, amount1 };
+  }
+  if (canScanLogs(client)) {
+    return sumCollectLogs(client, positionManager, tokenId, fromBlock, toBlock);
+  }
+  return { amount0: 0n, amount1: 0n };
+}
+
 function canScanLogs(client: Client): boolean {
   return typeof (client as any).getLogs === "function";
 }

@@ -162,7 +162,13 @@ program
 
     if (!isJsonMode()) console.log(`Fetching positions for ${config.wallet}...`);
 
-    const positions = await getPositionsView(config);
+    let positions;
+    try {
+      positions = await getPositionsView(config);
+    } catch (err) {
+      printCommandError(err instanceof Error ? err.message : "Failed to fetch positions");
+      return;
+    }
 
     if (positions.length === 0) {
       output({ positions: [] }, () => console.log("No LP positions found for this wallet."));
@@ -269,7 +275,13 @@ program
 
     console.log(`Taking snapshot for ${config.wallet}...`);
 
-    const results = await takeSnapshot(config);
+    let results;
+    try {
+      results = await takeSnapshot(config);
+    } catch (err) {
+      printCommandError(err instanceof Error ? err.message : "Snapshot failed");
+      return;
+    }
 
     if (results.length === 0) {
       console.log("No LP positions found.");

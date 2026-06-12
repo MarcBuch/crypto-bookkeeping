@@ -6,6 +6,7 @@ import {
   useSyncPositions,
   useSyncPosition,
 } from "./hooks/useDashboardPositions";
+import { useHedge } from "./hooks/useHedge";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -295,9 +296,11 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const rightDistance = (position.priceUpper - position.currentPrice) / position.currentPrice;
   const rangeTone = position.inRange ? "from-emerald-500 to-teal-300" : "from-rose-400 to-red-500";
   const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
+  const { data: hedgeData } = useHedge(position.tokenId);
 
   return (
-    <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
+    <div>
+      <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
       <div className="flex min-w-0 items-center gap-3">
         <TokenPairIcon token0={position.token0.symbol} token1={position.token1.symbol} />
         <div className="min-w-0">
@@ -379,6 +382,127 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         </button>
       </div>
     </article>
+
+    {hedgeData && (
+      <HedgePanel hedge={hedgeData} pnl={position.pnl ?? undefined} />
+    )}
+    </div>
+  );
+}
+
+function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: import("./api").PnLView }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const size = Math.abs(parseFloat(hedge.szi));
+  const unrealizedTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+  // Mark price color tracks direction of the trade: green when short is winning (price ↓), red when losing (price ↑)
+  const markTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+
+  const hedgePnl = hedge.unrealizedPnl + hedge.fundingEarned;
+  const lpAbsPnl = pnl?.token1UsdPrice != null
+    ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
+    : null;
+  const combinedPnl = lpAbsPnl != null ? lpAbsPnl + hedgePnl : null;
+  const combinedTone = combinedPnl == null ? "text-neutral-950" : combinedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+
+  return (
+    <div className="bg-neutral-300">
+      {/* Always-visible summary row — click to expand/collapse */}
+      <button
+        type="button"
+        onClick={() => setExpanded((x) => !x)}
+        className="w-full px-5 py-4 sm:px-7 flex flex-wrap items-center justify-between gap-4 text-left transition hover:bg-black/[0.04]"
+      >
+        {/* Left — identity */}
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-400 bg-rose-100 px-2.5 py-0.5 text-[0.62rem] font-black tracking-[0.18em] text-rose-700 uppercase">
+            ▼ SHORT
+          </span>
+          <div>
+            <p className="font-mono text-sm font-black tracking-tight text-neutral-950">
+              {size} {hedge.coin}-PERP
+            </p>
+            <p className="mt-0.5 text-[0.65rem] font-semibold tracking-wide text-neutral-500 uppercase">
+              {hedge.leverage.value}× {hedge.leverage.type} · Hyperliquid
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-5">
+          {/* Net hedged P&L summary */}
+          {combinedPnl != null && (
+            <div className="text-right">
+              <p className="text-[0.62rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">Net hedged P&L</p>
+              <p className={`mt-0.5 font-mono text-xl font-black tracking-tight ${combinedTone}`}>
+                {formatUsd(combinedPnl)}
+              </p>
+              <p className="mt-0.5 text-[0.62rem] font-semibold text-neutral-500">
+                LP {formatUsd(lpAbsPnl!)} · hedge {formatUsd(hedgePnl)}
+              </p>
+            </div>
+          )}
+
+          {/* Chevron */}
+          <span
+            className={`shrink-0 text-neutral-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+            aria-hidden
+          >
+            ▾
+          </span>
+        </div>
+      </button>
+
+      {/* Expandable detail section */}
+      {expanded && (
+        <div className="border-t border-neutral-400/40 px-5 pb-5 pt-4 sm:px-7">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+            <HedgeStat label="Entry" value={`$${formatPrice(hedge.entryPx)}`} />
+            <HedgeStat label="Mark" value={`$${formatPrice(hedge.markPx)}`} valueClassName={markTone} />
+            <HedgeStat
+              label="Unrealized"
+              value={formatUsd(hedge.unrealizedPnl)}
+              valueClassName={unrealizedTone}
+            />
+            <HedgeStat
+              label="Funding earned"
+              value={`+${formatUsd(hedge.fundingEarned)}`}
+              valueClassName="text-emerald-700"
+            />
+            <HedgeStat
+              label="Liquidation"
+              value={hedge.liquidationPx ? `$${formatPrice(hedge.liquidationPx)}` : "—"}
+              valueClassName="text-amber-700"
+            />
+            <HedgeStat
+              label="Hedge P&L"
+              value={formatUsd(hedgePnl)}
+              valueClassName={hedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+              detail="unrealized + funding"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HedgeStat({
+  label,
+  value,
+  valueClassName = "text-neutral-950",
+  detail,
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+  detail?: string;
+}) {
+  return (
+    <div>
+      <p className="text-[0.62rem] font-semibold tracking-[0.15em] text-neutral-500 uppercase">{label}</p>
+      <p className={`mt-1 font-mono text-sm font-black ${valueClassName}`}>{value}</p>
+      {detail && <p className="mt-0.5 text-[0.6rem] text-neutral-600">{detail}</p>}
+    </div>
   );
 }
 

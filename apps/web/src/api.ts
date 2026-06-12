@@ -56,6 +56,18 @@ export interface DashboardPosition extends PositionView {
   pnl?: PnLView;
 }
 
+export interface HedgeView {
+  tokenId: string;
+  coin: string;
+  szi: string;
+  entryPx: number;
+  markPx: number;
+  unrealizedPnl: number;
+  fundingEarned: number;
+  liquidationPx: number | null;
+  leverage: { type: string; value: number };
+}
+
 export type TaxTransactionLabel = "Trade" | "Transfer" | null;
 
 export interface TaxTransaction {
@@ -381,4 +393,9 @@ export async function updateTaxTransaction(
   }
 
   return data.transaction as unknown as TaxTransaction;
+}
+
+export async function getHedge(tokenId: string): Promise<HedgeView> {
+  const data = await fetchJson<HedgeView>(`/positions/${tokenId}/hedge`);
+  return data;
 }

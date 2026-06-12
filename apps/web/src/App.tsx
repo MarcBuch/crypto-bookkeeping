@@ -278,8 +278,8 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
       <DarkStat label="Balance" value={balance == null ? "USD unavailable" : formatUsd(balance)} />
       <DarkStat
         label="Pending Earnings"
-        value={pnl ? `${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
-        detail={pnl?.feesValueUsd != null ? formatUsdFeeValue(pnl.feesValueUsd) : undefined}
+        value={pnl ? `${formatNumber(pnl.pendingFeesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
+        detail={pnl?.pendingFeesValueUsd != null ? formatUsdFeeValue(pnl.pendingFeesValueUsd) : undefined}
       />
       <DarkStat
         label="ROI"
@@ -292,7 +292,7 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
               : `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`
             : undefined
         }
-        tooltip={pnl ? "Gain/loss vs entry value, fees included." : undefined}
+        tooltip={pnl ? "Gain/loss vs entry value. Includes all fees earned (collected + pending)." : undefined}
       />
 
       <div className="min-w-0 font-mono text-xs font-bold">

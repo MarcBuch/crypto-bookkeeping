@@ -6,8 +6,18 @@ import { isNumericString } from "../utils/validation.js";
 export async function ilRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/il", async (_request: FastifyRequest, _reply: FastifyReply) => {
     const config = fastify.lpConfig;
-    const positions = await getILView(config);
-    return { positions };
+    try {
+      const positions = await getILView(config);
+      return { positions };
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        return _reply.status(404).send({ error: "Position not found" });
+      }
+      if (err instanceof RpcError && err.code === -32005) {
+        return _reply.status(503).send({ error: "RPC rate limited, try again later" });
+      }
+      throw err;
+    }
   });
 
   fastify.get<{ Params: { tokenId: string } }>(

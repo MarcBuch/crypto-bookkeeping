@@ -44,7 +44,7 @@ bun "$SKILL_DIR/hedge-retrospective.ts" 484645 --json 2>/dev/null
 | Flag | Default | Description |
 |---|---|---|
 | `tokenId` | first active | LP position token ID (also works on closed positions) |
-| `--days N` | since open | Lookback window in days (max 90) |
+| `--days N` | since open | Lookback window in days |
 | `--size 0.5` | `1.0` | Fraction of HYPE delta to short (0.5 = half hedge) |
 | `--json` | false | Machine-readable output |
 
@@ -98,4 +98,4 @@ bun "$SKILL_DIR/hedge-retrospective.ts" 484645 --json 2>/dev/null
 - Funding is approximated using the daily price as mark price for each funding payment.
 - `wasHedgeWorthIt` is true if the hedge covered at least 50% of IL. Adjust your threshold as needed.
 - For closed positions, the full position lifetime is used if `--days` is omitted.
-- Regime at entry is approximated from the current 30-day window — exact historical regime requires price data older than 30 days from the open date.
+- Price data is fetched from the Hyperliquid `candleSnapshot` API using the HL perp ticker (e.g. `HYPE`). Regime at entry uses the exact 32-day window ending at the position open timestamp.

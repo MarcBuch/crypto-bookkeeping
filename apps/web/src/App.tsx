@@ -113,6 +113,44 @@ function PnlHeaderTooltip() {
   );
 }
 
+function FeesHeaderTooltip() {
+  const [visible, setVisible] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const ref = useRef<HTMLSpanElement>(null);
+
+  function handleMouseEnter() {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+    }
+    setVisible(true);
+  }
+
+  return (
+    <span
+      ref={ref}
+      className="inline-flex cursor-help items-center gap-1"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setVisible(false)}
+    >
+      Total Fees
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neutral-200 text-[0.6rem] leading-none font-bold text-neutral-500 select-none">
+        ?
+      </span>
+      {visible && (
+        <span
+          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-neutral-900 px-3 py-2 text-xs font-normal tracking-normal text-white normal-case shadow-lg"
+          style={{ left: coords.x, top: coords.y - 8, transform: "translate(-50%, -100%)" }}
+        >
+          All fees earned over the life of this position — both already collected and currently
+          pending. Included in the ROI calculation.
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
   if (positions.length === 0) {
     return <EmptyState />;
@@ -187,7 +225,9 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
                 <th className="px-5 py-3">
                   <PnlHeaderTooltip />
                 </th>
-                <th className="px-5 py-3">Fees</th>
+                <th className="px-5 py-3">
+                  <FeesHeaderTooltip />
+                </th>
                 <th className="px-5 py-3" aria-label="Actions"></th>
               </tr>
             </thead>

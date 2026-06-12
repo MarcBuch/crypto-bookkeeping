@@ -51,6 +51,19 @@ export interface StoredSnapshot {
   net_pnl: number;
 }
 
+export interface StoredHedgeSnapshot {
+  id: number;
+  token_id: string;
+  coin: string;
+  szi: string;
+  entry_px: number;
+  mark_px: number;
+  unrealized_pnl: number;
+  funding_earned: number;
+  liquidation_px: number | null;
+  snapshot_at: string;
+}
+
 export type TaxTransactionLabel = "Trade" | "Transfer" | null;
 export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
 
@@ -757,6 +770,36 @@ export interface StoredTokenMetadata {
   name: string | null;
   decimals: number | null;
   fetched_at: string;
+}
+
+export function insertHedgeSnapshot(
+  snapshot: Omit<StoredHedgeSnapshot, "id" | "snapshot_at">,
+): void {
+  const db = getDb();
+  db.run(
+    `INSERT INTO hedge_snapshots
+     (token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      snapshot.token_id,
+      snapshot.coin,
+      snapshot.szi,
+      snapshot.entry_px,
+      snapshot.mark_px,
+      snapshot.unrealized_pnl,
+      snapshot.funding_earned,
+      snapshot.liquidation_px ?? null,
+    ],
+  );
+}
+
+export function listHedgeSnapshots(tokenId: string): StoredHedgeSnapshot[] {
+  const db = getDb();
+  return db
+    .query(
+      "SELECT id, token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px, snapshot_at FROM hedge_snapshots WHERE token_id = ? ORDER BY snapshot_at DESC",
+    )
+    .all(tokenId) as StoredHedgeSnapshot[];
 }
 
 export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {

@@ -50,7 +50,7 @@ export function resetDb(): void {
   db = null;
 }
 
-function initSchema(database: Database): void {
+export function initSchema(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS positions (
       token_id TEXT PRIMARY KEY,
@@ -170,6 +170,21 @@ function initSchema(database: Database): void {
       decimals INTEGER,
       fetched_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS hedge_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_id TEXT NOT NULL,
+      coin TEXT NOT NULL,
+      szi TEXT NOT NULL,
+      entry_px REAL NOT NULL,
+      mark_px REAL NOT NULL,
+      unrealized_pnl REAL NOT NULL,
+      funding_earned REAL NOT NULL,
+      liquidation_px REAL,
+      snapshot_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hedge_snapshots_token_id ON hedge_snapshots(token_id);
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist

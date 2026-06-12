@@ -21,3 +21,6 @@ packages/*/node_modules/
 apps/*/vite.config.js
 apps/*/vite.config.d.ts
 .worktrees/
+
+# Trade logs and session history
+trade_log/

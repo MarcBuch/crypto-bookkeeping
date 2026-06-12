@@ -125,7 +125,9 @@ interface HedgeReport {
     risePct: number;                  // e.g. 0.10 = 10% rise
     newPrice: number;
     lpHypeAtPrice: number;            // HYPE remaining in LP at that price (V3 gamma)
+    lpValueGainUsd: number;           // LP portfolio value gain vs current price
     shortLossUsd: number;             // mark-to-market loss on recommended short
+    netCombinedUsd: number;           // shortLoss - lpValueGain (true combined cost)
     overhedgeHype: number;            // how many HYPE the short exceeds LP delta
     fees7dUsd: number;                // 7d fee income
     net7dUsd: number;                 // fees7d - shortLoss (+ funding)
@@ -135,6 +137,26 @@ interface HedgeReport {
   hedgeCloseTriggerPrice: number;     // close short if price reaches this
   hedgeReduceTriggerPrice: number;    // reduce to 50% if price reaches this
   hedgeCloseTriggerReason: string;
+
+  // Break-even hedge: size so short profit exactly covers LP loss at lower bound
+  breakEvenHedge: {
+    sizeHype: number;
+    notionalUsd: number;
+    lpLossAtLowerUsd: number;         // LP value lost if price hits lower bound
+    lpValueAtLowerUsd: number;
+    verificationUsd: number;          // lpValue + shortProfit (should ≈ currentLpValue)
+  };
+
+  // Stop loss scenarios: for candidate stops, true net cost after LP value gain
+  stopLossScenarios: {
+    stopPrice: number;
+    bufferPct: number;                // % above current price
+    shortLossUsd: number;
+    lpGainUsd: number;                // LP value increase at that price
+    netCombinedLossUsd: number;       // shortLoss - lpGain
+    daysFeesToRecover: number;        // netCombinedLoss / dailyFeeUsd
+  }[];
+
   capitalPreservationVerdict: "no-hedge" | "consider-hedge" | "hedge-recommended";
   capitalPreservationReason: string;
 }
@@ -362,6 +384,28 @@ function v3Liquidity(amount0: number, P: number, Pb: number): number {
 }
 
 /**
+ * Total USD value of the V3 LP position at a given price.
+ *   In range:     value = HYPE_amount * P + USDC_amount
+ *   Below lower:  all HYPE — value = hypeAtLower * P
+ *   Above upper:  all USDC — value = L * (sqrt(Pb) - sqrt(Pa))
+ */
+function v3LpValue(L: number, P: number, Pa: number, Pb: number): number {
+  const sqrtA = Math.sqrt(Pa);
+  const sqrtB = Math.sqrt(Pb);
+  if (P <= Pa) {
+    const hype = L * (1 / sqrtA - 1 / sqrtB);
+    return hype * P;
+  }
+  if (P >= Pb) {
+    return L * (sqrtB - sqrtA);
+  }
+  const sqrtP = Math.sqrt(P);
+  const hype = L * (1 / sqrtP - 1 / sqrtB);
+  const usdc = L * (sqrtP - sqrtA);
+  return hype * P + usdc;
+}
+
+/**
  * HYPE amount in LP at a given price (still in range: Pa < P < Pb).
  *   amount0 = L * (1/sqrt(P) - 1/sqrt(Pb))
  * Returns 0 if price is at or above upper bound.
@@ -540,16 +584,58 @@ async function main() {
     recommendedHedgeSize(hypeExposureAtLowerBound, hypeExposure, currentPrice, pos.entryPrice, dailyFeeUsd ?? 0, dailyFundingRate);
 
   const SCENARIO_RISES = [0.05, 0.10, 0.15, 0.20];
+  const currentLpValue = v3LpValue(liquidityConstant, currentPrice, pos.priceLower, pos.priceUpper);
   const upsideScenarios = SCENARIO_RISES.map((risePct) => {
     const newPrice = currentPrice * (1 + risePct);
     const lpHypeAtPrice = v3HypeAtPrice(liquidityConstant, newPrice, pos.priceLower, pos.priceUpper);
+    const lpValueGainUsd = v3LpValue(liquidityConstant, newPrice, pos.priceLower, pos.priceUpper) - currentLpValue;
     const shortLossUsd = recommendedHedgeHype * currentPrice * risePct;
+    const netCombinedUsd = shortLossUsd - lpValueGainUsd;
     const overhedgeHype = recommendedHedgeHype - lpHypeAtPrice;
     const fees7dUsd = (dailyFeeUsd ?? 0) * 7;
     const funding7dUsd = recommendedHedgeHype * currentPrice * dailyFundingRate * 7;
     const net7dUsd = fees7dUsd + funding7dUsd - shortLossUsd;
-    return { risePct, newPrice, lpHypeAtPrice, shortLossUsd, overhedgeHype, fees7dUsd, net7dUsd };
+    return { risePct, newPrice, lpHypeAtPrice, lpValueGainUsd, shortLossUsd, netCombinedUsd, overhedgeHype, fees7dUsd, net7dUsd };
   });
+
+  // ── Break-even hedge ──────────────────────────────────────────────────────
+  // Size the short so its profit at the lower bound exactly covers the LP loss.
+  //   shortProfit = priceDrop * hedgeSize
+  //   lpLoss = currentLpValue - lpValueAtLower
+  //   hedgeSize = lpLoss / priceDrop
+  const lpValueAtLower = v3LpValue(liquidityConstant, pos.priceLower, pos.priceLower, pos.priceUpper);
+  const lpLossAtLower = currentLpValue - lpValueAtLower;
+  const priceDrop = currentPrice - pos.priceLower;
+  const breakEvenSize = Math.round((lpLossAtLower / priceDrop) * 10) / 10;
+  const breakEvenHedge = {
+    sizeHype: breakEvenSize,
+    notionalUsd: Math.round(breakEvenSize * currentPrice),
+    lpLossAtLowerUsd: Math.round(lpLossAtLower * 100) / 100,
+    lpValueAtLowerUsd: Math.round(lpValueAtLower * 100) / 100,
+    verificationUsd: Math.round((lpValueAtLower + priceDrop * breakEvenSize) * 100) / 100,
+  };
+
+  // ── Stop loss scenarios ───────────────────────────────────────────────────
+  // For each candidate stop price: short loss, LP value gain, net combined cost,
+  // and days of fees needed to recover the net.
+  const STOP_CANDIDATES = [59.52, 61.00, 61.58, 62.50, 65.00];
+  const stopLossScenarios = STOP_CANDIDATES
+    .filter((stop) => stop > currentPrice)
+    .map((stopPrice) => {
+      const shortLossUsd = (stopPrice - currentPrice) * breakEvenSize;
+      const lpGainUsd = v3LpValue(liquidityConstant, stopPrice, pos.priceLower, pos.priceUpper) - currentLpValue;
+      const netCombinedLossUsd = Math.round((shortLossUsd - lpGainUsd) * 100) / 100;
+      const bufferPct = ((stopPrice - currentPrice) / currentPrice) * 100;
+      const daysFeesToRecover = (dailyFeeUsd ?? 0) > 0 ? netCombinedLossUsd / (dailyFeeUsd ?? 1) : Infinity;
+      return {
+        stopPrice,
+        bufferPct: Math.round(bufferPct * 10) / 10,
+        shortLossUsd: Math.round(shortLossUsd * 100) / 100,
+        lpGainUsd: Math.round(lpGainUsd * 100) / 100,
+        netCombinedLossUsd,
+        daysFeesToRecover: Math.round(daysFeesToRecover * 10) / 10,
+      };
+    });
 
   const { closePrice: hedgeCloseTriggerPrice, reducePrice: hedgeReduceTriggerPrice, reason: hedgeCloseTriggerReason } =
     hedgeTriggers(currentPrice, recommendedHedgeHype, dailyFeeUsd ?? 0, dailyFundingRate);
@@ -612,6 +698,8 @@ async function main() {
     hedgeCloseTriggerPrice,
     hedgeReduceTriggerPrice,
     hedgeCloseTriggerReason,
+    breakEvenHedge,
+    stopLossScenarios,
     capitalPreservationVerdict,
     capitalPreservationReason,
   };
@@ -699,14 +787,15 @@ async function main() {
   console.log(`  ${report.recommendedHedgeReason}`);
 
   console.log(`\n  Upside scenarios (recommended ${report.recommendedHedgeHype} ${perpSymbol} short):`);
-  console.log(`  ${"rise".padEnd(6)}  ${"new price".padEnd(10)}  ${"LP HYPE".padEnd(9)}  ${"overhedge".padEnd(11)}  ${"short loss".padEnd(11)}  net (7d fees+funding-loss)`);
+  console.log(`  ${"rise".padEnd(6)}  ${"new price".padEnd(10)}  ${"LP HYPE".padEnd(9)}  ${"LP gain".padEnd(9)}  ${"short loss".padEnd(11)}  ${"net combined".padEnd(13)}  net (7d fees+funding-loss)`);
   for (const s of report.upsideScenarios) {
     console.log(
       `  +${(s.risePct * 100).toFixed(0)}%`.padEnd(7) +
       `  ${usd(s.newPrice).padEnd(10)}` +
       `  ${s.lpHypeAtPrice.toFixed(1).padEnd(9)}` +
-      `  ${s.overhedgeHype.toFixed(1).padEnd(11)}` +
+      `  ${("+" + usd(s.lpValueGainUsd)).padEnd(9)}` +
       `  ${("-" + usd(s.shortLossUsd)).padEnd(11)}` +
+      `  ${(s.netCombinedUsd >= 0 ? "-" : "+") + usd(Math.abs(s.netCombinedUsd)).padEnd(13)}` +
       `  ${s.net7dUsd >= 0 ? "+" : ""}${usd(s.net7dUsd)}`,
     );
   }
@@ -714,6 +803,27 @@ async function main() {
   console.log(`\n  Close trigger:  ${usd(report.hedgeCloseTriggerPrice)}`);
   console.log(`  Reduce trigger: ${usd(report.hedgeReduceTriggerPrice)}`);
   console.log(`  ${report.hedgeCloseTriggerReason}`);
+
+  console.log("\n### Break-even Hedge");
+  const be = report.breakEvenHedge;
+  console.log(`  Size:              ${be.sizeHype} ${perpSymbol}  (${usd(be.notionalUsd)} notional)`);
+  console.log(`  LP value now:      ${usd(currentLpValue)}`);
+  console.log(`  LP value at lower: ${usd(be.lpValueAtLowerUsd)}`);
+  console.log(`  LP loss at lower:  ${usd(be.lpLossAtLowerUsd)}`);
+  console.log(`  Verification:      ${usd(be.verificationUsd)}  (LP + short profit at lower bound, should ≈ LP now)`);
+
+  console.log(`\n  Stop loss scenarios (break-even size ${be.sizeHype} ${perpSymbol}):`);
+  console.log(`  ${"stop".padEnd(8)}  ${"buffer".padEnd(8)}  ${"short loss".padEnd(11)}  ${"LP gain".padEnd(9)}  ${"net loss".padEnd(10)}  days fees`);
+  for (const s of report.stopLossScenarios) {
+    console.log(
+      `  ${usd(s.stopPrice).padEnd(8)}` +
+      `  +${s.bufferPct.toFixed(1)}%`.padEnd(9) +
+      `  ${("-" + usd(s.shortLossUsd)).padEnd(11)}` +
+      `  ${("+" + usd(s.lpGainUsd)).padEnd(9)}` +
+      `  ${("-" + usd(s.netCombinedLossUsd)).padEnd(10)}` +
+      `  ${s.daysFeesToRecover.toFixed(1)} days`,
+    );
+  }
 
   console.log("\n### Verdict (fee-optimisation)");
   const icons = { "no-hedge": "✗", "consider-hedge": "△", "hedge-recommended": "✓" };

@@ -26,7 +26,7 @@ export function formatPnLDisplayData(pnlData: PnLView[]): PnLDisplayData[] {
       holdValue: `${formatNumber(pos.holdValueInToken1, 4)} ${pos.token1Symbol}`,
       feesEarned: `${formatNumber(pos.feesCollected0, 4)} ${pos.token0Symbol} + ${formatNumber(pos.feesCollected1, 4)} ${pos.token1Symbol} (= ${formatNumber(pos.feesValueInToken1, 4)} ${pos.token1Symbol}; ${usdFees})`,
       absolutePnl: `${formatNumber(pos.absolutePnlInToken1, 4)} ${pos.token1Symbol} (${formatPercent(pos.absolutePnlPercent)})`,
-      divergenceLoss: `${pos.divergenceLossPercent} (${formatNumber(pos.exitValueInToken1 - pos.holdValueInToken1, 4)} ${pos.token1Symbol})`,
+      divergenceLoss: `${formatPercent(pos.divergenceLossPercent)} (${formatNumber(pos.exitValueInToken1 - pos.holdValueInToken1, 4)} ${pos.token1Symbol})`,
       opportunityCost: `${formatNumber(pos.opportunityCostInToken1, 4)} ${pos.token1Symbol}`,
     };
   });

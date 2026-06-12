@@ -268,6 +268,33 @@ describe("GET /il", () => {
     expect(body.positions).toHaveLength(1);
     expect(body.positions[0].tokenId).toBe("123");
   });
+
+  it("returns 503 when service throws RpcError with code -32005", async () => {
+    mockGetILView = async () => {
+      throw new MockRpcError("Rate limited", -32005);
+    };
+
+    const res = await server.inject({ method: "GET", url: "/il" });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: "RPC rate limited, try again later" });
+  });
+
+  it("returns 500 when service throws a generic error", async () => {
+    mockGetILView = async () => {
+      throw new Error("Unexpected failure");
+    };
+
+    const res = await server.inject({ method: "GET", url: "/il" });
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("returns 200 with empty positions array when service returns no rows", async () => {
+    mockGetILView = async () => [];
+
+    const res = await server.inject({ method: "GET", url: "/il" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ positions: [] });
+  });
 });
 
 // ---------------------------------------------------------------------------

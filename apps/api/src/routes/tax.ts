@@ -325,8 +325,13 @@ async function handleTaxTransactionUpdate(
 
 export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/tax/transactions/enrich", async (_request, reply) => {
-    const result = await enrichTaxTransactionsEurValues(fastify.lpConfig);
-    reply.send(result);
+    try {
+      const result = await enrichTaxTransactionsEurValues(fastify.lpConfig);
+      return reply.send(result);
+    } catch (err) {
+      fastify.log.error(err);
+      return reply.status(503).send({ error: "Failed to enrich tax transactions" });
+    }
   });
 
   fastify.post("/tax/transactions/sync", async (_request, reply) => {

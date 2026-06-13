@@ -3,6 +3,7 @@ import {
   formatPrice,
   formatPercent,
   formatUsd,
+  buildNetHedgePnL,
   type PnLDisplayData,
   type PnLView,
   type HedgeView,
@@ -42,30 +43,13 @@ export function formatPnLDisplayData(
     let netPnl: string | undefined;
 
     if (hedge) {
-      // hedge P&L in USD (Hyperliquid always returns USD)
-      const hedgePnlUsd: number | null =
-        hedge.status === "closed"
-          ? hedge.realizedPnl != null
-            ? hedge.realizedPnl + hedge.fundingEarned
-            : null
-          : hedge.unrealizedPnl + hedge.fundingEarned;
-
-      // LP P&L in USD (only if token1UsdPrice available)
-      const lpAbsPnlUsd: number | null =
-        pos.token1UsdPrice != null
-          ? pos.absolutePnlInToken1 * pos.token1UsdPrice
-          : null;
-
-      const lpEntryUsd: number | null =
-        pos.token1UsdPrice != null
-          ? pos.entryValueInToken1 * pos.token1UsdPrice
-          : null;
+      const { lpPnlUsd, hedgePnlUsd, combinedPnlUsd, combinedRoiPct } =
+        buildNetHedgePnL(pos, hedge);
 
       // lpPnl: USD if available, else token1-denominated (same as absolutePnl but relabeled)
-      if (lpAbsPnlUsd != null) {
-        lpPnl = `${formatUsd(lpAbsPnlUsd)} (${formatPercent(pos.absolutePnlPercent)})`;
+      if (lpPnlUsd != null) {
+        lpPnl = `${formatUsd(lpPnlUsd)} (${formatPercent(pos.absolutePnlPercent)})`;
       }
-      // else lpPnl stays undefined → displayPnL falls back to absolutePnl
 
       // hedgePnl string — always USD
       if (hedge.status === "closed") {
@@ -79,10 +63,8 @@ export function formatPnLDisplayData(
       }
 
       // netPnl — only when both sides in USD and entry > 0
-      if (lpAbsPnlUsd != null && hedgePnlUsd != null && lpEntryUsd != null && lpEntryUsd > 0) {
-        const combinedUsd = lpAbsPnlUsd + hedgePnlUsd;
-        const combinedRoiPct = combinedUsd / lpEntryUsd;
-        netPnl = `${formatUsd(combinedUsd)} (${formatPercent(combinedRoiPct)})`;
+      if (combinedPnlUsd != null && combinedRoiPct != null) {
+        netPnl = `${formatUsd(combinedPnlUsd)} (${formatPercent(combinedRoiPct)})`;
       }
     }
 

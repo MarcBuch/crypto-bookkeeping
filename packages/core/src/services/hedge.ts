@@ -1,5 +1,14 @@
 import type { Config } from "../config.js";
-import { insertHedgeSnapshot } from "../db/store.js";
+import {
+  insertHedgeSnapshot,
+  getOpenHedgeEvent,
+  getEarliestHedgeSnapshot,
+  insertHedgeEvent,
+  listHedgeSnapshots,
+  closeHedgeEvent,
+  getHedgeEvents,
+  type StoredHedgeEvent,
+} from "../db/store.js";
 
 export interface HedgeView {
   tokenId: string;
@@ -11,6 +20,10 @@ export interface HedgeView {
   fundingEarned: number; // cumFunding.sinceOpen, positive when short earns
   liquidationPx: number | null;
   leverage: { type: string; value: number };
+  status: "active" | "closed";
+  realizedPnl?: number | null;
+  closedAt?: string | null;
+  closeReason?: string | null;
 }
 
 interface HyperliquidPosition {
@@ -32,6 +45,18 @@ interface HyperliquidPosition {
 
 interface HyperliquidClearinghouseState {
   assetPositions: HyperliquidPosition[];
+}
+
+interface HyperliquidFill {
+  coin: string;
+  px: string;
+  sz: string;
+  side: "A" | "B";
+  time: number;
+  closedPnl: string;
+  oid: number;
+  tid: number;
+  dir: string;
 }
 
 export async function getHedgeView(config: Config, tokenId: string): Promise<HedgeView> {
@@ -79,6 +104,11 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
   const position = data.assetPositions.find((ap) => ap.position.coin === coin);
 
   if (!position) {
+    // Position is fully absent from Hyperliquid (settled and removed, not just szi=0).
+    // Attempt to reconstruct a closed view from fills + local data.
+    const closedView = await resolveAbsentPosition(config, tokenId, coin);
+    if (closedView) return closedView;
+
     throw new Error(
       `No open ${coin} position found on Hyperliquid for wallet ${config.wallet}. ` +
         `Available positions: ${data.assetPositions.map((ap) => ap.position.coin).join(", ") || "none"}`,
@@ -88,10 +118,23 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
   // Check if position is closed (szi === 0)
   const szi = parseFloat(position.position.szi);
   if (szi === 0) {
-    throw new Error(
-      `${coin} position is closed (szi=0) for wallet ${config.wallet}. ` +
-        `Cannot create hedge view for a closed position.`,
-    );
+    // Position closed on Hyperliquid — detect and record the close
+    const closedEvent = await resolveHedgeClose(config, tokenId, coin);
+    return {
+      tokenId,
+      coin,
+      szi: position.position.szi,
+      entryPx: parseFloat(position.position.entryPx),
+      markPx: parseFloat(position.position.markPx),
+      unrealizedPnl: 0,
+      fundingEarned: closedEvent?.funding_earned ?? 0,
+      liquidationPx: null,
+      leverage: position.position.leverage,
+      status: "closed",
+      realizedPnl: closedEvent?.realized_pnl ?? null,
+      closedAt: closedEvent?.closed_at ?? null,
+      closeReason: closedEvent?.close_reason ?? null,
+    };
   }
 
   // Parse all numeric fields
@@ -111,6 +154,7 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
     fundingEarned,
     liquidationPx: isNaN(liquidationPx) ? null : liquidationPx,
     leverage: position.position.leverage,
+    status: "active",
   };
 }
 
@@ -125,4 +169,260 @@ export function snapshotHedge(view: HedgeView): void {
     funding_earned: view.fundingEarned,
     liquidation_px: view.liquidationPx,
   });
+}
+
+/**
+ * Handles the case where a position is completely absent from Hyperliquid's
+ * clearinghouseState (fully settled, removed) and no local snapshots exist.
+ *
+ * Strategy:
+ * 1. Check if we already have a closed hedge_event (idempotent fast-path).
+ * 2. Fetch all fills for this coin since epoch 0 — opening fills give us
+ *    entry price and size; closing fills give us realized P&L.
+ * 3. If no fills found at all, return null (genuinely no history).
+ */
+async function resolveAbsentPosition(
+  config: Config,
+  tokenId: string,
+  coin: string,
+): Promise<HedgeView | null> {
+  // Fast path: already recorded in DB
+  const existingClosed = getHedgeEvents(tokenId).find(
+    (e) => e.coin === coin && e.status === "closed",
+  );
+  if (existingClosed) {
+    return buildClosedView(tokenId, coin, existingClosed);
+  }
+
+  // Fetch all fills for this wallet (no startTime filter — no local open event to anchor to)
+  const response = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "userFillsByTime",
+      user: config.wallet,
+      startTime: 0,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Hyperliquid API error (${response.status}) fetching fills for wallet ${config.wallet}`,
+    );
+  }
+
+  const fills = (await response.json()) as HyperliquidFill[];
+  const coinFills = fills.filter((f) => f.coin === coin);
+  if (coinFills.length === 0) return null;
+
+  // Derive entry from the earliest open fill
+  const openFills = coinFills.filter((f) => f.dir.includes("Open"));
+  const closingFills = coinFills.filter((f) => f.dir.includes("Close"));
+  if (closingFills.length === 0) return null;
+
+  const entryPx =
+    openFills.length > 0
+      ? parseFloat(openFills.reduce((e, f) => (f.time < e.time ? f : e)).px)
+      : 0;
+
+  const totalClosedPnl = closingFills.reduce((s, f) => s + parseFloat(f.closedPnl), 0);
+  const largestFill = closingFills.reduce((m, f) =>
+    parseFloat(f.sz) > parseFloat(m.sz) ? f : m,
+  );
+  const totalSize =
+    openFills.length > 0
+      ? openFills.reduce((s, f) => s + parseFloat(f.sz), 0)
+      : closingFills.reduce((s, f) => s + parseFloat(f.sz), 0);
+
+  // Write the open event (bootstrap) then close it
+  const openedAt = openFills.length > 0
+    ? new Date(Math.min(...openFills.map((f) => f.time))).toISOString()
+    : new Date(Math.min(...closingFills.map((f) => f.time))).toISOString();
+
+  // Insert open event (idempotent — partial unique index guards duplicates)
+  try {
+    insertHedgeEvent({
+      token_id: tokenId,
+      coin,
+      status: "open",
+      entry_px: entryPx,
+      size: totalSize,
+      opened_at: openedAt,
+      closed_at: null,
+      close_px: null,
+      realized_pnl: null,
+      funding_earned: null,
+      close_reason: null,
+      hl_fill_hash: null,
+    });
+  } catch {
+    // Race or already exists — continue
+  }
+
+  const closedEvent = closeHedgeEvent({
+    token_id: tokenId,
+    coin,
+    closed_at: new Date(largestFill.time).toISOString(),
+    close_px: parseFloat(largestFill.px),
+    realized_pnl: totalClosedPnl,
+    funding_earned: 0,
+    close_reason: "stop_loss",
+    hl_fill_hash: String(largestFill.tid),
+  });
+
+  const finalEvent = closedEvent ?? getHedgeEvents(tokenId).find(
+    (e) => e.coin === coin && e.status === "closed",
+  ) ?? null;
+
+  return finalEvent ? buildClosedView(tokenId, coin, finalEvent) : null;
+}
+
+function buildClosedView(
+  tokenId: string,
+  coin: string,
+  event: StoredHedgeEvent,
+): HedgeView {
+  return {
+    tokenId,
+    coin,
+    szi: "0",
+    entryPx: event.entry_px,
+    markPx: event.close_px ?? 0,
+    unrealizedPnl: 0,
+    fundingEarned: event.funding_earned ?? 0,
+    liquidationPx: null,
+    leverage: { type: "cross", value: 0 },
+    status: "closed",
+    realizedPnl: event.realized_pnl,
+    closedAt: event.closed_at,
+    closeReason: event.close_reason,
+  };
+}
+
+export function resolveHedgeOpen(
+  tokenId: string,
+  coin: string,
+): StoredHedgeEvent | null {
+  // Check if an open event already exists (idempotent)
+  const existingOpen = getOpenHedgeEvent(tokenId, coin);
+  if (existingOpen) {
+    return existingOpen;
+  }
+
+  // Query the earliest hedge_snapshot for this (tokenId, coin)
+  const earliestSnapshot = getEarliestHedgeSnapshot(tokenId, coin);
+  if (!earliestSnapshot) {
+    return null;
+  }
+
+  // Create the open event from the earliest snapshot
+  try {
+    return insertHedgeEvent({
+      token_id: tokenId,
+      coin: coin,
+      status: "open",
+      entry_px: earliestSnapshot.entry_px,
+      size: Math.abs(parseFloat(earliestSnapshot.szi)),
+      opened_at: earliestSnapshot.snapshot_at,
+      closed_at: null,
+      close_px: null,
+      realized_pnl: null,
+      funding_earned: null,
+      close_reason: null,
+      hl_fill_hash: null,
+    });
+  } catch {
+    // Race: another caller already inserted the open event — return it
+    return getOpenHedgeEvent(tokenId, coin);
+  }
+}
+
+export async function resolveHedgeClose(
+  config: Config,
+  tokenId: string,
+  coin: string,
+): Promise<StoredHedgeEvent | null> {
+  // Step 1: Check if already closed (idempotent)
+  const allEvents = getHedgeEvents(tokenId);
+  const existingClosed = allEvents.find(
+    (event) => event.status === "closed" && event.coin === coin,
+  );
+  if (existingClosed) {
+    return existingClosed;
+  }
+
+  // Step 2: Ensure we have an open event
+  const openEvent = resolveHedgeOpen(tokenId, coin);
+  if (!openEvent) {
+    return null;
+  }
+
+  // Step 3: Get funding_earned from most recent hedge_snapshots
+  const snapshots = listHedgeSnapshots(tokenId);
+  const mostRecentSnapshot = snapshots.find((s) => s.coin === coin);
+  const fundingEarned = mostRecentSnapshot?.funding_earned ?? 0;
+
+   // Step 4: Fetch fills from Hyperliquid userFillsByTime API
+   const response = await fetch("https://api.hyperliquid.xyz/info", {
+     method: "POST",
+     headers: { "Content-Type": "application/json" },
+     body: JSON.stringify({
+       type: "userFillsByTime",
+       user: config.wallet,
+       startTime: new Date(openEvent.opened_at).getTime(),
+     }),
+   });
+
+  if (!response.ok) {
+    throw new Error(
+      `Hyperliquid API error (${response.status}): ${response.statusText} ` +
+        `when fetching userFillsByTime for wallet ${config.wallet}`,
+    );
+  }
+
+  const fills = (await response.json()) as HyperliquidFill[];
+
+  // Step 5: Filter fills to find closing fills for this coin
+  const closingFills = fills.filter(
+    (fill) => fill.coin === coin && fill.dir.includes("Close"),
+  );
+
+  if (closingFills.length === 0) {
+    return null;
+  }
+
+  // Step 6: Sum up closedPnl across all closing fills
+  const totalClosedPnl = closingFills.reduce(
+    (sum, fill) => sum + parseFloat(fill.closedPnl),
+    0,
+  );
+
+  // Step 7: Find the closing fill with the largest size
+  const largestFill = closingFills.reduce((max, fill) =>
+    parseFloat(fill.sz) > parseFloat(max.sz) ? fill : max,
+  );
+
+  // Step 8: Call closeHedgeEvent
+  const closedEvent = closeHedgeEvent({
+    token_id: tokenId,
+    coin,
+    closed_at: new Date(largestFill.time).toISOString(),
+    close_px: parseFloat(largestFill.px),
+    realized_pnl: totalClosedPnl,
+    funding_earned: fundingEarned,
+    close_reason: "stop_loss",
+    hl_fill_hash: String(largestFill.tid),
+  });
+
+  // Step 9: Return the closed event (or re-fetch if race condition)
+  if (closedEvent) {
+    return closedEvent;
+  }
+
+  // Re-fetch in case of race condition
+  const allEventsAfter = getHedgeEvents(tokenId);
+  return (
+    allEventsAfter.find((event) => event.status === "closed" && event.coin === coin) ||
+    null
+  );
 }

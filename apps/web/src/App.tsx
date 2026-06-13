@@ -298,6 +298,31 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
   const { data: hedgeData } = useHedge(position.tokenId);
 
+  // Hedge-adjusted ROI
+  // For closed hedges, suppress combined ROI when realizedPnl is unknown (null/undefined)
+  // rather than silently treating unknown P&L as zero.
+  const hedgePnlUsd = hedgeData
+    ? hedgeData.status === "closed"
+      ? hedgeData.realizedPnl != null
+        ? hedgeData.realizedPnl + hedgeData.fundingEarned
+        : null
+      : hedgeData.unrealizedPnl + hedgeData.fundingEarned
+    : null;
+
+  const lpAbsPnlUsd = pnl?.token1UsdPrice != null
+    ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
+    : null;
+  const lpEntryUsd = pnl?.token1UsdPrice != null
+    ? pnl.entryValueInToken1 * pnl.token1UsdPrice
+    : null;
+
+  const combinedAbsUsd =
+    lpAbsPnlUsd != null && hedgePnlUsd != null ? lpAbsPnlUsd + hedgePnlUsd : null;
+  const combinedRoiPct =
+    combinedAbsUsd != null && lpEntryUsd != null && lpEntryUsd > 0
+      ? combinedAbsUsd / lpEntryUsd
+      : null;
+
   return (
     <div>
       <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
@@ -326,16 +351,44 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
       />
       <DarkStat
         label="ROI"
-        value={pnl ? formatPercent(pnl.absolutePnlPercent) : "n/a"}
-        valueClassName={pnl ? darkToneClass(pnl.absolutePnlPercent) : undefined}
+        value={pnl ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent) : "n/a"}
+        valueClassName={pnl ? darkToneClass(combinedRoiPct ?? pnl.absolutePnlPercent) : undefined}
         detail={
           pnl
-            ? pnl.token1UsdPrice != null
-              ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)
-              : `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`
+            ? (() => {
+                const netUsd = combinedAbsUsd ?? lpAbsPnlUsd;
+                const netToken = `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`;
+                const display = netUsd != null ? formatUsd(netUsd) : netToken;
+                const tone = darkToneClass(
+                  netUsd != null ? netUsd : pnl.absolutePnlInToken1,
+                );
+                return <span className={tone}>{display}</span>;
+              })()
             : undefined
         }
-        tooltip={pnl ? "Gain/loss vs entry value. Includes all fees earned (collected + pending)." : undefined}
+        tooltip={
+          pnl
+            ? (() => {
+                const lines: string[] = [];
+                if (combinedRoiPct != null) {
+                  lines.push(`Net (LP + hedge): ${formatUsd(combinedAbsUsd!)}`);
+                  lines.push(`  LP P&L:      ${formatUsd(lpAbsPnlUsd!)}`);
+                  lines.push(`  Hedge P&L:   ${formatUsd(hedgePnlUsd!)}`);
+                  lines.push(`Entry value:   ${formatUsd(lpEntryUsd!)}`);
+                } else if (lpAbsPnlUsd != null) {
+                  lines.push(`LP P&L: ${formatUsd(lpAbsPnlUsd)}`);
+                  lines.push(`  Fees: ${formatUsd(pnl.feesValueUsd ?? pnl.feesValueInToken1)} ${pnl.feesValueUsd == null ? pnl.token1Symbol : ""}`);
+                  lines.push(`Entry: ${formatUsd(lpEntryUsd!)}`);
+                } else {
+                  lines.push(`LP P&L: ${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`);
+                  lines.push(`  Fees: ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}`);
+                  lines.push(`Entry: ${formatNumber(pnl.entryValueInToken1)} ${pnl.token1Symbol}`);
+                }
+                lines.push(`ROI = net P&L ÷ entry value`);
+                return lines.join("\n");
+              })()
+            : undefined
+        }
       />
 
       <div className="min-w-0 font-mono text-xs font-bold">
@@ -567,7 +620,7 @@ export function DarkStat({
 }: {
   label: string;
   value: string;
-  detail?: string;
+  detail?: React.ReactNode;
   valueClassName?: string;
   tooltip?: string;
 }) {

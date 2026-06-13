@@ -328,7 +328,7 @@ describe("getHedgeView() — closed position path", () => {
       // Verify closedAt is a valid ISO timestamp
       expect(typeof result.closedAt).toBe("string");
       expect(new Date(result.closedAt!).getTime()).toBeGreaterThan(0);
-      expect(result.closeReason).toBe("stop_loss");
+      expect(result.closeReason).toBe("manual_close");
       expect(result.fundingEarned).toBe(0.5);
       expect(result.entryPx).toBe(61.5);
       expect(result.markPx).toBe(62.0);

@@ -383,12 +383,13 @@ describe("resolveHedgeClose — adversarial tests", () => {
       }
     });
 
-    it("resolveHedgeClose with multiple fills — uses largest fill for close_px", async () => {
+    it("resolveHedgeClose with multiple fills — uses VWAP for close_px", async () => {
       // Setup: insert snapshot and open event
       insertHedgeSnapshot(minimalHedgeSnapshot("token-123", "HYPE"));
       resolveHedgeOpen("token-123", "HYPE");
 
       // Mock fetch to return fills with different sizes
+      // VWAP = (60.0*10 + 61.58*20 + 62.0*5) / 35 = (600 + 1231.6 + 310) / 35 = 2141.6 / 35 ≈ 61.189
       const originalFetch = globalThis.fetch;
       globalThis.fetch = (async () => ({
         ok: true,
@@ -396,7 +397,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
         statusText: "OK",
         json: async () => [
           mockFill({ closedPnl: "-30", sz: "10", px: "60.0" }),
-          mockFill({ closedPnl: "-20", sz: "20", px: "61.58" }), // Largest
+          mockFill({ closedPnl: "-20", sz: "20", px: "61.58" }),
           mockFill({ closedPnl: "-5", sz: "5", px: "62.0" }),
         ],
       } as unknown as Response)) as unknown as typeof fetch;
@@ -406,7 +407,9 @@ describe("resolveHedgeClose — adversarial tests", () => {
         const result = await resolveHedgeClose(config, "token-123", "HYPE");
 
         expect(result).toBeDefined();
-        expect(result?.close_px).toBe(61.58); // From largest fill (sz=20)
+        // VWAP = (60.0*10 + 61.58*20 + 62.0*5) / 35
+        const expectedVwap = (60.0 * 10 + 61.58 * 20 + 62.0 * 5) / 35;
+        expect(result?.close_px).toBeCloseTo(expectedVwap, 6);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -483,18 +486,18 @@ describe("resolveHedgeClose — adversarial tests", () => {
       }
     });
 
-    it("resolveHedgeClose sets close_reason to 'stop_loss'", async () => {
+    it("resolveHedgeClose sets close_reason to 'manual_close' for regular close fills", async () => {
       // Setup: insert snapshot and open event
       insertHedgeSnapshot(minimalHedgeSnapshot("token-123", "HYPE"));
       resolveHedgeOpen("token-123", "HYPE");
 
-      // Mock fetch to return closing fills
+      // Mock fetch to return a normal "Close Short" fill (not a liquidation)
       const originalFetch = globalThis.fetch;
       globalThis.fetch = (async () => ({
         ok: true,
         status: 200,
         statusText: "OK",
-        json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
+        json: async () => [mockFill({ closedPnl: "-50", sz: "30.1", dir: "Close Short" })],
       } as unknown as Response)) as unknown as typeof fetch;
 
       try {
@@ -502,7 +505,32 @@ describe("resolveHedgeClose — adversarial tests", () => {
         const result = await resolveHedgeClose(config, "token-123", "HYPE");
 
         expect(result).toBeDefined();
-        expect(result?.close_reason).toBe("stop_loss");
+        expect(result?.close_reason).toBe("manual_close");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("resolveHedgeClose sets close_reason to 'liquidation' when any fill is a liquidation", async () => {
+      // Setup: insert snapshot and open event
+      insertHedgeSnapshot(minimalHedgeSnapshot("token-123", "HYPE"));
+      resolveHedgeOpen("token-123", "HYPE");
+
+      // Mock fetch to return a liquidation fill
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => [mockFill({ closedPnl: "-50", sz: "30.1", dir: "Liquidated" })],
+      } as unknown as Response)) as unknown as typeof fetch;
+
+      try {
+        const config = minimalConfig();
+        const result = await resolveHedgeClose(config, "token-123", "HYPE");
+
+        expect(result).toBeDefined();
+        expect(result?.close_reason).toBe("liquidation");
       } finally {
         globalThis.fetch = originalFetch;
       }

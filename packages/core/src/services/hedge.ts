@@ -9,6 +9,7 @@ import {
   getHedgeEvents,
   type StoredHedgeEvent,
 } from "../db/store.js";
+import type { PnLView } from "./pnl.js";
 
 export interface HedgeView {
   tokenId: string;
@@ -172,6 +173,48 @@ export function snapshotHedge(view: HedgeView): void {
 }
 
 /**
+ * Infer the close reason from the set of closing fills.
+ *
+ * Hyperliquid encodes direction in the `dir` field, e.g.:
+ *   "Close Short" — voluntary close (TP/manual)
+ *   "Close Long"  — voluntary close
+ *   "Liquidated"  — liquidation (may appear on its own or alongside Close)
+ *
+ * Rules:
+ *   - Any fill whose dir contains "Liquidat" → "liquidation"
+ *   - All fills are closing fills and none mention liquidation → "manual_close"
+ *   - Fallback (unknown dir format) → "manual_close"
+ */
+function inferCloseReason(
+  closingFills: HyperliquidFill[],
+): "liquidation" | "manual_close" {
+  if (closingFills.some((f) => f.dir.toLowerCase().includes("liquidat"))) {
+    return "liquidation";
+  }
+  return "manual_close";
+}
+
+/**
+ * Compute the volume-weighted average price (VWAP) across a set of fills.
+ * Falls back to the price of the single largest fill when total size is zero
+ * (should not happen in practice).
+ */
+function vwapClose(fills: HyperliquidFill[]): number {
+  const totalSize = fills.reduce((s, f) => s + parseFloat(f.sz), 0);
+  if (totalSize === 0) {
+    const largest = fills.reduce((m, f) =>
+      parseFloat(f.sz) > parseFloat(m.sz) ? f : m,
+    );
+    return parseFloat(largest.px);
+  }
+  const weightedSum = fills.reduce(
+    (s, f) => s + parseFloat(f.px) * parseFloat(f.sz),
+    0,
+  );
+  return weightedSum / totalSize;
+}
+
+/**
  * Handles the case where a position is completely absent from Hyperliquid's
  * clearinghouseState (fully settled, removed) and no local snapshots exist.
  *
@@ -226,6 +269,7 @@ async function resolveAbsentPosition(
       : 0;
 
   const totalClosedPnl = closingFills.reduce((s, f) => s + parseFloat(f.closedPnl), 0);
+  const closePx = vwapClose(closingFills);
   const largestFill = closingFills.reduce((m, f) =>
     parseFloat(f.sz) > parseFloat(m.sz) ? f : m,
   );
@@ -263,10 +307,12 @@ async function resolveAbsentPosition(
     token_id: tokenId,
     coin,
     closed_at: new Date(largestFill.time).toISOString(),
-    close_px: parseFloat(largestFill.px),
+    close_px: closePx,
     realized_pnl: totalClosedPnl,
-    funding_earned: 0,
-    close_reason: "stop_loss",
+    // funding_earned is unknown here — no snapshots available. Store null so
+    // callers can distinguish "zero" from "not recorded".
+    funding_earned: null,
+    close_reason: inferCloseReason(closingFills),
     hl_fill_hash: String(largestFill.tid),
   });
 
@@ -382,9 +428,13 @@ export async function resolveHedgeClose(
 
   const fills = (await response.json()) as HyperliquidFill[];
 
-  // Step 5: Filter fills to find closing fills for this coin
+  // Step 5: Filter fills to find closing fills for this coin.
+  // Include both voluntary closes ("Close Short", "Close Long") and
+  // liquidations ("Liquidated") — both reduce/clear the position.
   const closingFills = fills.filter(
-    (fill) => fill.coin === coin && fill.dir.includes("Close"),
+    (fill) =>
+      fill.coin === coin &&
+      (fill.dir.includes("Close") || fill.dir.toLowerCase().includes("liquidat")),
   );
 
   if (closingFills.length === 0) {
@@ -397,7 +447,9 @@ export async function resolveHedgeClose(
     0,
   );
 
-  // Step 7: Find the closing fill with the largest size
+  // Step 7: VWAP close price across all closing fills; largest fill used for
+  // the representative tid (hl_fill_hash) and closed_at timestamp.
+  const closePx = vwapClose(closingFills);
   const largestFill = closingFills.reduce((max, fill) =>
     parseFloat(fill.sz) > parseFloat(max.sz) ? fill : max,
   );
@@ -407,10 +459,10 @@ export async function resolveHedgeClose(
     token_id: tokenId,
     coin,
     closed_at: new Date(largestFill.time).toISOString(),
-    close_px: parseFloat(largestFill.px),
+    close_px: closePx,
     realized_pnl: totalClosedPnl,
     funding_earned: fundingEarned,
-    close_reason: "stop_loss",
+    close_reason: inferCloseReason(closingFills),
     hl_fill_hash: String(largestFill.tid),
   });
 
@@ -425,4 +477,73 @@ export async function resolveHedgeClose(
     allEventsAfter.find((event) => event.status === "closed" && event.coin === coin) ||
     null
   );
+}
+
+// ---------------------------------------------------------------------------
+// Shared net hedge P&L helper
+// ---------------------------------------------------------------------------
+
+/**
+ * The combined LP + hedge P&L figures used in the CLI and web UI.
+ *
+ * All fields are `null` when the required price data is unavailable (i.e.
+ * `token1UsdPrice` is null) or when realized P&L is unknown for a closed
+ * hedge.
+ */
+export interface NetHedgePnL {
+  /** LP absolute P&L in USD */
+  lpPnlUsd: number | null;
+  /**
+   * Hedge P&L in USD.
+   * - Active: unrealizedPnl + fundingEarned
+   * - Closed with known realizedPnl: realizedPnl + fundingEarned
+   * - Closed with unknown realizedPnl: null
+   */
+  hedgePnlUsd: number | null;
+  /** LP entry value in USD (used for ROI denominator) */
+  lpEntryUsd: number | null;
+  /**
+   * Combined (LP + hedge) P&L in USD.
+   * Null when either leg is null.
+   */
+  combinedPnlUsd: number | null;
+  /**
+   * Combined ROI as a decimal fraction (e.g. 0.05 = 5 %).
+   * Null when combined P&L or entry value is null, or entry value is zero.
+   */
+  combinedRoiPct: number | null;
+}
+
+/**
+ * Compute the combined LP + hedge P&L figures from a `PnLView` and a
+ * `HedgeView`. This is the single source of truth shared by the CLI
+ * (`pnl-format.ts`) and the web (`App.tsx / HedgePanel`).
+ */
+export function buildNetHedgePnL(pnl: PnLView, hedge: HedgeView): NetHedgePnL {
+  const hedgePnlUsd: number | null =
+    hedge.status === "closed"
+      ? hedge.realizedPnl != null
+        ? hedge.realizedPnl + hedge.fundingEarned
+        : null
+      : hedge.unrealizedPnl + hedge.fundingEarned;
+
+  const lpPnlUsd: number | null =
+    pnl.token1UsdPrice != null
+      ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
+      : null;
+
+  const lpEntryUsd: number | null =
+    pnl.token1UsdPrice != null
+      ? pnl.entryValueInToken1 * pnl.token1UsdPrice
+      : null;
+
+  const combinedPnlUsd =
+    lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
+
+  const combinedRoiPct =
+    combinedPnlUsd != null && lpEntryUsd != null && lpEntryUsd > 0
+      ? combinedPnlUsd / lpEntryUsd
+      : null;
+
+  return { lpPnlUsd, hedgePnlUsd, lpEntryUsd, combinedPnlUsd, combinedRoiPct };
 }

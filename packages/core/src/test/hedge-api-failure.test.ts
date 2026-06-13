@@ -9,6 +9,18 @@
  */
 
 import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
+import { Database } from "bun:sqlite";
+import { initSchema } from "../db/schema.js";
+
+// Mock getDb before importing store functions
+let testDb: Database;
+
+mock.module("../db/schema.js", () => ({
+  getDb: () => testDb,
+  initSchema,
+  resolveDbPath: () => ":memory:",
+  resetDb: () => {},
+}));
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing the module under test
@@ -81,6 +93,10 @@ const validHyperliquidResponse = {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  // Create a fresh in-memory database for each test
+  testDb = new Database(":memory:");
+  initSchema(testDb);
+  
   mockFetch = async () => ({
     ok: true,
     status: 200,
@@ -225,13 +241,22 @@ describe("getHedgeView() — API failure scenarios", () => {
 
   // Additional edge case: assetPositions is empty array
   it("assetPositions is empty array: no matching HYPE position → throws error", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        assetPositions: [],
-      }),
-    });
+    let callCount = 0;
+    mockFetch = async (_url: string, options: unknown) => {
+      callCount++;
+      const body = JSON.parse((options as { body?: string })?.body ?? "{}");
+      if (body.type === "userFillsByTime") {
+        // No fills found — resolveAbsentPosition returns null → falls through to throw
+        return { ok: true, status: 200, json: async () => [] };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          assetPositions: [],
+        }),
+      };
+    };
 
     const promise = getHedgeView(baseConfig, "484645");
     await expect(promise).rejects.toThrow();
@@ -240,36 +265,50 @@ describe("getHedgeView() — API failure scenarios", () => {
   });
 
   // Additional edge case: position with szi = 0 (closed)
-  it("position with szi = 0 (closed): throws error for closed position", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        assetPositions: [
-          {
-            position: {
-              coin: "HYPE",
-              szi: "0", // Closed position
-              entryPx: "1.5",
-              positionValue: "0",
-              unrealizedPnl: "0",
-              cumFunding: {
-                sinceOpen: "0",
+  it("position with szi = 0 (closed): returns closed HedgeView", async () => {
+    let callCount = 0;
+    mockFetch = async () => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: clearinghouseState with szi=0
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            assetPositions: [
+              {
+                position: {
+                  coin: "HYPE",
+                  szi: "0", // Closed position
+                  entryPx: "1.5",
+                  positionValue: "0",
+                  unrealizedPnl: "0",
+                  cumFunding: {
+                    sinceOpen: "0",
+                  },
+                  leverage: { type: "cross", value: 1 },
+                  liquidationPx: "0",
+                  markPx: "1.6",
+                },
+                type: "perp",
               },
-              leverage: { type: "cross", value: 1 },
-              liquidationPx: "0",
-              markPx: "1.6",
-            },
-            type: "perp",
-          },
-        ],
-      }),
-    });
+            ],
+          }),
+        };
+      } else {
+        // Second call: userFillsByTime with empty fills
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        };
+      }
+    };
 
-    const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    // Should mention closed position
-    await expect(promise).rejects.toThrow("closed");
+    const result = await getHedgeView(baseConfig, "484645");
+    expect(result.status).toBe("closed");
+    expect(result.unrealizedPnl).toBe(0);
+    expect(result.szi).toBe("0");
   });
 
   // Additional edge case: missing hedge config

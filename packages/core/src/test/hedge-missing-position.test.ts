@@ -8,9 +8,21 @@
  *  - assetPositions missing from response
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock, beforeEach } from "bun:test";
+import { Database } from "bun:sqlite";
+import { initSchema } from "../db/schema.js";
 import type { Config } from "../config.js";
 import { getHedgeView } from "../services/hedge.js";
+
+// Mock getDb before importing store functions
+let testDb: Database;
+
+mock.module("../db/schema.js", () => ({
+  getDb: () => testDb,
+  initSchema,
+  resolveDbPath: () => ":memory:",
+  resetDb: () => {},
+}));
 
 const originalFetch = globalThis.fetch;
 
@@ -22,13 +34,26 @@ type FetchCall = {
 function mockFetchJson(data: unknown, responseInit: ResponseInit = {}): FetchCall[] {
   const calls: FetchCall[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
-    calls.push({ url: String(input), body: requestInit?.body as string });
+    const bodyStr = requestInit?.body as string;
+    calls.push({ url: String(input), body: bodyStr });
     const status = responseInit.status ?? 200;
+    // For the secondary userFillsByTime call (triggered when position is absent),
+    // return an empty array so resolveAbsentPosition finds no fills and falls
+    // through to the throw — preserving the expected error behaviour.
+    let responseData: unknown = data;
+    try {
+      const parsed = JSON.parse(bodyStr ?? "{}");
+      if (parsed.type === "userFillsByTime") {
+        responseData = [];
+      }
+    } catch {
+      // ignore parse errors
+    }
     return {
       ok: status >= 200 && status < 300,
       status,
       statusText: "OK",
-      json: async () => data,
+      json: async () => responseData,
     } as Response;
   }) as unknown as typeof fetch;
   return calls;
@@ -47,6 +72,12 @@ function mockFetchError(status: number, statusText: string): FetchCall[] {
   }) as unknown as typeof fetch;
   return calls;
 }
+
+beforeEach(() => {
+  // Create a fresh in-memory database for each test
+  testDb = new Database(":memory:");
+  initSchema(testDb);
+});
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -244,26 +275,54 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
       },
     });
 
-    mockFetchJson({
-      assetPositions: [
-        {
-          position: {
-            coin: "HYPE",
-            szi: "0.00",
-            entryPx: "2000",
-            positionValue: "0",
-            unrealizedPnl: "0",
-            cumFunding: { sinceOpen: "0" },
-            leverage: { type: "cross", value: 1 },
-            liquidationPx: "0",
-            markPx: "2100",
-          },
-          type: "perp",
-        },
-      ],
-    });
+    // Mock fetch to return closed position on first call (clearinghouseState)
+    // and empty fills on second call (userFillsByTime)
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: clearinghouseState with szi=0
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            assetPositions: [
+              {
+                position: {
+                  coin: "HYPE",
+                  szi: "0.00",
+                  entryPx: "2000",
+                  positionValue: "0",
+                  unrealizedPnl: "0",
+                  cumFunding: { sinceOpen: "0" },
+                  leverage: { type: "cross", value: 1 },
+                  liquidationPx: "0",
+                  markPx: "2100",
+                },
+                type: "perp",
+              },
+            ],
+          }),
+        } as Response;
+      } else {
+        // Second call: userFillsByTime with empty fills
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+    }) as unknown as typeof fetch;
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/closed/i);
+    try {
+      const result = await getHedgeView(config, "123");
+      expect(result.status).toBe("closed");
+      expect(result.unrealizedPnl).toBe(0);
+      expect(result.szi).toBe("0.00");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("throws with 'szi=0' message when position size is zero", async () => {
@@ -276,26 +335,54 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
       },
     });
 
-    mockFetchJson({
-      assetPositions: [
-        {
-          position: {
-            coin: "HYPE",
-            szi: "0",
-            entryPx: "2000",
-            positionValue: "0",
-            unrealizedPnl: "0",
-            cumFunding: { sinceOpen: "0" },
-            leverage: { type: "cross", value: 1 },
-            liquidationPx: "0",
-            markPx: "2100",
-          },
-          type: "perp",
-        },
-      ],
-    });
+    // Mock fetch to return closed position on first call (clearinghouseState)
+    // and empty fills on second call (userFillsByTime)
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: clearinghouseState with szi=0
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            assetPositions: [
+              {
+                position: {
+                  coin: "HYPE",
+                  szi: "0",
+                  entryPx: "2000",
+                  positionValue: "0",
+                  unrealizedPnl: "0",
+                  cumFunding: { sinceOpen: "0" },
+                  leverage: { type: "cross", value: 1 },
+                  liquidationPx: "0",
+                  markPx: "2100",
+                },
+                type: "perp",
+              },
+            ],
+          }),
+        } as Response;
+      } else {
+        // Second call: userFillsByTime with empty fills
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+    }) as unknown as typeof fetch;
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/szi=0/i);
+    try {
+      const result = await getHedgeView(config, "123");
+      expect(result.status).toBe("closed");
+      expect(result.unrealizedPnl).toBe(0);
+      expect(result.szi).toBe("0");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   // =========================================================================

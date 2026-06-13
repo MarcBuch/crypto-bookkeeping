@@ -586,6 +586,44 @@ describe("GET /positions/:tokenId/hedge/events", () => {
   });
 
   // =========================================================================
+  // Cluster B2: Position exists but has no hedge config
+  // =========================================================================
+  describe("Cluster B2: Position with no hedge config", () => {
+    it("returns 404 when position exists but has no hedge config", async () => {
+      const res = await server.inject({ method: "GET", url: "/positions/456/hedge/events" });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        error: "No hedge configured for this position",
+        tokenId: "456",
+      });
+    });
+
+    it("returns 404 before calling getHedgeEvents for missing hedge config", async () => {
+      let getHedgeEventsCalled = false;
+      mockGetHedgeEvents = async () => {
+        getHedgeEventsCalled = true;
+        return [];
+      };
+
+      const res = await server.inject({ method: "GET", url: "/positions/456/hedge/events" });
+      expect(res.statusCode).toBe(404);
+      expect(getHedgeEventsCalled).toBe(false);
+    });
+
+    it("distinguishes between 'position not found' and 'no hedge config' errors", async () => {
+      // Position 999 doesn't exist
+      const res1 = await server.inject({ method: "GET", url: "/positions/999/hedge/events" });
+      expect(res1.statusCode).toBe(404);
+      expect(res1.json().error).toBe("Position not found");
+
+      // Position 456 exists but has no hedge
+      const res2 = await server.inject({ method: "GET", url: "/positions/456/hedge/events" });
+      expect(res2.statusCode).toBe(404);
+      expect(res2.json().error).toBe("No hedge configured for this position");
+    });
+  });
+
+  // =========================================================================
   // Cluster C: Empty history (known position, no events)
   // =========================================================================
   describe("Cluster C: Empty history (known position, no events)", () => {

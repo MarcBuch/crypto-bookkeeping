@@ -55,6 +55,13 @@ export async function hedgeRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: "Position not found", tokenId });
       }
 
+      // Check if hedge is configured for this position (mirrors /hedge endpoint)
+      if (!config.positions[tokenId].hedge) {
+        return reply
+          .status(404)
+          .send({ error: "No hedge configured for this position", tokenId });
+      }
+
       try {
         const events = await getHedgeEvents(tokenId);
         return reply.status(200).send({ events, tokenId });

@@ -106,6 +106,9 @@ interface HedgeReport {
   // Regime
   driftVolRatio: number;
   regime: string;
+  dailyVol: number;       // 1-sigma daily log-return vol (30-day), used for vol-stop derivation
+  high7d: number;         // highest daily close over last 7 days — natural structural stop reference
+  low7d: number;          // lowest daily close over last 7 days
 
   // Verdict (fee-optimisation framing)
   verdict: "no-hedge" | "consider-hedge" | "hedge-recommended";
@@ -154,6 +157,7 @@ interface HedgeReport {
     lpGainUsd: number;                // LP value increase at that price
     netCombinedLossUsd: number;       // shortLoss - lpGain
     daysFeesToRecover: number;        // netCombinedLoss / dailyFeeUsd
+    maxSizeForFeeConstraint: number;  // largest short (HYPE) where net loss <= 7 days of fees
   }[];
 
   capitalPreservationVerdict: "no-hedge" | "consider-hedge" | "hedge-recommended";
@@ -199,7 +203,14 @@ async function fetchFundingAndOI(coin: string): Promise<{ fundingRate: number; o
   };
 }
 
-async function fetchDriftVolRatio(coin: string): Promise<{ ratio: number; regime: string; pct7dChange: number }> {
+async function fetchDriftVolRatio(coin: string): Promise<{
+  ratio: number;
+  regime: string;
+  pct7dChange: number;
+  dailyVol: number;       // 1-sigma daily log-return vol (30-day)
+  high7d: number;         // highest daily close over last 7 days
+  low7d: number;          // lowest daily close over last 7 days
+}> {
   const now = Date.now();
   const startTime = now - 32 * 24 * 60 * 60 * 1000; // 32 days ago in ms
   const res = await fetch(HL_API, {
@@ -229,7 +240,12 @@ async function fetchDriftVolRatio(coin: string): Promise<{ ratio: number; regime
     ? ((closes[closes.length - 1] - closes[closes.length - 8]) / closes[closes.length - 8]) * 100
     : 0;
 
-  return { ratio, regime, pct7dChange };
+  // 7-day high/low closes (structural price reference for stop placement)
+  const last8Closes = closes.slice(-8);
+  const high7d = Math.max(...last8Closes);
+  const low7d = Math.min(...last8Closes);
+
+  return { ratio, regime, pct7dChange, dailyVol: vol, high7d, low7d };
 }
 
 async function fetchOpenTimestamp(tokenId: string): Promise<number | null> {
@@ -522,7 +538,7 @@ async function main() {
   // Determine perp symbol (strip W prefix from wrapped token)
   const perpSymbol = pos.token0Symbol.replace(/^W/, "");
 
-  const [{ fundingRate, openInterest }, { ratio: driftVolRatio, regime, pct7dChange }, openTs] = await Promise.all([
+  const [{ fundingRate, openInterest }, { ratio: driftVolRatio, regime, pct7dChange, dailyVol, high7d, low7d }, openTs] = await Promise.all([
     fetchFundingAndOI(perpSymbol),
     fetchDriftVolRatio(perpSymbol),
     fetchOpenTimestamp(pos.tokenId),
@@ -625,10 +641,40 @@ async function main() {
   };
 
   // ── Stop loss scenarios ───────────────────────────────────────────────────
-  // For each candidate stop price: short loss, LP value gain, net combined cost,
-  // and days of fees needed to recover the net.
-  const STOP_CANDIDATES = [59.52, 61.00, 61.58, 62.50, 65.00];
-  const stopLossScenarios = STOP_CANDIDATES
+  // Dynamic stop candidates derived from price structure and volatility:
+  //   1. LP entry price         — natural "thesis invalidated" level
+  //   2. LP upper-third trigger — operational rerange level
+  //   3. 1.5σ vol stop          — entry + 1.5 × dailyVol × currentPrice (one vol move buffer)
+  //   4. 7d structural high +1% — above which the previous range high is broken
+  //
+  // For each candidate: short loss, LP value gain, net combined cost,
+  // days of fees to recover, and max position size where net loss ≤ 7 days fees.
+  const upperThirdPrice = pos.priceLower + (pos.priceUpper - pos.priceLower) * (2 / 3);
+  const volStopPrice = currentPrice * (1 + 1.5 * dailyVol);
+  const structuralHighStop = high7d * 1.01;
+
+  const rawCandidates = [
+    pos.entryPrice,
+    upperThirdPrice,
+    volStopPrice,
+    structuralHighStop,
+  ];
+
+  // Deduplicate: if two candidates are within $0.30 of each other, keep only the higher one
+  const dedupedCandidates: number[] = [];
+  const sorted = [...rawCandidates].sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    if (i === 0 || sorted[i] - sorted[i - 1] > 0.30) {
+      dedupedCandidates.push(sorted[i]);
+    } else {
+      // Replace previous with the higher value
+      dedupedCandidates[dedupedCandidates.length - 1] = sorted[i];
+    }
+  }
+
+  const maxLossPerStop = (dailyFeeUsd ?? 0) * 7; // budget: 1 week of fees
+
+  const stopLossScenarios = dedupedCandidates
     .filter((stop) => stop > currentPrice)
     .map((stopPrice) => {
       const shortLossUsd = (stopPrice - currentPrice) * breakEvenSize;
@@ -636,13 +682,20 @@ async function main() {
       const netCombinedLossUsd = Math.round((shortLossUsd - lpGainUsd) * 100) / 100;
       const bufferPct = ((stopPrice - currentPrice) / currentPrice) * 100;
       const daysFeesToRecover = (dailyFeeUsd ?? 0) > 0 ? netCombinedLossUsd / (dailyFeeUsd ?? 1) : Infinity;
+      // Max size so net loss (shortLoss - lpGain) ≤ 7-day fee budget
+      // netLoss = size * (stopPrice - currentPrice) - lpGainUsd
+      // size ≤ (maxLossPerStop + lpGainUsd) / (stopPrice - currentPrice)
+      const maxSizeForFeeConstraint = stopPrice > currentPrice
+        ? Math.max(0, Math.round(((maxLossPerStop + lpGainUsd) / (stopPrice - currentPrice)) * 10) / 10)
+        : 0;
       return {
-        stopPrice,
+        stopPrice: Math.round(stopPrice * 100) / 100,
         bufferPct: Math.round(bufferPct * 10) / 10,
         shortLossUsd: Math.round(shortLossUsd * 100) / 100,
         lpGainUsd: Math.round(lpGainUsd * 100) / 100,
         netCombinedLossUsd,
         daysFeesToRecover: Math.round(daysFeesToRecover * 10) / 10,
+        maxSizeForFeeConstraint,
       };
     });
 
@@ -696,6 +749,9 @@ async function main() {
     openInterest,
     driftVolRatio,
     regime,
+    dailyVol,
+    high7d,
+    low7d,
     verdict,
     verdictReason,
     hedgeBreakEvenDays,
@@ -766,6 +822,8 @@ async function main() {
 
   console.log("\n### Market Regime");
   console.log(`  Drift/vol ratio: ${driftVolRatio.toFixed(3)}  →  ${regime.toUpperCase()}`);
+  console.log(`  Daily vol (30d): ${(dailyVol * 100).toFixed(2)}%  →  1.5σ stop level: ${usd(currentPrice * (1 + 1.5 * dailyVol))}`);
+  console.log(`  7d high: ${usd(high7d)}  |  7d low: ${usd(low7d)}  |  structural stop (high +1%): ${usd(high7d * 1.01)}`);
 
   console.log("\n### Hedge Break-even");
   if (hedgeBreakEvenDays !== null) {
@@ -822,16 +880,28 @@ async function main() {
   console.log(`  LP loss at lower:  ${usd(be.lpLossAtLowerUsd)}`);
   console.log(`  Verification:      ${usd(be.verificationUsd)}  (LP + short profit at lower bound, should ≈ LP now)`);
 
+  const upperThirdDisplay = pos.priceLower + (pos.priceUpper - pos.priceLower) * (2 / 3);
+  const volStopDisplay = currentPrice * (1 + 1.5 * dailyVol);
+  const structHighDisplay = high7d * 1.01;
+  function stopLabel(price: number): string {
+    if (Math.abs(price - pos.entryPrice) < 0.05) return "LP entry";
+    if (Math.abs(price - upperThirdDisplay) < 0.05) return "upper-third";
+    if (Math.abs(price - volStopDisplay) < 0.30) return "1.5σ vol";
+    if (Math.abs(price - structHighDisplay) < 0.30) return "7d high+1%";
+    return "";
+  }
   console.log(`\n  Stop loss scenarios (break-even size ${be.sizeHype} ${perpSymbol}):`);
-  console.log(`  ${"stop".padEnd(8)}  ${"buffer".padEnd(8)}  ${"short loss".padEnd(11)}  ${"LP gain".padEnd(9)}  ${"net loss".padEnd(10)}  days fees`);
+  console.log(`  ${"stop".padEnd(8)}  ${"label".padEnd(12)}  ${"buffer".padEnd(8)}  ${"short loss".padEnd(11)}  ${"LP gain".padEnd(9)}  ${"net loss".padEnd(10)}  ${"days fees".padEnd(10)}  max size (≤7d fees)`);
   for (const s of report.stopLossScenarios) {
     console.log(
       `  ${usd(s.stopPrice).padEnd(8)}` +
+      `  ${stopLabel(s.stopPrice).padEnd(12)}` +
       `  +${s.bufferPct.toFixed(1)}%`.padEnd(9) +
       `  ${("-" + usd(s.shortLossUsd)).padEnd(11)}` +
       `  ${("+" + usd(s.lpGainUsd)).padEnd(9)}` +
       `  ${("-" + usd(s.netCombinedLossUsd)).padEnd(10)}` +
-      `  ${s.daysFeesToRecover.toFixed(1)} days`,
+      `  ${s.daysFeesToRecover.toFixed(1)} days`.padEnd(11) +
+      `  ${s.maxSizeForFeeConstraint} ${perpSymbol}`,
     );
   }
 

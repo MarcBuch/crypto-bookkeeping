@@ -83,6 +83,9 @@ bun "$SKILL_DIR/hedge-advisor.ts" 484645 --json 2>/dev/null
   // Market regime
   "driftVolRatio": 0.137,           // |mean daily return| / daily vol (30-day window, from HL candleSnapshot)
   "regime": "range-bound",          // "range-bound" | "mild-trend" | "strong-trend"
+  "dailyVol": 0.0683,               // 1-sigma daily log-return vol (30-day) — used for vol-stop derivation
+  "high7d": 65.80,                  // highest daily close over last 7 days — structural stop reference
+  "low7d": 52.61,                   // lowest daily close over last 7 days
 
   // Verdict 1: fee-optimisation (is the hedge cost justified by fee income?)
   "verdict": "no-hedge",            // "no-hedge" | "consider-hedge" | "hedge-recommended"
@@ -122,7 +125,22 @@ bun "$SKILL_DIR/hedge-advisor.ts" 484645 --json 2>/dev/null
   // Triggers for managing the short
   "hedgeCloseTriggerPrice": 61.20,  // close short here — 7-day income equals total short loss
   "hedgeReduceTriggerPrice": 58.64, // reduce to 50% here
-  "hedgeCloseTriggerReason": "Close at $61.20 (+9.1% from current): 7-day income ($X) equals total short loss at that price."
+  "hedgeCloseTriggerReason": "Close at $61.20 (+9.1% from current): 7-day income ($X) equals total short loss at that price.",
+
+  // Stop loss scenarios — dynamically derived, not hardcoded prices
+  // Four candidates: LP entry price, LP upper-third trigger, 1.5σ vol stop, 7d high +1%
+  // Deduplicated if within $0.30 of each other (higher candidate kept)
+  "stopLossScenarios": [
+    {
+      "stopPrice": 61.58,
+      "bufferPct": 2.8,
+      "shortLossUsd": 48.57,
+      "lpGainUsd": 20.31,
+      "netCombinedLossUsd": 28.26,
+      "daysFeesToRecover": 6.5,
+      "maxSizeForFeeConstraint": 30.5  // largest short (HYPE) where net loss <= 7 days of fees at this stop
+    }
+  ]
 }
 ```
 
@@ -173,3 +191,5 @@ Evaluated in priority order; first matching rule wins:
 - When funding is positive (longs pay shorts), the short **earns carry** — the hedge has negative carry cost.
 - `hedgeBreakEvenDays` = how long before funding alone pays off the current IL. This is an optimistic estimate — it treats current IL as fixed and ignores the additional IL that will accumulate while waiting.
 - HYPE exposure in LP (`hypeExposure`) shifts as price moves. As price rises the LP sells HYPE; as it falls the LP accumulates HYPE. The reported value is the current snapshot.
+- **Sizing discipline:** Always set the stop at a technically valid level first (`high7d * 1.01` or `1.5σ vol stop`), then use `maxSizeForFeeConstraint` to determine the position size. Never work backwards from break-even size to find the stop — that was the failure mode that produced the oversized hedge closed at a loss on Jun 12.
+- **Stop candidates** are derived dynamically: LP entry price, LP upper-third trigger, 1.5σ vol stop (`currentPrice × (1 + 1.5 × dailyVol)`), and 7d structural high +1%. Hardcoded stops are not used.

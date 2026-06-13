@@ -97,6 +97,7 @@ const baseHedgeData: HedgeView = {
   fundingEarned: 25.5,
   liquidationPx: 8.5,
   leverage: { type: "cross", value: 1 },
+  status: "active",
 };
 
 // ============================================================================

@@ -46,6 +46,14 @@ const daysArg = daysArgIdx !== -1 ? parseFloat(process.argv[daysArgIdx + 1]) : n
 const sizeArgIdx = process.argv.indexOf("--size");
 const hedgeSize = sizeArgIdx !== -1 ? parseFloat(process.argv[sizeArgIdx + 1]) : 1.0;
 
+// --stop PRICE  simulate a stop-loss order at this price; detected using daily candle highs
+const stopArgIdx = process.argv.indexOf("--stop");
+const stopPriceArg = stopArgIdx !== -1 ? parseFloat(process.argv[stopArgIdx + 1]) : null;
+
+// --entry PRICE  override the short entry price (default: LP entry from position data)
+const entryArgIdx = process.argv.indexOf("--entry");
+const entryPriceArg = entryArgIdx !== -1 ? parseFloat(process.argv[entryArgIdx + 1]) : null;
+
 const HL_API = "https://api.hyperliquid.xyz/info";
 const HL_RPC = "https://rpc.hyperliquid.xyz/evm";
 
@@ -74,9 +82,11 @@ interface LpPosition {
 
 interface DailyRow {
   date: string;
-  price: number;
+  price: number;   // close
+  high: number;    // candle high — used for stop-out detection
   shortDayPnl: number;
   fundingEarned: number;
+  stopTriggered: boolean; // true if candle high >= stop price on this day
 }
 
 interface RetroReport {
@@ -90,6 +100,7 @@ interface RetroReport {
   hedgeSize: number;
   hypeShorted: number;
   hypeNotionalUsd: number;
+  shortEntryPrice: number; // actual short entry price (may differ from LP entry if --entry supplied)
 
   // LP
   lpAbsolutePnlUsd: number;
@@ -101,6 +112,9 @@ interface RetroReport {
   shortPricePnlUsd: number;
   fundingEarnedUsd: number;
   totalHedgePnlUsd: number;
+  stopPrice: number | null;         // stop price if --stop was provided
+  stoppedOutAt: string | null;      // date stop triggered, or null
+  stoppedOutLoss: number | null;    // realized short loss at stop, or null
 
   // Combined
   combinedPnlUsd: number;
@@ -110,6 +124,8 @@ interface RetroReport {
   // Regime at entry
   regimeAtEntry: string;
   driftVolRatioAtEntry: number;
+  dailyVolAtEntry: number;          // 1-sigma daily vol at entry — contextualises how tight the stop was
+  volStopLevel: number;             // entry × (1 + 1.5 × dailyVolAtEntry) — what a vol-appropriate stop looks like
   regimeJustifiedHedge: boolean;
 
   // Daily breakdown
@@ -197,7 +213,7 @@ async function fetchDailyPrices(
   coin: string,
   startTimeMs: number,
   endTimeMs: number,
-): Promise<{ date: string; price: number; timestamp: number }[]> {
+): Promise<{ date: string; price: number; high: number; timestamp: number }[]> {
   const res = await fetch(HL_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -212,6 +228,7 @@ async function fetchDailyPrices(
     timestamp: c.t,
     date: new Date(c.t).toISOString().split("T")[0],
     price: parseFloat(c.c),
+    high: parseFloat(c.h),
   }));
 }
 
@@ -232,7 +249,7 @@ async function fetchFundingHistory(
 async function fetchRegimeAtDate(
   coin: string,
   entryTimestampMs: number,
-): Promise<{ ratio: number; regime: string }> {
+): Promise<{ ratio: number; regime: string; dailyVol: number }> {
   const startTimeMs = entryTimestampMs - 32 * 86400_000;
   const endTimeMs = entryTimestampMs;
   const res = await fetch(HL_API, {
@@ -255,7 +272,7 @@ async function fetchRegimeAtDate(
   const vol = Math.sqrt(variance);
   const ratio = vol > 0 ? Math.abs(mean) / vol : 0;
   const regime = ratio < 0.5 ? "range-bound" : ratio <= 1.0 ? "mild-trend" : "strong-trend";
-  return { ratio, regime };
+  return { ratio, regime, dailyVol: vol };
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -271,6 +288,20 @@ async function main() {
   if (!pos) throw new Error(`Position ${tokenIdArg ?? "(active)"} not found.`);
 
   const perpSymbol = pos.token0Symbol.replace(/^W/, "");
+
+  // Read actual hedge config from config.json if present (used as default for --entry and --stop)
+  const root = repoRoot();
+  const configRaw = await Bun.file(path.join(root, "config.json")).text();
+  const cfg = JSON.parse(configRaw) as {
+    rpc: string;
+    positions?: Record<string, { openTx?: string }>;
+    hedge?: Record<string, {
+      entryPriceHype?: number;
+      sizeHype?: number;
+      stopLossPriceHype?: number;
+    }>;
+  };
+  const hedgeCfg = cfg.hedge?.[pos.tokenId];
 
   const openTs = await fetchOpenTimestamp(pos.tokenId);
   const nowTs = Date.now() / 1000;
@@ -288,17 +319,23 @@ async function main() {
     fetchRegimeAtDate(perpSymbol, entryTimestampMs),
   ]);
 
-  // Prices already have exact timestamps — no trimming needed
   const trimmedPrices = dailyPrices;
   if (trimmedPrices.length < 2)
     throw new Error("Insufficient price data for the requested period.");
 
-  const entryPrice = trimmedPrices[0].price;
+  // Short entry: --entry flag > config.hedge[tokenId].entryPriceHype > first daily close
+  const shortEntryPrice = entryPriceArg ?? hedgeCfg?.entryPriceHype ?? trimmedPrices[0].price;
+
+  // Stop price: --stop flag > config.hedge[tokenId].stopLossPriceHype > null (no stop)
+  const stopPrice = stopPriceArg ?? hedgeCfg?.stopLossPriceHype ?? null;
+
+  const entryPrice = trimmedPrices[0].price; // LP price reference (first candle)
   const exitPrice = trimmedPrices[trimmedPrices.length - 1].price;
 
-  // HYPE exposure at entry (use entry amount from position)
+  // HYPE exposure: config.hedge size > entryAmount0 * hedgeSize fraction
   const hypeAtEntry = pos.entryAmount0;
-  const hypeShorted = hypeAtEntry * hedgeSize;
+  const configuredSize = hedgeCfg?.sizeHype;
+  const hypeShorted = configuredSize ?? (hypeAtEntry * hedgeSize);
 
   // Daily funding grouped by date
   const dailyFunding: Record<string, number> = {};
@@ -309,14 +346,31 @@ async function main() {
     dailyFunding[dt] = (dailyFunding[dt] ?? 0) + entry.rate * avgPrice * hypeShorted;
   }
 
-  // Build daily rows
+  // Build daily rows with stop-out detection
   const dailyRows: DailyRow[] = [];
-  let prevPrice = entryPrice;
-  for (const { date, price } of trimmedPrices.slice(1)) {
-    const shortDayPnl = (prevPrice - price) * hypeShorted; // profit when price falls
-    const fundingEarned = dailyFunding[date] ?? 0;
-    dailyRows.push({ date, price, shortDayPnl, fundingEarned });
-    prevPrice = price;
+  let prevPrice = shortEntryPrice;
+  let stoppedOutAt: string | null = null;
+  let stoppedOutLoss: number | null = null;
+
+  for (const { date, price, high } of trimmedPrices.slice(1)) {
+    // If already stopped out, don't add more rows
+    if (stoppedOutAt !== null) break;
+
+    const stopTriggered = stopPrice !== null && high >= stopPrice;
+
+    if (stopTriggered) {
+      // Stop fires at stopPrice on this candle; short loss is (stopPrice - shortEntryPrice) * size
+      const stopLoss = (stopPrice! - shortEntryPrice) * hypeShorted;
+      const fundingEarned = dailyFunding[date] ?? 0;
+      stoppedOutAt = date;
+      stoppedOutLoss = -stopLoss; // negative = loss for a short
+      dailyRows.push({ date, price: stopPrice!, high, shortDayPnl: -stopLoss, fundingEarned, stopTriggered: true });
+    } else {
+      const shortDayPnl = (prevPrice - price) * hypeShorted;
+      const fundingEarned = dailyFunding[date] ?? 0;
+      dailyRows.push({ date, price, high, shortDayPnl, fundingEarned, stopTriggered: false });
+      prevPrice = price;
+    }
   }
 
   // Aggregate
@@ -324,7 +378,7 @@ async function main() {
   const fundingEarnedUsd = dailyRows.reduce((s, r) => s + r.fundingEarned, 0);
   const totalHedgePnlUsd = shortPricePnlUsd + fundingEarnedUsd;
 
-  // LP actuals (from position data — covers full position lifetime if period = full)
+  // LP actuals (from position data)
   const lpAbsolutePnlUsd = pos.absolutePnlInToken1;
   const lpFeesUsd = pos.feesValueInToken1;
   const lpIlUsd = Math.abs(pos.opportunityCostInToken1);
@@ -335,23 +389,38 @@ async function main() {
   const hedgeBenefitUsd = combinedPnlUsd - lpAbsolutePnlUsd;
   const hedgeBenefitPct = hedgeBenefitUsd / pos.entryValueInToken1;
 
+  // Vol-appropriate stop reference
+  const dailyVolAtEntry = regimeAtEntry.dailyVol;
+  const volStopLevel = shortEntryPrice * (1 + 1.5 * dailyVolAtEntry);
+
   const regimeJustifiedHedge =
     regimeAtEntry.regime === "mild-trend" || regimeAtEntry.regime === "strong-trend";
 
   const priceChangePct = (exitPrice - entryPrice) / entryPrice;
 
   // Was it worth it?
-  const wasHedgeWorthIt = totalHedgePnlUsd > lpIlUsd * 0.5; // hedge covered at least 50% of IL
+  // If stopped out: it was worth it only if the stop loss was < IL that was ultimately avoided
+  // Otherwise: hedge covered at least 50% of IL
+  let wasHedgeWorthIt: boolean;
+  if (stoppedOutAt !== null) {
+    wasHedgeWorthIt = totalHedgePnlUsd > 0 || (stoppedOutLoss !== null && Math.abs(stoppedOutLoss!) < lpIlUsd * 0.5);
+  } else {
+    wasHedgeWorthIt = totalHedgePnlUsd > lpIlUsd * 0.5;
+  }
 
   let analysis: string;
+  const stoppedNote = stoppedOutAt
+    ? ` Stop fired on ${stoppedOutAt} at $${stopPrice!.toFixed(2)} — only ${dailyRows.length} day(s) of hedge coverage. Vol-appropriate stop (1.5σ) would have been $${volStopLevel.toFixed(2)}.`
+    : "";
+
   if (wasHedgeWorthIt && !regimeJustifiedHedge) {
-    analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) but the regime at entry (${regimeAtEntry.regime}, ratio ${regimeAtEntry.ratio.toFixed(3)}) did not justify it systematically — it was a directional call that paid off.`;
+    analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) but the regime at entry (${regimeAtEntry.regime}, ratio ${regimeAtEntry.ratio.toFixed(3)}) did not justify it systematically — it was a directional call that paid off.${stoppedNote}`;
   } else if (wasHedgeWorthIt && regimeJustifiedHedge) {
-    analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) and the regime (${regimeAtEntry.regime}) supported it. Good execution.`;
+    analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) and the regime (${regimeAtEntry.regime}) supported it. Good execution.${stoppedNote}`;
   } else if (!wasHedgeWorthIt && regimeJustifiedHedge) {
-    analysis = `The hedge underperformed (+$${totalHedgePnlUsd.toFixed(2)} vs $${lpIlUsd.toFixed(2)} IL), but the regime signal was valid. Execution timing was the issue.`;
+    analysis = `The hedge underperformed ($${totalHedgePnlUsd.toFixed(2)} vs $${lpIlUsd.toFixed(2)} IL), but the regime signal was valid. Execution timing was the issue.${stoppedNote}`;
   } else {
-    analysis = `Hedge was not worth it (+$${totalHedgePnlUsd.toFixed(2)} vs $${lpIlUsd.toFixed(2)} IL) and regime (${regimeAtEntry.regime}, ratio ${regimeAtEntry.ratio.toFixed(3)}) did not support it. Correct decision to skip.`;
+    analysis = `Hedge was not worth it ($${totalHedgePnlUsd.toFixed(2)} vs $${lpIlUsd.toFixed(2)} IL) and regime (${regimeAtEntry.regime}, ratio ${regimeAtEntry.ratio.toFixed(3)}) did not support it.${stoppedNote}`;
   }
 
   const report: RetroReport = {
@@ -364,7 +433,8 @@ async function main() {
     priceChangePct,
     hedgeSize,
     hypeShorted,
-    hypeNotionalUsd: hypeShorted * entryPrice,
+    hypeNotionalUsd: hypeShorted * shortEntryPrice,
+    shortEntryPrice,
     lpAbsolutePnlUsd,
     lpFeesUsd,
     lpIlUsd,
@@ -372,11 +442,16 @@ async function main() {
     shortPricePnlUsd,
     fundingEarnedUsd,
     totalHedgePnlUsd,
+    stopPrice,
+    stoppedOutAt,
+    stoppedOutLoss,
     combinedPnlUsd,
     hedgeBenefitUsd,
     hedgeBenefitPct,
     regimeAtEntry: regimeAtEntry.regime,
     driftVolRatioAtEntry: regimeAtEntry.ratio,
+    dailyVolAtEntry,
+    volStopLevel,
     regimeJustifiedHedge,
     dailyRows,
     wasHedgeWorthIt,
@@ -393,8 +468,9 @@ async function main() {
   const pct = (n: number) => (n >= 0 ? "+" : "") + (n * 100).toFixed(2) + "%";
 
   console.log(`\n## Hedge Retrospective: ${report.pair} (#${report.tokenId})`);
-  console.log(`Period: ${periodDays.toFixed(1)} days   Hedge size: ${(hedgeSize * 100).toFixed(0)}% of delta`);
-  console.log(`${entryPrice.toFixed(2)} → ${exitPrice.toFixed(2)}  (${pct(priceChangePct)})\n`);
+  console.log(`Period: ${periodDays.toFixed(1)} days   Hedge size: ${hypeShorted.toFixed(1)} ${perpSymbol} short @ $${shortEntryPrice.toFixed(2)}`);
+  if (stopPrice) console.log(`Stop loss: $${stopPrice.toFixed(2)}${stoppedOutAt ? `  ← TRIGGERED on ${stoppedOutAt}` : "  (not triggered)"}`);
+  console.log(`Price: $${entryPrice.toFixed(2)} → $${exitPrice.toFixed(2)}  (${pct(priceChangePct)})\n`);
 
   console.log("### LP (Actual)");
   console.log(`  Absolute P&L:    ${usd(lpAbsolutePnlUsd)}`);
@@ -403,10 +479,12 @@ async function main() {
   console.log(`  Net vs HODL:     ${usd(lpNetVsHodlUsd)}`);
 
   console.log("\n### Short Hedge (Simulated)");
-  console.log(`  ${hypeShorted.toFixed(2)} ${perpSymbol} shorted at $${entryPrice.toFixed(2)}`);
+  console.log(`  ${hypeShorted.toFixed(2)} ${perpSymbol} shorted at $${shortEntryPrice.toFixed(2)}`);
+  if (stopPrice) console.log(`  Stop at $${stopPrice.toFixed(2)}  (${((stopPrice / shortEntryPrice - 1) * 100).toFixed(1)}% buffer)  |  1.5σ vol stop: $${volStopLevel.toFixed(2)}`);
   console.log(`  Price P&L:       ${usd(shortPricePnlUsd)}`);
   console.log(`  Funding earned:  +$${fundingEarnedUsd.toFixed(2)}`);
   console.log(`  Total hedge P&L: ${usd(totalHedgePnlUsd)}`);
+  if (stoppedOutAt) console.log(`  ⚠ Stopped out on ${stoppedOutAt} — only ${dailyRows.length} day(s) of coverage`);
 
   console.log("\n### Combined (LP + Hedge)");
   console.log(`  LP only:         ${usd(lpAbsolutePnlUsd)}`);
@@ -414,20 +492,23 @@ async function main() {
   console.log(`  Hedge benefit:   ${usd(hedgeBenefitUsd)}  (${pct(hedgeBenefitPct)} of entry)`);
 
   console.log("\n### Regime at Entry");
-  console.log(
-    `  Drift/vol ratio: ${regimeAtEntry.ratio.toFixed(3)}  →  ${regimeAtEntry.regime.toUpperCase()}`,
-  );
-  console.log(
-    `  Regime justified hedge: ${regimeJustifiedHedge ? "YES" : "NO"}`,
-  );
+  console.log(`  Drift/vol ratio: ${regimeAtEntry.ratio.toFixed(3)}  →  ${regimeAtEntry.regime.toUpperCase()}`);
+  console.log(`  Daily vol:       ${(dailyVolAtEntry * 100).toFixed(2)}%  |  1.5σ vol stop: $${volStopLevel.toFixed(2)}`);
+  console.log(`  Regime justified hedge: ${regimeJustifiedHedge ? "YES" : "NO"}`);
 
   console.log("\n### Daily Breakdown");
-  console.log("  Date        | Price  | Short P&L | Funding | Row Total");
-  console.log("  ------------|--------|-----------|---------|----------");
+  console.log(`  ${"Date".padEnd(12)}| ${"Price".padEnd(8)}| ${"High".padEnd(8)}| ${"Short P&L".padEnd(11)}| ${"Funding".padEnd(9)}| Row Total`);
+  console.log(`  ${"-".repeat(60)}`);
   for (const row of report.dailyRows) {
     const rowTotal = row.shortDayPnl + row.fundingEarned;
+    const stopFlag = row.stopTriggered ? " ← STOP" : "";
     console.log(
-      `  ${row.date} | $${row.price.toFixed(2).padStart(6)} | ${row.shortDayPnl >= 0 ? "+" : ""}$${row.shortDayPnl.toFixed(2).padStart(7)} | $${row.fundingEarned.toFixed(3).padStart(7)} | ${rowTotal >= 0 ? "+" : ""}$${rowTotal.toFixed(2)}`,
+      `  ${row.date.padEnd(12)}` +
+      `| $${row.price.toFixed(2).padStart(6)} ` +
+      `| $${row.high.toFixed(2).padStart(6)} ` +
+      `| ${(row.shortDayPnl >= 0 ? "+" : "")}$${row.shortDayPnl.toFixed(2).padStart(8)} ` +
+      `| $${row.fundingEarned.toFixed(3).padStart(7)} ` +
+      `| ${rowTotal >= 0 ? "+" : ""}$${rowTotal.toFixed(2)}${stopFlag}`,
     );
   }
 

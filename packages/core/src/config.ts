@@ -6,6 +6,9 @@ import type { Address } from "viem";
 export interface PositionConfig {
   openTx: string;
   closeTx?: string;
+  hedge?: {
+    coin: string;
+  };
 }
 
 export interface PricingConfig {

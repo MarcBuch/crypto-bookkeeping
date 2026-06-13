@@ -4,6 +4,7 @@ import {
   getPositionsView,
   getPnLView,
   getILView,
+  getHedgeView,
   takeSnapshot,
   getHistoryView,
   syncTaxTransactions,
@@ -27,6 +28,7 @@ import {
   type TaxTransactionLabelFilter,
   type TaxTransactionUpdate,
   type ManualTaxTransactionInput,
+  type HedgeView,
 } from "@lp-tracker/core";
 import { Command } from "commander";
 
@@ -219,9 +221,20 @@ program
       return;
     }
 
-    const displayData = formatPnLDisplayData(pnlData);
+    // Fetch hedge views for positions that have hedge config — best-effort
+    const hedgeMap = new Map<string, HedgeView>();
+    for (const pos of pnlData) {
+      if (!config.positions?.[pos.tokenId]?.hedge) continue;
+      try {
+        hedgeMap.set(pos.tokenId, await getHedgeView(config, pos.tokenId));
+      } catch {
+        // Hedge fetch failures are non-fatal — LP P&L still displays
+      }
+    }
 
-    output(formatPnLJsonPayload(pnlData), () => displayPnL(displayData));
+    const displayData = formatPnLDisplayData(pnlData, hedgeMap);
+
+    output(formatPnLJsonPayload(pnlData, hedgeMap), () => displayPnL(displayData));
   });
 
 // ===== IL COMMAND =====

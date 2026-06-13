@@ -6,6 +6,8 @@ import {
   useSyncPositions,
   useSyncPosition,
 } from "./hooks/useDashboardPositions";
+import { useHedge } from "./hooks/useHedge";
+import { buildNetHedgePnL } from "./hedge-pnl";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -295,9 +297,15 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const rightDistance = (position.priceUpper - position.currentPrice) / position.currentPrice;
   const rangeTone = position.inRange ? "from-emerald-500 to-teal-300" : "from-rose-400 to-red-500";
   const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
+  const { data: hedgeData } = useHedge(position.tokenId);
+
+  // Hedge-adjusted ROI — computed via shared helper (same logic as CLI pnl-format.ts)
+  const { lpPnlUsd: lpAbsPnlUsd, hedgePnlUsd, lpEntryUsd, combinedPnlUsd: combinedAbsUsd, combinedRoiPct } =
+    hedgeData ? buildNetHedgePnL(pnl, hedgeData) : { lpPnlUsd: null, hedgePnlUsd: null, lpEntryUsd: null, combinedPnlUsd: null, combinedRoiPct: null };
 
   return (
-    <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
+    <div>
+      <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
       <div className="flex min-w-0 items-center gap-3">
         <TokenPairIcon token0={position.token0.symbol} token1={position.token1.symbol} />
         <div className="min-w-0">
@@ -323,16 +331,44 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
       />
       <DarkStat
         label="ROI"
-        value={pnl ? formatPercent(pnl.absolutePnlPercent) : "n/a"}
-        valueClassName={pnl ? darkToneClass(pnl.absolutePnlPercent) : undefined}
+        value={pnl ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent) : "n/a"}
+        valueClassName={pnl ? darkToneClass(combinedRoiPct ?? pnl.absolutePnlPercent) : undefined}
         detail={
           pnl
-            ? pnl.token1UsdPrice != null
-              ? formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)
-              : `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`
+            ? (() => {
+                const netUsd = combinedAbsUsd ?? lpAbsPnlUsd;
+                const netToken = `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`;
+                const display = netUsd != null ? formatUsd(netUsd) : netToken;
+                const tone = darkToneClass(
+                  netUsd != null ? netUsd : pnl.absolutePnlInToken1,
+                );
+                return <span className={tone}>{display}</span>;
+              })()
             : undefined
         }
-        tooltip={pnl ? "Gain/loss vs entry value. Includes all fees earned (collected + pending)." : undefined}
+        tooltip={
+          pnl
+            ? (() => {
+                const lines: string[] = [];
+                if (combinedRoiPct != null) {
+                  lines.push(`Net (LP + hedge): ${formatUsd(combinedAbsUsd!)}`);
+                  lines.push(`  LP P&L:      ${formatUsd(lpAbsPnlUsd!)}`);
+                  lines.push(`  Hedge P&L:   ${formatUsd(hedgePnlUsd!)}`);
+                  lines.push(`Entry value:   ${formatUsd(lpEntryUsd!)}`);
+                } else if (lpAbsPnlUsd != null) {
+                  lines.push(`LP P&L: ${formatUsd(lpAbsPnlUsd)}`);
+                  lines.push(`  Fees: ${formatUsd(pnl.feesValueUsd ?? pnl.feesValueInToken1)} ${pnl.feesValueUsd == null ? pnl.token1Symbol : ""}`);
+                  lines.push(`Entry: ${formatUsd(lpEntryUsd!)}`);
+                } else {
+                  lines.push(`LP P&L: ${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`);
+                  lines.push(`  Fees: ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}`);
+                  lines.push(`Entry: ${formatNumber(pnl.entryValueInToken1)} ${pnl.token1Symbol}`);
+                }
+                lines.push(`ROI = net P&L ÷ entry value`);
+                return lines.join("\n");
+              })()
+            : undefined
+        }
       />
 
       <div className="min-w-0 font-mono text-xs font-bold">
@@ -379,6 +415,158 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         </button>
       </div>
     </article>
+
+    {hedgeData && (
+      <HedgePanel hedge={hedgeData} pnl={position.pnl ?? undefined} />
+    )}
+    </div>
+  );
+}
+
+function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: import("./api").PnLView }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const size = Math.abs(parseFloat(hedge.szi));
+  const unrealizedTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+  // Mark price color tracks direction of the trade: green when short is winning (price ↓), red when losing (price ↑)
+  const markTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+
+  // Use shared helper — same logic as CLI pnl-format.ts and core buildNetHedgePnL
+  const { lpPnlUsd: lpAbsPnl, hedgePnlUsd: hedgePnl, combinedPnlUsd: combinedPnl } =
+    buildNetHedgePnL(pnl, hedge);
+  const combinedTone = combinedPnl == null ? "text-neutral-950" : combinedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+
+  return (
+    <div className="bg-neutral-300">
+      {/* Always-visible summary row — click to expand/collapse */}
+      <button
+        type="button"
+        onClick={() => setExpanded((x) => !x)}
+        className="w-full px-5 py-2 sm:px-7 flex items-center justify-between gap-3 text-left transition hover:bg-black/[0.04]"
+      >
+        {/* Left — identity */}
+        <div className="flex items-center gap-2 min-w-0">
+          {hedge.status === "closed" ? (
+            <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-neutral-400 bg-neutral-200 px-2 py-0.5 text-[0.6rem] font-black tracking-[0.18em] text-neutral-700 uppercase">
+              ■ CLOSED
+            </span>
+          ) : (
+            <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-rose-400 bg-rose-100 px-2 py-0.5 text-[0.6rem] font-black tracking-[0.18em] text-rose-700 uppercase">
+              ▼ SHORT
+            </span>
+          )}
+          <span className="font-mono text-xs font-bold tracking-tight text-neutral-950 truncate">
+            {size} {hedge.coin}-PERP
+          </span>
+          <span className="text-[0.65rem] font-medium text-neutral-400 truncate hidden sm:inline">
+            {hedge.status === "closed" && hedge.closeReason
+              ? hedge.closeReason
+              : hedge.leverage.value > 0
+              ? `${hedge.leverage.value}× ${hedge.leverage.type}`
+              : hedge.leverage.type}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          {/* Net hedged P&L — single line */}
+          {combinedPnl != null && (
+            <span className="text-xs font-mono font-bold">
+              <span className="text-neutral-400 font-medium mr-1">net</span>
+              <span className={combinedTone}>{formatUsd(combinedPnl)}</span>
+              <span className="text-neutral-400 font-normal ml-1 hidden sm:inline">
+                (LP {formatUsd(lpAbsPnl!)} · hedge {formatUsd(hedgePnl)})
+              </span>
+            </span>
+          )}
+
+          {/* Chevron */}
+          <span
+            className={`shrink-0 text-neutral-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+            aria-hidden
+          >
+            ▾
+          </span>
+        </div>
+      </button>
+
+      {/* Expandable detail section */}
+      {expanded && (
+        <div className="border-t border-neutral-400/40 px-5 pb-5 pt-4 sm:px-7">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+            {hedge.status === "closed" ? (
+              <>
+                <HedgeStat label="Entry" value={`$${formatPrice(hedge.entryPx)}`} />
+                <HedgeStat label="Close" value={`$${formatPrice(hedge.markPx)}`} />
+                <HedgeStat
+                  label="Realized P&L"
+                  value={hedge.realizedPnl != null ? formatUsd(hedge.realizedPnl) : "unknown"}
+                  valueClassName={hedge.realizedPnl == null ? "text-neutral-400" : hedge.realizedPnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+                />
+                <HedgeStat
+                  label="Funding earned"
+                  value={`+${formatUsd(hedge.fundingEarned)}`}
+                  valueClassName="text-emerald-700"
+                />
+                {hedgePnl != null && (
+                  <HedgeStat
+                    label="Hedge P&L"
+                    value={formatUsd(hedgePnl)}
+                    valueClassName={hedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+                    detail="realized + funding"
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                <HedgeStat label="Entry" value={`$${formatPrice(hedge.entryPx)}`} />
+                <HedgeStat label="Mark" value={`$${formatPrice(hedge.markPx)}`} valueClassName={markTone} />
+                <HedgeStat
+                  label="Unrealized"
+                  value={formatUsd(hedge.unrealizedPnl)}
+                  valueClassName={unrealizedTone}
+                />
+                <HedgeStat
+                  label="Funding earned"
+                  value={`+${formatUsd(hedge.fundingEarned)}`}
+                  valueClassName="text-emerald-700"
+                />
+                <HedgeStat
+                  label="Liquidation"
+                  value={hedge.liquidationPx ? `$${formatPrice(hedge.liquidationPx)}` : "—"}
+                  valueClassName="text-amber-700"
+                />
+                <HedgeStat
+                  label="Hedge P&L"
+                  value={formatUsd(hedgePnl)}
+                  valueClassName={hedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+                  detail="unrealized + funding"
+                />
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HedgeStat({
+  label,
+  value,
+  valueClassName = "text-neutral-950",
+  detail,
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+  detail?: string;
+}) {
+  return (
+    <div>
+      <p className="text-[0.62rem] font-semibold tracking-[0.15em] text-neutral-500 uppercase">{label}</p>
+      <p className={`mt-1 font-mono text-sm font-black ${valueClassName}`}>{value}</p>
+      {detail && <p className="mt-0.5 text-[0.6rem] text-neutral-600">{detail}</p>}
+    </div>
   );
 }
 
@@ -412,7 +600,7 @@ export function DarkStat({
 }: {
   label: string;
   value: string;
-  detail?: string;
+  detail?: React.ReactNode;
   valueClassName?: string;
   tooltip?: string;
 }) {

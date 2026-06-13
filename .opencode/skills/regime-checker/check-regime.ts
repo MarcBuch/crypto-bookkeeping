@@ -2,12 +2,12 @@
 /**
  * check-regime.ts — WHYPE/USDC market regime detector.
  *
- * Fetches 30 days of daily HYPE price data from CoinGecko and computes
- * the drift/vol ratio as defined in PLAYBOOK.md:
+ * Fetches 30+ days of daily price data from Hyperliquid candleSnapshot and
+ * computes the drift/vol ratio as defined in PLAYBOOK.md:
  *
- *   dailyDrift = total log return / 30
- *   dailyVol   = std dev of 30 daily log returns
- *   ratio      = dailyDrift / dailyVol
+ *   dailyDrift = total log return / N
+ *   dailyVol   = std dev of N daily log returns
+ *   ratio      = abs(dailyDrift) / dailyVol
  *
  * Regime table (from playbook):
  *   ratio < 0.5   → Range-bound  → Full position, normal rerange discipline
@@ -16,29 +16,42 @@
  *
  * Usage:
  *   bun .opencode/skills/regime-checker/check-regime.ts [--json]
- *   bun .opencode/skills/regime-checker/check-regime.ts [coin_id] [--json]
+ *   bun .opencode/skills/regime-checker/check-regime.ts [TICKER] [--json]
  *
  * Examples:
  *   bun check-regime.ts
  *   bun check-regime.ts --json
- *   bun check-regime.ts hyperliquid --json
+ *   bun check-regime.ts HYPE --json
  */
 
-const coinId =
+const coin =
   process.argv.find(
     (a) =>
       !a.startsWith("--") &&
       !a.includes("check-regime") &&
       !a.includes("bun") &&
       !a.endsWith(".ts"),
-  ) ?? "hyperliquid";
+  ) ?? "HYPE";
 
 const jsonMode = process.argv.includes("--json");
-const COINGECKO_API = "https://api.coingecko.com/api/v3";
+const HL_API = "https://api.hyperliquid.xyz/info";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type Regime = "range-bound" | "mild-trend" | "strong-trend";
+
+interface HlCandle {
+  t: number; // open time ms
+  T: number; // close time ms
+  s: string; // symbol
+  i: string; // interval
+  o: string; // open
+  c: string; // close
+  h: string; // high
+  l: string; // low
+  v: string; // volume
+  n: number; // number of trades
+}
 
 interface RegimeReport {
   coin: string;
@@ -55,9 +68,10 @@ interface RegimeReport {
   action: string;
   positionGuidance: string;
   rerangeGuidance: string;
+  openInterest: number; // USD
 
   // 7-day window
-  priceChange7d: number;  // percent
+  priceChange7d: number; // percent
   dailyDrift7d: number;
   dailyVol7d: number;
   ratio7d: number;
@@ -67,27 +81,54 @@ interface RegimeReport {
 
 // ─── Fetch ─────────────────────────────────────────────────────────────────────
 
-async function fetchPrices(
-  id: string,
-  days = 31,
+async function fetchCandles(
+  ticker: string,
 ): Promise<{ prices: number[]; timestamps: number[] }> {
-  // interval=daily gives one point per day; fetch 31 to get 30 log returns
-  const url = `${COINGECKO_API}/coins/${id}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CoinGecko error: ${res.status} ${res.statusText}`);
-  const data = (await res.json()) as { prices: [number, number][] };
+  // Request 35 days back to ensure we always get at least 32 candles
+  const now = Date.now();
+  const startTime = now - 35 * 24 * 60 * 60 * 1000;
+
+  const res = await fetch(HL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "candleSnapshot",
+      req: {
+        coin: ticker,
+        interval: "1d",
+        startTime,
+        endTime: now,
+      },
+    }),
+  });
+  if (!res.ok)
+    throw new Error(`Hyperliquid API error: ${res.status} ${res.statusText}`);
+  const candles = (await res.json()) as HlCandle[];
+  if (candles.length < 2)
+    throw new Error(`Insufficient candle data for ${ticker} from Hyperliquid`);
+  // Sort ascending by open time, take the 32 most-recent candles
+  const sorted = [...candles].sort((a, b) => a.t - b.t).slice(-32);
   return {
-    prices: data.prices.map(([, p]) => p),
-    timestamps: data.prices.map(([t]) => t),
+    prices: sorted.map((candle) => parseFloat(candle.c)),
+    timestamps: sorted.map((candle) => candle.t),
   };
 }
 
-async function fetchSymbol(id: string): Promise<string> {
-  const url = `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=false`;
-  const res = await fetch(url);
-  if (!res.ok) return id.toUpperCase();
-  const data = (await res.json()) as { symbol?: string };
-  return (data.symbol ?? id).toUpperCase();
+async function fetchOpenInterest(ticker: string): Promise<number> {
+  const res = await fetch(HL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+  });
+  if (!res.ok)
+    throw new Error(`Hyperliquid API error: ${res.status} ${res.statusText}`);
+  const data = (await res.json()) as [
+    { universe: { name: string }[] },
+    { openInterest: string; funding: string; markPx: string }[],
+  ];
+  const idx = data[0].universe.findIndex((a) => a.name === ticker);
+  if (idx === -1) throw new Error(`Coin ${ticker} not found in Hyperliquid`);
+  return parseFloat(data[1][idx].openInterest);
 }
 
 // ─── Maths ─────────────────────────────────────────────────────────────────────
@@ -150,7 +191,6 @@ function fmtPct(n: number, signed = true): string {
 }
 
 function bar(ratio: number, width = 30): string {
-  const thresholds = [0, 0.5, 1.0, 2.0];
   const maxRatio = 2.0;
   const filled = Math.round(Math.min(ratio / maxRatio, 1) * width);
   const b = "█".repeat(filled) + "░".repeat(width - filled);
@@ -160,15 +200,16 @@ function bar(ratio: number, width = 30): string {
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const [{ prices, timestamps }, symbol] = await Promise.all([
-    fetchPrices(coinId, 31),
-    fetchSymbol(coinId),
+  const [{ prices, timestamps }, openInterest] = await Promise.all([
+    fetchCandles(coin),
+    fetchOpenInterest(coin),
   ]);
 
   if (prices.length < 2) {
-    throw new Error("Insufficient price data returned from CoinGecko");
+    throw new Error("Insufficient price data returned from Hyperliquid");
   }
 
+  // 32 prices → 31 log returns
   const returns = logReturns(prices);
   const dailyDrift = mean(returns);
   const dailyVol = stddev(returns);
@@ -186,12 +227,13 @@ async function main() {
   const dailyVol7d = stddev(returns7d);
   const ratio7d = dailyVol7d > 0 ? Math.abs(dailyDrift7d) / dailyVol7d : 0;
   const regime7d = classify(ratio7d);
-  const priceChange7d = ((prices7d[prices7d.length - 1] - prices7d[0]) / prices7d[0]) * 100;
+  const priceChange7d =
+    ((prices7d[prices7d.length - 1] - prices7d[0]) / prices7d[0]) * 100;
   const windowsDiverge = regime !== regime7d;
 
   const report: RegimeReport = {
-    coin: coinId,
-    symbol,
+    coin,
+    symbol: coin,
     fetchedAt: new Date().toISOString(),
     days: returns.length,
     currentPrice,
@@ -204,6 +246,7 @@ async function main() {
     action: REGIME_ACTIONS[regime],
     positionGuidance: REGIME_ACTIONS[regime],
     rerangeGuidance: RERANGE_GUIDANCE[regime],
+    openInterest,
     priceChange7d,
     dailyDrift7d,
     dailyVol7d,
@@ -225,7 +268,7 @@ async function main() {
     .toISOString()
     .split("T")[0];
 
-  console.log(`\n## Regime Check: ${symbol} (${coinId})`);
+  console.log(`\n## Regime Check: ${coin}`);
   console.log(
     `Window: ${report.days} trading days  (${startDate} → ${endDate})\n`,
   );
@@ -256,10 +299,19 @@ async function main() {
   }
 
   console.log("\n### Regime (30d — primary)");
-  console.log(`  ${REGIME_LABELS[regime].toUpperCase()}  (ratio = ${ratio.toFixed(3)})`);
+  console.log(
+    `  ${REGIME_LABELS[regime].toUpperCase()}  (ratio = ${ratio.toFixed(3)})`,
+  );
 
   console.log("\n### Regime (7d — near-term)");
-  console.log(`  ${REGIME_LABELS[regime7d].toUpperCase()}  (ratio = ${ratio7d.toFixed(3)})`);
+  console.log(
+    `  ${REGIME_LABELS[regime7d].toUpperCase()}  (ratio = ${ratio7d.toFixed(3)})`,
+  );
+
+  console.log("\n### Market Context");
+  console.log(
+    `  Open interest: $${openInterest.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+  );
 
   console.log("\n### Playbook Action");
   if (windowsDiverge) {

@@ -46,7 +46,6 @@ const daysArg = daysArgIdx !== -1 ? parseFloat(process.argv[daysArgIdx + 1]) : n
 const sizeArgIdx = process.argv.indexOf("--size");
 const hedgeSize = sizeArgIdx !== -1 ? parseFloat(process.argv[sizeArgIdx + 1]) : 1.0;
 
-const COINGECKO_API = "https://api.coingecko.com/api/v3";
 const HL_API = "https://api.hyperliquid.xyz/info";
 const HL_RPC = "https://rpc.hyperliquid.xyz/evm";
 
@@ -181,18 +180,38 @@ async function fetchOpenTimestamp(tokenId: string): Promise<number | null> {
   }
 }
 
+interface HlCandle {
+  t: number; // open time ms
+  T: number; // close time ms
+  s: string;
+  i: string;
+  o: string;
+  c: string;
+  h: string;
+  l: string;
+  v: string;
+  n: number;
+}
+
 async function fetchDailyPrices(
-  coinId: string,
-  days: number,
-): Promise<{ date: string; price: number }[]> {
-  const cgDays = Math.min(Math.ceil(days) + 2, 90);
-  const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=${cgDays}&interval=daily`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
-  const data = (await res.json()) as { prices: [number, number][] };
-  return data.prices.map(([ts, price]) => ({
-    date: new Date(ts).toISOString().split("T")[0],
-    price,
+  coin: string,
+  startTimeMs: number,
+  endTimeMs: number,
+): Promise<{ date: string; price: number; timestamp: number }[]> {
+  const res = await fetch(HL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "candleSnapshot",
+      req: { coin, interval: "1d", startTime: startTimeMs, endTime: endTimeMs },
+    }),
+  });
+  if (!res.ok) throw new Error(`Hyperliquid candleSnapshot error: ${res.status}`);
+  const candles = (await res.json()) as HlCandle[];
+  return candles.map((c) => ({
+    timestamp: c.t,
+    date: new Date(c.t).toISOString().split("T")[0],
+    price: parseFloat(c.c),
   }));
 }
 
@@ -211,16 +230,22 @@ async function fetchFundingHistory(
 }
 
 async function fetchRegimeAtDate(
-  coinId: string,
-  daysAgo: number,
+  coin: string,
+  entryTimestampMs: number,
 ): Promise<{ ratio: number; regime: string }> {
-  // Fetch 31 days ending at daysAgo to simulate what regime looked like at entry
-  // CoinGecko free tier only supports rolling windows — approximate with current 30d if entry is recent
-  const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=31&interval=daily`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
-  const raw = (await res.json()) as { prices: [number, number][] };
-  const prices = raw.prices.map(([, p]) => p);
+  const startTimeMs = entryTimestampMs - 32 * 86400_000;
+  const endTimeMs = entryTimestampMs;
+  const res = await fetch(HL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "candleSnapshot",
+      req: { coin, interval: "1d", startTime: startTimeMs, endTime: endTimeMs },
+    }),
+  });
+  if (!res.ok) throw new Error(`Hyperliquid candleSnapshot error: ${res.status}`);
+  const candles = (await res.json()) as HlCandle[];
+  const prices = candles.map((c) => parseFloat(c.c));
   const returns: number[] = [];
   for (let i = 1; i < prices.length; i++) {
     returns.push(Math.log(prices[i] / prices[i - 1]));
@@ -246,26 +271,25 @@ async function main() {
   if (!pos) throw new Error(`Position ${tokenIdArg ?? "(active)"} not found.`);
 
   const perpSymbol = pos.token0Symbol.replace(/^W/, "");
-  const cgId = perpSymbol === "HYPE" ? "hyperliquid" : perpSymbol.toLowerCase();
 
   const openTs = await fetchOpenTimestamp(pos.tokenId);
   const nowTs = Date.now() / 1000;
   const maxDays = openTs ? (nowTs - openTs) / 86400 : 30;
   const periodDays = daysArg ? Math.min(daysArg, maxDays) : maxDays;
 
-  const startTs = openTs ?? nowTs - periodDays * 86400;
   const startTimeMs = Math.floor((nowTs - periodDays * 86400) * 1000);
+  const endTimeMs = Date.now();
+  const entryTimestampMs = openTs ? Math.floor(openTs * 1000) : startTimeMs;
 
   // Fetch in parallel
   const [dailyPrices, fundingHistory, regimeAtEntry] = await Promise.all([
-    fetchDailyPrices(cgId, periodDays),
+    fetchDailyPrices(perpSymbol, startTimeMs, endTimeMs),
     fetchFundingHistory(perpSymbol, startTimeMs),
-    fetchRegimeAtDate(cgId, periodDays),
+    fetchRegimeAtDate(perpSymbol, entryTimestampMs),
   ]);
 
-  // Trim prices to period
-  const startDateStr = new Date(startTimeMs).toISOString().split("T")[0];
-  const trimmedPrices = dailyPrices.filter((p) => p.date >= startDateStr);
+  // Prices already have exact timestamps — no trimming needed
+  const trimmedPrices = dailyPrices;
   if (trimmedPrices.length < 2)
     throw new Error("Insufficient price data for the requested period.");
 
@@ -321,7 +345,7 @@ async function main() {
 
   let analysis: string;
   if (wasHedgeWorthIt && !regimeJustifiedHedge) {
-    analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) but the regime at entry (${regimeAtEntry.regime}, ratio ${regimeAtEntry.driftVolRatioAtEntry ?? regimeAtEntry.ratio.toFixed(3)}) did not justify it systematically — it was a directional call that paid off.`;
+    analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) but the regime at entry (${regimeAtEntry.regime}, ratio ${regimeAtEntry.ratio.toFixed(3)}) did not justify it systematically — it was a directional call that paid off.`;
   } else if (wasHedgeWorthIt && regimeJustifiedHedge) {
     analysis = `The hedge was profitable (+$${totalHedgePnlUsd.toFixed(2)}) and the regime (${regimeAtEntry.regime}) supported it. Good execution.`;
   } else if (!wasHedgeWorthIt && regimeJustifiedHedge) {

@@ -10,7 +10,7 @@ Combines all inputs needed to decide whether to place a delta hedge on an active
 1. **LP position data** — delta exposure, IL, fees, range proximity
 2. **Live funding rate** — from Hyperliquid perps API (hourly, annualized)
 3. **Fee run rate** — derived from open tx timestamp + total fees earned
-4. **Market regime** — 30-day drift/vol ratio from CoinGecko
+4. **Market regime** — 30-day drift/vol ratio from Hyperliquid candleSnapshot
 
 Decision equation:
 ```
@@ -78,9 +78,10 @@ bun "$SKILL_DIR/hedge-advisor.ts" 484645 --json 2>/dev/null
   "annualizedFundingRate": 0.1095,
   "dailyFundingEarned": 0.29,       // USD earned per day if short placed (positive = funding favors shorts)
   "fundingAsPctOfFees": 0.054,      // dailyFundingEarned / dailyFeeUsd
+  "openInterest": 1234567.8,        // open interest in HYPE (from metaAndAssetCtxs)
 
   // Market regime
-  "driftVolRatio": 0.137,           // |mean daily return| / daily vol (30-day window)
+  "driftVolRatio": 0.137,           // |mean daily return| / daily vol (30-day window, from HL candleSnapshot)
   "regime": "range-bound",          // "range-bound" | "mild-trend" | "strong-trend"
 
   // Verdict 1: fee-optimisation (is the hedge cost justified by fee income?)

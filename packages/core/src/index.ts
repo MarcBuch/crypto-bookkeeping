@@ -24,6 +24,13 @@ export {
   getSnapshots,
   getLatestSnapshot,
   getAllLatestSnapshots,
+  insertHedgeSnapshot,
+  listHedgeSnapshots,
+  getEarliestHedgeSnapshot,
+  insertHedgeEvent,
+  closeHedgeEvent,
+  getOpenHedgeEvent,
+  getHedgeEvents,
   upsertSyncedTaxTransaction,
   createManualTaxTransaction,
   getTaxTransaction,
@@ -48,6 +55,8 @@ export { getAllPositions as getAllStoredPositions } from "./db/store.js";
 export type {
   StoredPosition,
   StoredSnapshot,
+  StoredHedgeSnapshot,
+  StoredHedgeEvent,
   TaxTransactionLabel,
   TaxTransactionLabelFilter,
   StoredTaxTransaction,
@@ -73,6 +82,7 @@ export * from "./services/il.js";
 export * from "./services/snapshot.js";
 export * from "./services/history.js";
 export * from "./services/pricing.js";
+export * from "./services/hedge.js";
 export {
   syncTaxTransactions,
   enrichTaxTransactionsEurValues,

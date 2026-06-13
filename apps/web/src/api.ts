@@ -56,6 +56,38 @@ export interface DashboardPosition extends PositionView {
   pnl?: PnLView;
 }
 
+export interface HedgeView {
+  tokenId: string;
+  coin: string;
+  szi: string;
+  entryPx: number;
+  markPx: number;
+  unrealizedPnl: number;
+  fundingEarned: number;
+  liquidationPx: number | null;
+  leverage: { type: string; value: number };
+  status: "active" | "closed";
+  realizedPnl?: number | null;
+  closedAt?: string | null;
+  closeReason?: string | null;
+}
+
+export interface HedgeEvent {
+  id: number;
+  token_id: string;
+  coin: string;
+  status: "open" | "closed";
+  entry_px: number;
+  size: number;
+  opened_at: string;
+  closed_at: string | null;
+  close_px: number | null;
+  realized_pnl: number | null;
+  funding_earned: number | null;
+  close_reason: string | null;
+  hl_fill_hash: string | null;
+}
+
 export type TaxTransactionLabel = "Trade" | "Transfer" | null;
 
 export interface TaxTransaction {
@@ -381,4 +413,19 @@ export async function updateTaxTransaction(
   }
 
   return data.transaction as unknown as TaxTransaction;
+}
+
+export async function getHedge(tokenId: string): Promise<HedgeView> {
+  const data = await fetchJson<HedgeView>(`/positions/${tokenId}/hedge`);
+  return data;
+}
+
+export async function getHedgeEvents(tokenId: string): Promise<HedgeEvent[]> {
+  const data = await fetchJson<{ events?: HedgeEvent[]; tokenId?: string }>(
+    `/positions/${tokenId}/hedge/events`,
+  );
+  if (!Array.isArray(data.events)) {
+    throw new ApiError("API response did not include events.");
+  }
+  return data.events;
 }

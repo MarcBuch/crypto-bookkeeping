@@ -40,6 +40,12 @@ export interface PnLDisplayData {
   absolutePnl: string;
   divergenceLoss: string;
   opportunityCost: string;
+  /** LP P&L formatted string — replaces absolutePnl row label when hedge is present */
+  lpPnl?: string;
+  /** Hedge P&L formatted string — always USD; present only when hedge data available */
+  hedgePnl?: string;
+  /** Net P&L (LP + hedge) — present only when both USD figures available */
+  netPnl?: string;
 }
 
 export interface SnapshotDisplayData {
@@ -153,7 +159,9 @@ export function displayPnL(positions: PnLDisplayData[]): void {
       ["HODL Value", pos.holdValue],
       ["", ""],
       [{ colSpan: 2, content: "--- Results ---", hAlign: "center" }],
-      ["Absolute P&L (LP+Fees vs Entry)", pos.absolutePnl],
+      ["LP P&L (fees vs entry)", pos.lpPnl ?? pos.absolutePnl],
+      ...(pos.hedgePnl ? [["Hedge P&L", pos.hedgePnl]] : []),
+      ...(pos.netPnl ? [["Net P&L (LP + hedge)", pos.netPnl]] : []),
       ["Divergence Loss (LP vs HODL)", pos.divergenceLoss],
       ["Opportunity Cost vs HODL", pos.opportunityCost],
     );
@@ -162,7 +170,9 @@ export function displayPnL(positions: PnLDisplayData[]): void {
   }
 
   console.log("\n--- Legend ---");
-  console.log("Absolute P&L    = What you actually gained/lost vs your deposit");
+  console.log("LP P&L          = What you actually gained/lost vs your deposit (LP fees included)");
+  console.log("Hedge P&L       = Unrealized P&L + funding earned (active) or realized P&L + funding (closed)");
+  console.log("Net P&L         = LP P&L + hedge P&L (shown only when both are in USD)");
   console.log("Divergence Loss = Money left on the table vs simply holding");
   console.log("Opportunity Cost= HODL value - LP value (how much more HODL would have earned)\n");
 }
@@ -212,7 +222,7 @@ export function formatPrice(n: number): string {
 
 export function formatUsd(n: number): string {
   if (Math.abs(n) < 0.01) return "$0.00";
-  const sign = n >= 0 ? "+" : "";
+  const sign = n >= 0 ? "+" : "-";
   return `${sign}$${Math.abs(n).toFixed(2)}`;
 }
 

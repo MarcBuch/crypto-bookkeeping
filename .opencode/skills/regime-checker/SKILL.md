@@ -5,7 +5,7 @@ description: Use when the user asks about the current market regime, drift/vol r
 
 # Skill: Regime Checker
 
-Fetches 30 days of daily price data from CoinGecko and computes the drift/vol ratio as defined in PLAYBOOK.md. Maps the ratio to a regime and outputs the corresponding playbook action.
+Fetches 30+ days of daily candle data from Hyperliquid and computes the drift/vol ratio as defined in PLAYBOOK.md. Maps the ratio to a regime and outputs the corresponding playbook action. Also surfaces open interest from Hyperliquid perp markets.
 
 ## When to use
 
@@ -21,21 +21,23 @@ Fetches 30 days of daily price data from CoinGecko and computes the drift/vol ra
 ```bash
 SKILL_DIR=$(git rev-parse --show-toplevel)/.opencode/skills/regime-checker
 
-# Human-readable output (default: hyperliquid)
+# Human-readable output (default: HYPE)
 bun "$SKILL_DIR/check-regime.ts"
 
 # Structured JSON (for programmatic use / agent analysis)
 bun "$SKILL_DIR/check-regime.ts" --json 2>/dev/null  # 2>/dev/null suppresses progress output
 
-# Other coins
-bun "$SKILL_DIR/check-regime.ts" bitcoin --json 2>/dev/null
+# Other coins (use the Hyperliquid perp ticker, e.g. BTC, ETH, SOL)
+bun "$SKILL_DIR/check-regime.ts" BTC --json 2>/dev/null
 ```
+
+The coin argument (positional) is the **Hyperliquid perp ticker** (e.g. `HYPE`, `BTC`, `ETH`), not a CoinGecko slug.
 
 ## JSON Output Schema
 
 ```json
 {
-  "coin": "hyperliquid",
+  "coin": "HYPE",
   "symbol": "HYPE",
   "fetchedAt": "2026-06-04T20:45:30.600Z",
   "days": 31,
@@ -47,11 +49,18 @@ bun "$SKILL_DIR/check-regime.ts" bitcoin --json 2>/dev/null
   "regime": "range-bound",
   "action": "Full position. Normal rerange discipline (outer-third trigger).",
   "positionGuidance": "Full position. Normal rerange discipline (outer-third trigger).",
-  "rerangeGuidance": "Rerange on outer-third trigger at standard ±15–17% width. Every cycle >5 days is profitable."
+  "rerangeGuidance": "Rerange on outer-third trigger at standard ±15–17% width. Every cycle >5 days is profitable.",
+  "openInterest": 123456789,
+  "priceChange7d": 4.12,
+  "dailyDrift7d": 0.0058,
+  "dailyVol7d": 0.0431,
+  "ratio7d": 0.135,
+  "regime7d": "range-bound",
+  "windowsDiverge": false
 }
 ```
 
-Note: `action` and `positionGuidance` are currently identical — both carry the high-level regime action. Use either; prefer `positionGuidance` when combining with `rerangeGuidance` for a complete recommendation.
+**Outputs note:** `openInterest` (USD) is included in all output — sourced from Hyperliquid `metaAndAssetCtxs`. `action` and `positionGuidance` are identical; prefer `positionGuidance` when combining with `rerangeGuidance` for a complete recommendation.
 
 ## Regime Table (from PLAYBOOK.md)
 
@@ -70,8 +79,8 @@ ratio      = abs(dailyDrift) / dailyVol
 ```
 
 - Uses absolute value of drift — both strong uptrends and downtrends are directional
-- 31 price points → 30 log returns
-- Data source: CoinGecko free API (`/coins/{id}/market_chart?interval=daily`)
+- 32 price points → 31 log returns (32 most-recent daily closes from Hyperliquid)
+- Data source: Hyperliquid `candleSnapshot` API (`interval=1d`)
 
 ## Workflow
 
@@ -81,7 +90,7 @@ ratio      = abs(dailyDrift) / dailyVol
 bun "$SKILL_DIR/check-regime.ts" --json 2>/dev/null
 ```
 
-Parse `ratio` and `regime` from JSON output.
+Parse `ratio`, `regime`, and `openInterest` from JSON output.
 
 ### Step 2: Cross-reference with position state
 
@@ -102,10 +111,12 @@ Always include:
 - Comparison with the previous ratio recorded in PLAYBOOK.md (search for the most recent regime check entry)
 - Playbook action
 - Whether entry/rerange is advisable right now
+- `openInterest` as market context
 
 ## Important Notes
 
 - The drift/vol ratio uses **absolute drift** — a strong downtrend (negative drift) is as disqualifying for LP as a strong uptrend.
 - A 30-day priceChange30d can be large while ratio stays low if volatility is also high. The ratio captures *consistency* of direction, not magnitude.
 - The playbook's **exit trigger** is ratio > 1.0 for **7+ consecutive days**, not a single reading. A single spike above 1.0 warrants monitoring, not immediate closure.
-- CoinGecko's free API returns daily candles; each point is a 24h close. The window is rolling, not calendar-month aligned.
+- Hyperliquid `candleSnapshot` returns daily candles; each `c` field is the 24h close price. The window is rolling, not calendar-month aligned.
+- The coin argument is a **Hyperliquid perp ticker** (uppercase, e.g. `HYPE`), not a CoinGecko slug.

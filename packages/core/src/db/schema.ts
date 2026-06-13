@@ -50,7 +50,7 @@ export function resetDb(): void {
   db = null;
 }
 
-function initSchema(database: Database): void {
+export function initSchema(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS positions (
       token_id TEXT PRIMARY KEY,
@@ -170,6 +170,40 @@ function initSchema(database: Database): void {
       decimals INTEGER,
       fetched_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS hedge_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_id TEXT NOT NULL,
+      coin TEXT NOT NULL,
+      szi TEXT NOT NULL,
+      entry_px REAL NOT NULL,
+      mark_px REAL NOT NULL,
+      unrealized_pnl REAL NOT NULL,
+      funding_earned REAL NOT NULL,
+      liquidation_px REAL,
+      snapshot_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hedge_snapshots_token_id ON hedge_snapshots(token_id);
+
+    CREATE TABLE IF NOT EXISTS hedge_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_id TEXT NOT NULL,
+      coin TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      entry_px REAL NOT NULL,
+      size REAL NOT NULL,
+      opened_at TEXT NOT NULL,
+      closed_at TEXT,
+      close_px REAL,
+      realized_pnl REAL,
+      funding_earned REAL,
+      close_reason TEXT,
+      hl_fill_hash TEXT UNIQUE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hedge_events_token_id ON hedge_events(token_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_one_open ON hedge_events(token_id, coin) WHERE status = 'open';
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist
@@ -317,5 +351,12 @@ function initSchema(database: Database): void {
     CREATE INDEX IF NOT EXISTS idx_tax_transactions_block_number ON tax_transactions(block_number);
     CREATE INDEX IF NOT EXISTS idx_tax_transactions_from_address ON tax_transactions(from_address);
     CREATE INDEX IF NOT EXISTS idx_tax_transactions_to_address ON tax_transactions(to_address);
+  `);
+
+  // Migration: add partial unique index on hedge_events to prevent multiple open events
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_one_open 
+    ON hedge_events(token_id, coin) 
+    WHERE status = 'open';
   `);
 }

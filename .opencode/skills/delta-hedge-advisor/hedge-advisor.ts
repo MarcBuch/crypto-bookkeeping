@@ -5,7 +5,7 @@
  * Combines in a single pass:
  *   1. LP position data (via lp-tracker CLI)
  *   2. Live funding rate from Hyperliquid perps API
- *   3. 30-day drift/vol regime (CoinGecko)
+ *   3. 30-day drift/vol regime (Hyperliquid candleSnapshot)
  *   4. Fee run rate (derived from open tx block timestamp)
  *
  * Decision equation:
@@ -38,9 +38,7 @@ const tokenIdArg = process.argv.find(
     /^\d+$/.test(a),
 );
 
-const COINGECKO_API = "https://api.coingecko.com/api/v3";
 const HL_API = "https://api.hyperliquid.xyz/info";
-const HL_RPC = "https://rpc.hyperliquid.xyz/evm";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -103,6 +101,7 @@ interface HedgeReport {
   annualizedFundingRate: number;
   dailyFundingEarned: number; // if short placed
   fundingAsPctOfFees: number;
+  openInterest: number;        // open interest in HYPE from metaAndAssetCtxs
 
   // Regime
   driftVolRatio: number;
@@ -181,7 +180,7 @@ async function fetchLpPositions(): Promise<LpPosition[]> {
   }
 }
 
-async function fetchFundingRate(coin: string): Promise<number> {
+async function fetchFundingAndOI(coin: string): Promise<{ fundingRate: number; openInterest: number }> {
   const res = await fetch(HL_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -190,22 +189,34 @@ async function fetchFundingRate(coin: string): Promise<number> {
   if (!res.ok) throw new Error(`Hyperliquid API error: ${res.status}`);
   const data = (await res.json()) as [
     { universe: { name: string }[] },
-    { funding: string; markPx: string }[],
+    { funding: string; markPx: string; openInterest: string }[],
   ];
   const idx = data[0].universe.findIndex((a) => a.name === coin);
   if (idx === -1) throw new Error(`Coin ${coin} not found in Hyperliquid`);
-  return parseFloat(data[1][idx].funding);
+  return {
+    fundingRate: parseFloat(data[1][idx].funding),
+    openInterest: parseFloat(data[1][idx].openInterest),
+  };
 }
 
-async function fetchDriftVolRatio(coinId: string): Promise<{ ratio: number; regime: string; pct7dChange: number }> {
-  const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=31&interval=daily`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
-  const raw = (await res.json()) as { prices: [number, number][] };
-  const prices = raw.prices.map(([, p]) => p);
+async function fetchDriftVolRatio(coin: string): Promise<{ ratio: number; regime: string; pct7dChange: number }> {
+  const now = Date.now();
+  const startTime = now - 32 * 24 * 60 * 60 * 1000; // 32 days ago in ms
+  const res = await fetch(HL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "candleSnapshot",
+      req: { coin, interval: "1d", startTime, endTime: now },
+    }),
+  });
+  if (!res.ok) throw new Error(`Hyperliquid candleSnapshot error: ${res.status}`);
+  const candles = (await res.json()) as { t: number; T: number; s: string; i: string; o: string; c: string; h: string; l: string; v: string; n: number }[];
+  if (candles.length < 2) throw new Error(`Not enough candle data for ${coin}`);
+  const closes = candles.map((c) => parseFloat(c.c));
   const returns: number[] = [];
-  for (let i = 1; i < prices.length; i++) {
-    returns.push(Math.log(prices[i] / prices[i - 1]));
+  for (let i = 1; i < closes.length; i++) {
+    returns.push(Math.log(closes[i] / closes[i - 1]));
   }
   const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
   const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
@@ -213,10 +224,9 @@ async function fetchDriftVolRatio(coinId: string): Promise<{ ratio: number; regi
   const ratio = vol > 0 ? Math.abs(mean) / vol : 0;
   const regime = ratio < 0.5 ? "range-bound" : ratio <= 1.0 ? "mild-trend" : "strong-trend";
 
-  // 7-day price change from last 8 prices
-  const last8 = prices.slice(-8);
-  const pct7dChange = last8.length >= 2
-    ? ((last8[last8.length - 1] - last8[0]) / last8[0]) * 100
+  // 7-day price change: last close vs close 7 days prior
+  const pct7dChange = closes.length >= 8
+    ? ((closes[closes.length - 1] - closes[closes.length - 8]) / closes[closes.length - 8]) * 100
     : 0;
 
   return { ratio, regime, pct7dChange };
@@ -511,11 +521,10 @@ async function main() {
 
   // Determine perp symbol (strip W prefix from wrapped token)
   const perpSymbol = pos.token0Symbol.replace(/^W/, "");
-  const cgId = perpSymbol === "HYPE" ? "hyperliquid" : perpSymbol.toLowerCase();
 
-  const [fundingRate, { ratio: driftVolRatio, regime, pct7dChange }, openTs] = await Promise.all([
-    fetchFundingRate(perpSymbol),
-    fetchDriftVolRatio(cgId),
+  const [{ fundingRate, openInterest }, { ratio: driftVolRatio, regime, pct7dChange }, openTs] = await Promise.all([
+    fetchFundingAndOI(perpSymbol),
+    fetchDriftVolRatio(perpSymbol),
     fetchOpenTimestamp(pos.tokenId),
   ]);
 
@@ -684,6 +693,7 @@ async function main() {
     annualizedFundingRate,
     dailyFundingEarned,
     fundingAsPctOfFees,
+    openInterest,
     driftVolRatio,
     regime,
     verdict,

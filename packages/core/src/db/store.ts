@@ -51,6 +51,35 @@ export interface StoredSnapshot {
   net_pnl: number;
 }
 
+export interface StoredHedgeSnapshot {
+  id: number;
+  token_id: string;
+  coin: string;
+  szi: string;
+  entry_px: number;
+  mark_px: number;
+  unrealized_pnl: number;
+  funding_earned: number;
+  liquidation_px: number | null;
+  snapshot_at: string;
+}
+
+export interface StoredHedgeEvent {
+  id: number;
+  token_id: string;
+  coin: string;
+  status: "open" | "closed";
+  entry_px: number;
+  size: number;
+  opened_at: string;
+  closed_at: string | null;
+  close_px: number | null;
+  realized_pnl: number | null;
+  funding_earned: number | null;
+  close_reason: string | null;
+  hl_fill_hash: string | null;
+}
+
 export type TaxTransactionLabel = "Trade" | "Transfer" | null;
 export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
 
@@ -757,6 +786,151 @@ export interface StoredTokenMetadata {
   name: string | null;
   decimals: number | null;
   fetched_at: string;
+}
+
+export function insertHedgeSnapshot(
+  snapshot: Omit<StoredHedgeSnapshot, "id" | "snapshot_at">,
+): void {
+  const db = getDb();
+  db.run(
+    `INSERT INTO hedge_snapshots
+     (token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      snapshot.token_id,
+      snapshot.coin,
+      snapshot.szi,
+      snapshot.entry_px,
+      snapshot.mark_px,
+      snapshot.unrealized_pnl,
+      snapshot.funding_earned,
+      snapshot.liquidation_px ?? null,
+    ],
+  );
+}
+
+export function listHedgeSnapshots(tokenId: string): StoredHedgeSnapshot[] {
+  const db = getDb();
+  return db
+    .query(
+      "SELECT id, token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px, snapshot_at FROM hedge_snapshots WHERE token_id = ? ORDER BY snapshot_at DESC",
+    )
+    .all(tokenId) as StoredHedgeSnapshot[];
+}
+
+export function getEarliestHedgeSnapshot(
+  token_id: string,
+  coin: string,
+): StoredHedgeSnapshot | null {
+  const db = getDb();
+  return db
+    .query(
+      "SELECT id, token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px, snapshot_at FROM hedge_snapshots WHERE token_id = ? AND coin = ? ORDER BY snapshot_at ASC LIMIT 1",
+    )
+    .get(token_id, coin) as StoredHedgeSnapshot | null;
+}
+
+export function insertHedgeEvent(
+  event: Omit<StoredHedgeEvent, "id">,
+): StoredHedgeEvent {
+  const db = getDb();
+  db.run(
+    `INSERT INTO hedge_events
+     (token_id, coin, status, entry_px, size, opened_at, closed_at, close_px, realized_pnl, funding_earned, close_reason, hl_fill_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      event.token_id,
+      event.coin,
+      event.status,
+      event.entry_px,
+      event.size,
+      event.opened_at,
+      event.closed_at ?? null,
+      event.close_px ?? null,
+      event.realized_pnl ?? null,
+      event.funding_earned ?? null,
+      event.close_reason ?? null,
+      event.hl_fill_hash ?? null,
+    ],
+  );
+
+  const inserted = db
+    .query("SELECT * FROM hedge_events WHERE id = last_insert_rowid()")
+    .get() as StoredHedgeEvent;
+  return inserted;
+}
+
+export function closeHedgeEvent(params: {
+  token_id: string;
+  coin: string;
+  closed_at: string;
+  close_px: number;
+  realized_pnl: number;
+  funding_earned: number;
+  close_reason: string;
+  hl_fill_hash: string;
+}): StoredHedgeEvent | null {
+  const db = getDb();
+
+  // Check if this hl_fill_hash already exists (idempotency)
+  const existing = db
+    .query("SELECT * FROM hedge_events WHERE hl_fill_hash = ?")
+    .get(params.hl_fill_hash) as StoredHedgeEvent | null;
+
+  if (existing) {
+    return existing;
+  }
+
+  // Find the open event for this token_id and coin
+  const openEvent = db
+    .query(
+      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
+    )
+    .get(params.token_id, params.coin) as StoredHedgeEvent | null;
+
+  if (!openEvent) {
+    return null;
+  }
+
+  // Update the open event to closed
+  db.run(
+    `UPDATE hedge_events
+     SET status = 'closed', closed_at = ?, close_px = ?, realized_pnl = ?, funding_earned = ?, close_reason = ?, hl_fill_hash = ?
+     WHERE id = ?`,
+    [
+      params.closed_at,
+      params.close_px,
+      params.realized_pnl,
+      params.funding_earned,
+      params.close_reason,
+      params.hl_fill_hash,
+      openEvent.id,
+    ],
+  );
+
+  const updated = db
+    .query("SELECT * FROM hedge_events WHERE id = ?")
+    .get(openEvent.id) as StoredHedgeEvent;
+  return updated;
+}
+
+export function getOpenHedgeEvent(
+  token_id: string,
+  coin: string,
+): StoredHedgeEvent | null {
+  const db = getDb();
+  return db
+    .query(
+      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
+    )
+    .get(token_id, coin) as StoredHedgeEvent | null;
+}
+
+export function getHedgeEvents(token_id: string): StoredHedgeEvent[] {
+  const db = getDb();
+  return db
+    .query("SELECT * FROM hedge_events WHERE token_id = ? ORDER BY opened_at DESC")
+    .all(token_id) as StoredHedgeEvent[];
 }
 
 export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {

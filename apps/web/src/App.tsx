@@ -7,6 +7,7 @@ import {
   useSyncPosition,
 } from "./hooks/useDashboardPositions";
 import { useHedge } from "./hooks/useHedge";
+import { buildNetHedgePnL } from "./hedge-pnl";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -298,30 +299,9 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
   const { data: hedgeData } = useHedge(position.tokenId);
 
-  // Hedge-adjusted ROI
-  // For closed hedges, suppress combined ROI when realizedPnl is unknown (null/undefined)
-  // rather than silently treating unknown P&L as zero.
-  const hedgePnlUsd = hedgeData
-    ? hedgeData.status === "closed"
-      ? hedgeData.realizedPnl != null
-        ? hedgeData.realizedPnl + hedgeData.fundingEarned
-        : null
-      : hedgeData.unrealizedPnl + hedgeData.fundingEarned
-    : null;
-
-  const lpAbsPnlUsd = pnl?.token1UsdPrice != null
-    ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
-    : null;
-  const lpEntryUsd = pnl?.token1UsdPrice != null
-    ? pnl.entryValueInToken1 * pnl.token1UsdPrice
-    : null;
-
-  const combinedAbsUsd =
-    lpAbsPnlUsd != null && hedgePnlUsd != null ? lpAbsPnlUsd + hedgePnlUsd : null;
-  const combinedRoiPct =
-    combinedAbsUsd != null && lpEntryUsd != null && lpEntryUsd > 0
-      ? combinedAbsUsd / lpEntryUsd
-      : null;
+  // Hedge-adjusted ROI — computed via shared helper (same logic as CLI pnl-format.ts)
+  const { lpPnlUsd: lpAbsPnlUsd, hedgePnlUsd, lpEntryUsd, combinedPnlUsd: combinedAbsUsd, combinedRoiPct } =
+    hedgeData ? buildNetHedgePnL(pnl, hedgeData) : { lpPnlUsd: null, hedgePnlUsd: null, lpEntryUsd: null, combinedPnlUsd: null, combinedRoiPct: null };
 
   return (
     <div>
@@ -451,17 +431,9 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
   // Mark price color tracks direction of the trade: green when short is winning (price ↓), red when losing (price ↑)
   const markTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
 
-  // Match the null-guard used in ActivePositionRow: when realizedPnl is unknown
-  // (null), keep hedgePnl as null rather than silently treating it as $0.
-  const hedgePnl: number | null = hedge.status === "closed"
-    ? hedge.realizedPnl != null
-      ? hedge.realizedPnl + hedge.fundingEarned
-      : null
-    : hedge.unrealizedPnl + hedge.fundingEarned;
-  const lpAbsPnl = pnl?.token1UsdPrice != null
-    ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
-    : null;
-  const combinedPnl = lpAbsPnl != null && hedgePnl != null ? lpAbsPnl + hedgePnl : null;
+  // Use shared helper — same logic as CLI pnl-format.ts and core buildNetHedgePnL
+  const { lpPnlUsd: lpAbsPnl, hedgePnlUsd: hedgePnl, combinedPnlUsd: combinedPnl } =
+    buildNetHedgePnL(pnl, hedge);
   const combinedTone = combinedPnl == null ? "text-neutral-950" : combinedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
 
   return (
@@ -489,7 +461,9 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
           <span className="text-[0.65rem] font-medium text-neutral-400 truncate hidden sm:inline">
             {hedge.status === "closed" && hedge.closeReason
               ? hedge.closeReason
-              : `${hedge.leverage.value}× ${hedge.leverage.type}`}
+              : hedge.leverage.value > 0
+              ? `${hedge.leverage.value}× ${hedge.leverage.type}`
+              : hedge.leverage.type}
           </span>
         </div>
 

@@ -451,13 +451,17 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
   // Mark price color tracks direction of the trade: green when short is winning (price ↓), red when losing (price ↑)
   const markTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
 
-  const hedgePnl = hedge.status === "closed"
-    ? (hedge.realizedPnl ?? 0) + hedge.fundingEarned
+  // Match the null-guard used in ActivePositionRow: when realizedPnl is unknown
+  // (null), keep hedgePnl as null rather than silently treating it as $0.
+  const hedgePnl: number | null = hedge.status === "closed"
+    ? hedge.realizedPnl != null
+      ? hedge.realizedPnl + hedge.fundingEarned
+      : null
     : hedge.unrealizedPnl + hedge.fundingEarned;
   const lpAbsPnl = pnl?.token1UsdPrice != null
     ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
     : null;
-  const combinedPnl = lpAbsPnl != null ? lpAbsPnl + hedgePnl : null;
+  const combinedPnl = lpAbsPnl != null && hedgePnl != null ? lpAbsPnl + hedgePnl : null;
   const combinedTone = combinedPnl == null ? "text-neutral-950" : combinedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
 
   return (
@@ -521,20 +525,22 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
                 <HedgeStat label="Close" value={`$${formatPrice(hedge.markPx)}`} />
                 <HedgeStat
                   label="Realized P&L"
-                  value={formatUsd(hedge.realizedPnl ?? 0)}
-                  valueClassName={(hedge.realizedPnl ?? 0) >= 0 ? "text-emerald-700" : "text-rose-600"}
+                  value={hedge.realizedPnl != null ? formatUsd(hedge.realizedPnl) : "unknown"}
+                  valueClassName={hedge.realizedPnl == null ? "text-neutral-400" : hedge.realizedPnl >= 0 ? "text-emerald-700" : "text-rose-600"}
                 />
                 <HedgeStat
                   label="Funding earned"
                   value={`+${formatUsd(hedge.fundingEarned)}`}
                   valueClassName="text-emerald-700"
                 />
-                <HedgeStat
-                  label="Hedge P&L"
-                  value={formatUsd(hedgePnl)}
-                  valueClassName={hedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
-                  detail="realized + funding"
-                />
+                {hedgePnl != null && (
+                  <HedgeStat
+                    label="Hedge P&L"
+                    value={formatUsd(hedgePnl)}
+                    valueClassName={hedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+                    detail="realized + funding"
+                  />
+                )}
               </>
             ) : (
               <>

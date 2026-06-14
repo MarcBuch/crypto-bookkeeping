@@ -7,9 +7,37 @@
  *   Cluster C (null funding): event with funding_earned = null produces exactly 1 row
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, beforeEach, afterEach, mock } from "bun:test";
 
-import { buildHedgeTaxEntries } from "../services/tax-transactions.js";
+// ---------------------------------------------------------------------------
+// Mocks must be set up BEFORE importing the module under test
+// ---------------------------------------------------------------------------
+
+let mockClosedEvents: unknown[] = [];
+let upsertCalls: unknown[] = [];
+
+mock.module("../db/store.js", () => ({
+  getAllClosedHedgeEvents: () => mockClosedEvents,
+  getTaxTransaction: () => null, // No existing rows, so enrichment path is exercised
+  upsertSyncedTaxTransaction: (entry: unknown) => {
+    upsertCalls.push(entry);
+  },
+  getAllPositions: () => [],
+  getTaxSyncState: () => null,
+  getTaxTransactionsNeedingEurEnrichment: () => [],
+  updateTaxTransactionEurValues: () => {},
+  upsertTaxSyncState: () => {},
+}));
+
+mock.module("../services/pricing.js", () => ({
+  getHistoricalPrice: async () => 1.0, // Fixed price, no network calls
+}));
+
+// ---------------------------------------------------------------------------
+// Now import the module under test
+// ---------------------------------------------------------------------------
+
+import { buildHedgeTaxEntries, syncHedgeTaxFlows } from "../services/tax-transactions.js";
 import type { StoredHedgeEvent } from "../db/store.js";
 
 // ---------------------------------------------------------------------------
@@ -38,28 +66,33 @@ function makeHedgeEvent(
 }
 
 // ---------------------------------------------------------------------------
+// Test setup/teardown
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  mockClosedEvents = [];
+  upsertCalls = [];
+});
+
+afterEach(() => {
+  mockClosedEvents = [];
+  upsertCalls = [];
+});
+
+// ---------------------------------------------------------------------------
 // Cluster A: no events
 // ---------------------------------------------------------------------------
 
 describe("syncHedgeTaxFlows — Cluster A (no events)", () => {
-  it("should return {synced: 0} when no closed events", () => {
-    const closedEvents: StoredHedgeEvent[] = [];
-    let synced = 0;
-    for (const event of closedEvents) {
-      // buildHedgeTaxEntries would be called here
-      synced++;
-    }
-    expect(synced).toBe(0);
+  it("should return {synced: 0} when no closed events", async () => {
+    mockClosedEvents = [];
+    const result = await syncHedgeTaxFlows({ pricing: {} as any });
+    expect(result.synced).toBe(0);
   });
 
-  it("should not call upsertSyncedTaxTransaction when no events", () => {
-    const upsertCalls: unknown[] = [];
-    const closedEvents: StoredHedgeEvent[] = [];
-
-    for (const event of closedEvents) {
-      upsertCalls.push(event);
-    }
-
+  it("should not call upsertSyncedTaxTransaction when no events", async () => {
+    mockClosedEvents = [];
+    await syncHedgeTaxFlows({ pricing: {} as any });
     expect(upsertCalls.length).toBe(0);
   });
 });
@@ -79,29 +112,13 @@ describe("syncHedgeTaxFlows — Cluster B (idempotency)", () => {
       funding_earned: 50,
     });
 
-    const upsertCalls: Array<{ id: string }> = [];
-    const closedEvents = [event];
-
     // First call
-    for (const evt of closedEvents) {
-      const closeId = `hedge:close:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
-      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}:funding`;
-      upsertCalls.push({ id: closeId });
-      upsertCalls.push({ id: fundingId });
-    }
-
-    const firstCallIds = upsertCalls.map((c) => c.id);
+    const firstCallEntries = buildHedgeTaxEntries(event, "2024-01-02T00:00:00Z");
+    const firstCallIds = firstCallEntries.map((e) => e.id);
 
     // Second call
-    upsertCalls.length = 0;
-    for (const evt of closedEvents) {
-      const closeId = `hedge:close:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
-      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}:funding`;
-      upsertCalls.push({ id: closeId });
-      upsertCalls.push({ id: fundingId });
-    }
-
-    const secondCallIds = upsertCalls.map((c) => c.id);
+    const secondCallEntries = buildHedgeTaxEntries(event, "2024-01-02T00:00:00Z");
+    const secondCallIds = secondCallEntries.map((e) => e.id);
 
     expect(firstCallIds).toEqual(secondCallIds);
   });
@@ -114,10 +131,8 @@ describe("syncHedgeTaxFlows — Cluster B (idempotency)", () => {
 
     const ids: string[] = [];
     for (const evt of events) {
-      const closeId = `hedge:close:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
-      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}:funding`;
-      ids.push(closeId);
-      ids.push(fundingId);
+      const entries = buildHedgeTaxEntries(evt, "2024-01-02T00:00:00Z");
+      ids.push(...entries.map((e) => e.id));
     }
 
     expect(ids.length).toBe(4);
@@ -139,19 +154,8 @@ describe("syncHedgeTaxFlows — Cluster C (null funding)", () => {
       funding_earned: null,
     });
 
-    let rowCount = 0;
-    // Simulate buildHedgeTaxEntries logic
-    const pnl = event.realized_pnl ?? 0;
-    if (pnl !== null) {
-      rowCount++; // close row
-    }
-
-    const funding = event.funding_earned ?? 0;
-    if (funding !== 0) {
-      rowCount++; // funding row
-    }
-
-    expect(rowCount).toBe(1);
+    const entries = buildHedgeTaxEntries(event, "2024-01-02T00:00:00Z");
+    expect(entries.length).toBe(1);
   });
 
   it("should produce exactly 1 row when funding_earned is 0", () => {
@@ -160,18 +164,8 @@ describe("syncHedgeTaxFlows — Cluster C (null funding)", () => {
       funding_earned: 0,
     });
 
-    let rowCount = 0;
-    const pnl = event.realized_pnl ?? 0;
-    if (pnl !== null) {
-      rowCount++; // close row
-    }
-
-    const funding = event.funding_earned ?? 0;
-    if (funding !== 0) {
-      rowCount++; // funding row
-    }
-
-    expect(rowCount).toBe(1);
+    const entries = buildHedgeTaxEntries(event, "2024-01-02T00:00:00Z");
+    expect(entries.length).toBe(1);
   });
 
   it("should produce 2 rows when funding_earned is non-zero", () => {
@@ -180,18 +174,8 @@ describe("syncHedgeTaxFlows — Cluster C (null funding)", () => {
       funding_earned: 25,
     });
 
-    let rowCount = 0;
-    const pnl = event.realized_pnl ?? 0;
-    if (pnl !== null) {
-      rowCount++; // close row
-    }
-
-    const funding = event.funding_earned ?? 0;
-    if (funding !== 0) {
-      rowCount++; // funding row
-    }
-
-    expect(rowCount).toBe(2);
+    const entries = buildHedgeTaxEntries(event, "2024-01-02T00:00:00Z");
+    expect(entries.length).toBe(2);
   });
 
   it("should handle multiple events with mixed null/zero funding", () => {
@@ -203,15 +187,8 @@ describe("syncHedgeTaxFlows — Cluster C (null funding)", () => {
 
     let totalRows = 0;
     for (const event of events) {
-      const pnl = event.realized_pnl ?? 0;
-      if (pnl !== null) {
-        totalRows++; // close row
-      }
-
-      const funding = event.funding_earned ?? 0;
-      if (funding !== 0) {
-        totalRows++; // funding row
-      }
+      const entries = buildHedgeTaxEntries(event, "2024-01-02T00:00:00Z");
+      totalRows += entries.length;
     }
 
     expect(totalRows).toBe(4); // 1 + 1 + 2

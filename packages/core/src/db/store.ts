@@ -933,6 +933,15 @@ export function getHedgeEvents(token_id: string): StoredHedgeEvent[] {
     .all(token_id) as StoredHedgeEvent[];
 }
 
+export function getAllClosedHedgeEvents(): StoredHedgeEvent[] {
+  const db = getDb();
+  return db
+    .query(
+      `SELECT * FROM hedge_events WHERE status = 'closed' ORDER BY closed_at ASC NULLS LAST, id ASC`,
+    )
+    .all() as StoredHedgeEvent[];
+}
+
 export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {
   const db = getDb();
   const address = metadata.contract_address.toLowerCase();

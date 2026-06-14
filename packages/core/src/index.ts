@@ -31,6 +31,7 @@ export {
   closeHedgeEvent,
   getOpenHedgeEvent,
   getHedgeEvents,
+  getAllClosedHedgeEvents,
   upsertSyncedTaxTransaction,
   createManualTaxTransaction,
   getTaxTransaction,
@@ -86,6 +87,8 @@ export * from "./services/hedge.js";
 export {
   syncTaxTransactions,
   enrichTaxTransactionsEurValues,
+  buildHedgeTaxEntries,
+  syncHedgeTaxFlows,
 } from "./services/tax-transactions.js";
 export type {
   SyncTaxTransactionsOptions,

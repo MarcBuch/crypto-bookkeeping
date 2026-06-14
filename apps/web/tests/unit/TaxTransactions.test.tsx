@@ -22,6 +22,7 @@ import {
   taxCommentDraftState,
   taxTransactionLabelOptions,
   submitManualTaxTransactionForm,
+  TransactionHashLink,
   updateTaxTransactionGroup,
 } from "../../src/TaxTransactions";
 
@@ -1607,5 +1608,85 @@ describe("tax transactions rendering", () => {
     expect(html).toContain("Mixed");
     // Standalone row shows its gain value
     expect(html).toContain("50.00");
+  });
+});
+
+describe("TransactionHashLink", () => {
+  it("renders a clickable Hyperscan link for 0x hashes", () => {
+    const hash = "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    const html = renderToStaticMarkup(<TransactionHashLink hash={hash} />);
+    expect(html).toContain("hyperscan.com/tx/");
+    expect(html).toContain("<a ");
+  });
+
+  it("renders plain text (no link) for non-0x hashes like Hyperliquid fill TIDs", () => {
+    const hash = "794235780488404";
+    const html = renderToStaticMarkup(<TransactionHashLink hash={hash} />);
+    expect(html).not.toContain("<a ");
+    expect(html).not.toContain("hyperscan.com");
+    expect(html).toContain(hash);
+  });
+
+  it("truncates long hashes but shows full hash in title", () => {
+    const hash = "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    const html = renderToStaticMarkup(<TransactionHashLink hash={hash} />);
+    expect(html).toContain(`title="${hash}"`);
+    // Rendered visible text should be short form: first 6 chars + ... + last 4 chars
+    expect(html).toContain("0xabcd");
+    expect(html).toContain("7890");
+    expect(html).toContain("...");
+    // Visible text node should not contain the full hash (attributes are fine)
+    const textOnly = html.replace(/<[^>]+>/g, "");
+    expect(textOnly).not.toBe(hash);
+    expect(textOnly.trim()).toBe("0xabcd...7890");
+  });
+});
+
+describe("groupTaxTransactions — hedge event grouping", () => {
+  const disc = "794235780488404";
+  const closeRow: TaxTransaction = {
+    ...taxTransaction,
+    id: `hedge:close:484645:HYPE:${disc}`,
+    hash: disc,
+    transaction_type: "hedge-close",
+    source: "hedge-events",
+    label: null,
+  };
+  const fundingRow: TaxTransaction = {
+    ...taxTransaction,
+    id: `hedge:funding:484645:HYPE:${disc}:funding`,
+    hash: `${disc}:funding`,
+    transaction_type: "hedge-funding",
+    source: "hedge-events",
+    label: null,
+  };
+
+  it("groups hedge:close and hedge:funding rows for the same event together", () => {
+    const groups = groupTaxTransactions([closeRow, fundingRow]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].transactions).toHaveLength(2);
+    expect(groups[0].transactions.map((t) => t.id)).toContain(closeRow.id);
+    expect(groups[0].transactions.map((t) => t.id)).toContain(fundingRow.id);
+  });
+
+  it("uses the close row as primary when it appears first", () => {
+    const groups = groupTaxTransactions([closeRow, fundingRow]);
+    expect(groups[0].primary.id).toBe(closeRow.id);
+  });
+
+  it("does not merge hedge events from different positions", () => {
+    const otherClose: TaxTransaction = {
+      ...closeRow,
+      id: "hedge:close:999999:HYPE:otherhash",
+      hash: "otherhash",
+    };
+    const groups = groupTaxTransactions([closeRow, otherClose]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it("a lone hedge:close row without a funding row still appears as a single group", () => {
+    const groups = groupTaxTransactions([closeRow]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].transactions).toHaveLength(1);
   });
 });

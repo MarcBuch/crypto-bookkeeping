@@ -13,12 +13,15 @@ import { resolveTokenMetadata } from "../chain/token-metadata.js";
 import type { Config } from "../config.js";
 import {
   getAllPositions,
+  getAllClosedHedgeEvents,
   getTaxSyncState,
+  getTaxTransaction,
   getTaxTransactionsNeedingEurEnrichment,
   updateTaxTransactionEurValues,
   upsertSyncedTaxTransaction,
   upsertTaxSyncState,
   type StoredPosition,
+  type StoredHedgeEvent,
   type SyncedTaxTransaction,
 } from "../db/store.js";
 import { getHistoricalPrice } from "./pricing.js";
@@ -75,6 +78,8 @@ export interface SyncTaxTransactionsSummary {
   source: string;
   wallet: string;
   latestBlockNumber: number | null;
+  /** Number of tax rows written (1–2 per hedge event) not events */
+  hedgeFlowsSynced: number;
 }
 
 export async function syncLpTaxFlows(
@@ -381,6 +386,107 @@ function buildLpFeeEntry(
   };
 }
 
+export function buildHedgeTaxEntries(
+  event: StoredHedgeEvent,
+  syncedAt: string,
+): SyncedTaxTransaction[] {
+  // id discriminator: prefer hl_fill_hash, fall back to evt{id}
+  const disc = event.hl_fill_hash != null ? event.hl_fill_hash : `evt${event.id}`;
+  const timeStamp = event.closed_at ?? null;
+
+  const entries: SyncedTaxTransaction[] = [];
+
+  // Base entry with common fields shared by close and funding rows
+  const baseEntry = {
+    block_number: null,
+    time_stamp: timeStamp,
+    from_address: null,
+    to_address: null,
+    value: null,
+    gas_used: null,
+    gas_price: null,
+    fee: null,
+    method_id: null,
+    function_name: null,
+    input: null,
+    contract_address: null,
+    token_symbol: "USDC" as const,
+    token_decimal: 6,
+    token_name: "USD Coin",
+    source: "hedge-events",
+    is_error: 0,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  } satisfies Partial<SyncedTaxTransaction>;
+
+  // --- close row (realized P&L) ---
+  const pnl = event.realized_pnl ?? 0;
+  const absPnl = Math.abs(pnl).toFixed(8);
+  const closeEntry: SyncedTaxTransaction = {
+    ...baseEntry,
+    id: `hedge:close:${event.token_id}:${event.coin}:${disc}`,
+    hash: event.hl_fill_hash ?? `hedge:close:${event.token_id}:${event.coin}:${disc}`,
+    transaction_type: "hedge-close",
+    incoming_quantity: pnl > 0 ? absPnl : null,
+    incoming_asset: pnl > 0 ? "USDC" : null,
+    outgoing_quantity: pnl < 0 ? absPnl : null,
+    outgoing_asset: pnl < 0 ? "USDC" : null,
+    cost_eur: pnl === 0 ? "0" : null,
+    proceeds_eur: pnl === 0 ? "0" : null,
+    gain_eur: pnl === 0 ? "0" : null,
+  };
+  entries.push(closeEntry);
+
+  // --- funding row (only when non-zero) ---
+  const funding = event.funding_earned ?? 0;
+  if (funding !== 0) {
+    const absFunding = Math.abs(funding).toFixed(8);
+    const fundingEntry: SyncedTaxTransaction = {
+      ...baseEntry,
+      id: `hedge:funding:${event.token_id}:${event.coin}:${disc}:funding`,
+      hash: `${event.hl_fill_hash ?? `hedge:funding:${event.token_id}:${event.coin}:${disc}`}:funding`,
+      transaction_type: "hedge-funding",
+      incoming_quantity: funding > 0 ? absFunding : null,
+      incoming_asset: funding > 0 ? "USDC" : null,
+      outgoing_quantity: funding < 0 ? absFunding : null,
+      outgoing_asset: funding < 0 ? "USDC" : null,
+      cost_eur: null,
+      proceeds_eur: null,
+      gain_eur: null,
+    };
+    entries.push(fundingEntry);
+  }
+
+  return entries;
+}
+
+export async function syncHedgeTaxFlows(
+  config: Pick<Config, "pricing">,
+  options: { syncedAt?: string } = {},
+): Promise<{ synced: number }> {
+  const syncedAt = options.syncedAt ?? new Date().toISOString();
+  const closedEvents = getAllClosedHedgeEvents();
+  let synced = 0;
+  for (const event of closedEvents) {
+    const entries = buildHedgeTaxEntries(event, syncedAt);
+    for (const entry of entries) {
+      // Already enriched in DB — skip pricing API, upsert as-is
+      const existing = getTaxTransaction(entry.id);
+      const alreadyEnriched =
+        existing !== null &&
+        (existing.cost_eur !== null || existing.proceeds_eur !== null);
+
+      if (alreadyEnriched || entry.cost_eur !== null || entry.proceeds_eur !== null || !entry.time_stamp) {
+        upsertSyncedTaxTransaction(entry);
+      } else {
+        const [enriched] = await enrichTaxTransactionsWithEurValues([entry], config);
+        upsertSyncedTaxTransaction(enriched);
+      }
+      synced++;
+    }
+  }
+  return { synced };
+}
 
 export async function syncTaxTransactions(
   config: Pick<
@@ -466,6 +572,10 @@ export async function syncTaxTransactions(
   const lpFlowResult = await syncLpTaxFlows(config, { viemClient });
   synced += lpFlowResult.synced;
 
+  // ── Hedge tax flows: closed positions from hedge event data ────────────────
+  const hedgeFlowResult = await syncHedgeTaxFlows(config, { syncedAt });
+  synced += hedgeFlowResult.synced;
+
   // ── Update sync state watermark ────────────────────────────────────────────
   upsertTaxSyncState({
     wallet,
@@ -477,7 +587,7 @@ export async function syncTaxTransactions(
     source: "hypersync",
   });
 
-  return { synced, insertedOrUpdated: synced, source: "hypersync", wallet, latestBlockNumber };
+  return { synced, insertedOrUpdated: synced, source: "hypersync", wallet, latestBlockNumber, hedgeFlowsSynced: hedgeFlowResult.synced };
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,9 @@
  */
 
 import { describe, it, expect } from "bun:test";
+
 import type { Address } from "viem";
+
 import { computeUnclaimedFees } from "../chain/pools.js";
 
 describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
@@ -187,7 +189,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
       18,
     );
 
-    expect(Object.keys(result).sort()).toEqual(["fees0", "fees1"]);
+    expect(Object.keys(result).toSorted()).toEqual(["fees0", "fees1"]);
     expect(result.fees0).toBe(0);
     expect(result.fees1).toBe(0);
     expect(typeof result.fees0).toBe("number");
@@ -303,13 +305,6 @@ describe("computeUnclaimedFees — boundary values", () => {
     feeGrowthOutside1X128: 100000n,
   };
 
-  const tickUpperData = {
-    liquidityGross: 1000000n,
-    liquidityNet: -1000000n,
-    feeGrowthOutside0X128: 50000n,
-    feeGrowthOutside1X128: 100000n,
-  };
-
   const poolState = {
     address: poolAddress,
     sqrtPriceX96: 79228162514264337593543950336n,
@@ -363,7 +358,7 @@ describe("computeUnclaimedFees — boundary values", () => {
       feeGrowthInside0LastX128: 0n,
       feeGrowthInside1LastX128: 0n,
       tokensOwed0: 1000n, // 1000 raw units = 0.001 with 6 decimals
-      tokensOwed1: 500n,  // 500 raw units = 0.0000000000000005 with 18 decimals
+      tokensOwed1: 500n, // 500 raw units = 0.0000000000000005 with 18 decimals
     };
 
     const result = await computeUnclaimedFees(
@@ -415,7 +410,7 @@ describe("computeUnclaimedFees — boundary values", () => {
       address: poolAddress,
       sqrtPriceX96: 79228162514264337593543950336n,
       tick: 0,
-      feeGrowthGlobal0X128: 100n,  // Small value, triggers wrap-around
+      feeGrowthGlobal0X128: 100n, // Small value, triggers wrap-around
       feeGrowthGlobal1X128: 100n,
     };
 
@@ -478,44 +473,44 @@ describe("computeUnclaimedFees — boundary values", () => {
     expect(isFinite(result.fees1)).toBe(true);
   });
 
-   it("tick at exact range upper boundary (currentTick === tickUpper) → does not throw or return NaN", async () => {
-     const position = {
-       tickLower: -100,
-       tickUpper: 0,
-       liquidity: 1000000n,
-       feeGrowthInside0LastX128: 0n,
-       feeGrowthInside1LastX128: 0n,
-       tokensOwed0: 0n,
-       tokensOwed1: 0n,
-     };
+  it("tick at exact range upper boundary (currentTick === tickUpper) → does not throw or return NaN", async () => {
+    const position = {
+      tickLower: -100,
+      tickUpper: 0,
+      liquidity: 1000000n,
+      feeGrowthInside0LastX128: 0n,
+      feeGrowthInside1LastX128: 0n,
+      tokensOwed0: 0n,
+      tokensOwed1: 0n,
+    };
 
-     // Set poolState.tick to exactly tickUpper
-     const boundaryPoolState = {
-       address: poolAddress,
-       sqrtPriceX96: 79228162514264337593543950336n,
-       tick: 0, // Exactly at tickUpper
-       feeGrowthGlobal0X128: 1000n,
-       feeGrowthGlobal1X128: 2000n,
-     };
+    // Set poolState.tick to exactly tickUpper
+    const boundaryPoolState = {
+      address: poolAddress,
+      sqrtPriceX96: 79228162514264337593543950336n,
+      tick: 0, // Exactly at tickUpper
+      feeGrowthGlobal0X128: 1000n,
+      feeGrowthGlobal1X128: 2000n,
+    };
 
-     const result = await computeUnclaimedFees(
-       successClient as any,
-       poolAddress,
-       position,
-       boundaryPoolState,
-       6,
-       18,
-     );
+    const result = await computeUnclaimedFees(
+      successClient as any,
+      poolAddress,
+      position,
+      boundaryPoolState,
+      6,
+      18,
+    );
 
-     expect(result).toHaveProperty("fees0");
-     expect(result).toHaveProperty("fees1");
-     expect(typeof result.fees0).toBe("number");
-     expect(typeof result.fees1).toBe("number");
-     expect(isNaN(result.fees0)).toBe(false);
-     expect(isNaN(result.fees1)).toBe(false);
-     expect(isFinite(result.fees0)).toBe(true);
-     expect(isFinite(result.fees1)).toBe(true);
-   });
+    expect(result).toHaveProperty("fees0");
+    expect(result).toHaveProperty("fees1");
+    expect(typeof result.fees0).toBe("number");
+    expect(typeof result.fees1).toBe("number");
+    expect(isNaN(result.fees0)).toBe(false);
+    expect(isNaN(result.fees1)).toBe(false);
+    expect(isFinite(result.fees0)).toBe(true);
+    expect(isFinite(result.fees1)).toBe(true);
+  });
 });
 
 describe("computeUnclaimedFees — output contract", () => {
@@ -668,7 +663,7 @@ describe("computeUnclaimedFees — output contract", () => {
       18,
     );
 
-    const keys = Object.keys(result).sort();
+    const keys = Object.keys(result).toSorted();
     expect(keys).toEqual(["fees0", "fees1"]);
   });
 

@@ -1,5 +1,6 @@
-import { mock, describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mock, describe, it, expect, beforeEach } from "bun:test";
+
 import { initSchema } from "../db/schema.js";
 
 // Mock getDb before importing store functions
@@ -194,7 +195,7 @@ describe("hedge-events-store — adversarial tests", () => {
 
     it("closeHedgeEvent on a row that is already closed — returns null (no open event to close)", () => {
       // Insert and close an event
-      const opened = insertHedgeEvent(minimalHedgeEvent("token-123", "HYPE"));
+      insertHedgeEvent(minimalHedgeEvent("token-123", "HYPE"));
 
       const closed = closeHedgeEvent({
         token_id: "token-123",
@@ -383,7 +384,7 @@ describe("hedge-events-store — adversarial tests", () => {
       const tokenId = "token-123";
 
       // Insert events with different timestamps, closing each before opening the next
-      const _event1 = insertHedgeEvent(
+      insertHedgeEvent(
         minimalHedgeEvent(tokenId, "HYPE", {
           opened_at: "2024-01-01T00:00:00Z",
           entry_px: 100.0,
@@ -402,7 +403,7 @@ describe("hedge-events-store — adversarial tests", () => {
         hl_fill_hash: "hash-1",
       });
 
-      const _event2 = insertHedgeEvent(
+      insertHedgeEvent(
         minimalHedgeEvent(tokenId, "HYPE", {
           opened_at: "2024-01-02T00:00:00Z",
           entry_px: 101.0,
@@ -421,7 +422,7 @@ describe("hedge-events-store — adversarial tests", () => {
         hl_fill_hash: "hash-2",
       });
 
-      const _event3 = insertHedgeEvent(
+      insertHedgeEvent(
         minimalHedgeEvent(tokenId, "HYPE", {
           opened_at: "2024-01-03T00:00:00Z",
           entry_px: 102.0,
@@ -441,13 +442,13 @@ describe("hedge-events-store — adversarial tests", () => {
       const tokenId = "token-123";
 
       // Insert and close an event
-      const openedEvent = insertHedgeEvent(
+      insertHedgeEvent(
         minimalHedgeEvent(tokenId, "HYPE", {
           opened_at: "2024-01-01T00:00:00Z",
         }),
       );
 
-      const closedEvent = closeHedgeEvent({
+      closeHedgeEvent({
         token_id: tokenId,
         coin: "HYPE",
         closed_at: "2024-01-01T12:00:00Z",
@@ -459,7 +460,7 @@ describe("hedge-events-store — adversarial tests", () => {
       });
 
       // Insert another open event
-      const anotherOpen = insertHedgeEvent(
+      insertHedgeEvent(
         minimalHedgeEvent(tokenId, "HYPE", {
           opened_at: "2024-01-02T00:00:00Z",
         }),

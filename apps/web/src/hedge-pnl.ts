@@ -15,10 +15,7 @@ export interface NetHedgePnL {
   combinedRoiPct: number | null;
 }
 
-export function buildNetHedgePnL(
-  pnl: PnLView | undefined,
-  hedge: HedgeView,
-): NetHedgePnL {
+export function buildNetHedgePnL(pnl: PnLView | undefined, hedge: HedgeView): NetHedgePnL {
   const hedgePnlUsd: number | null =
     hedge.status === "closed"
       ? hedge.realizedPnl != null
@@ -27,17 +24,12 @@ export function buildNetHedgePnL(
       : hedge.unrealizedPnl + hedge.fundingEarned;
 
   const lpPnlUsd: number | null =
-    pnl?.token1UsdPrice != null
-      ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
-      : null;
+    pnl?.token1UsdPrice != null ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice : null;
 
   const lpEntryUsd: number | null =
-    pnl?.token1UsdPrice != null
-      ? pnl.entryValueInToken1 * pnl.token1UsdPrice
-      : null;
+    pnl?.token1UsdPrice != null ? pnl.entryValueInToken1 * pnl.token1UsdPrice : null;
 
-  const combinedPnlUsd =
-    lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
+  const combinedPnlUsd = lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
 
   const combinedRoiPct =
     combinedPnlUsd != null && lpEntryUsd != null && lpEntryUsd > 0

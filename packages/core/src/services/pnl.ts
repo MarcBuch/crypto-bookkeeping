@@ -7,7 +7,12 @@ import {
   sumCollectLogsPublic,
 } from "../chain/events.js";
 import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import { getPoolAddress, getPoolState, getTokenInfo, computeUnclaimedFees } from "../chain/pools.js";
+import {
+  getPoolAddress,
+  getPoolState,
+  getTokenInfo,
+  computeUnclaimedFees,
+} from "../chain/pools.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
 import { withRetry } from "../chain/rpc.js";
 import type { Config } from "../config.js";
@@ -126,10 +131,7 @@ export async function getPnLView(
 
   // logsFromBlock is the number of blocks to scan back (window size), matching
   // the events.ts windowBlocks parameter. undefined → events.ts uses its default.
-  const logsWindowBlocks =
-    config.logsFromBlock != null
-      ? BigInt(config.logsFromBlock)
-      : undefined;
+  const logsWindowBlocks = config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined;
 
   // Fetch latestBlock once to share across all position lookups
   const latestBlock = await withRetry(() => client.getBlockNumber());
@@ -194,9 +196,9 @@ export async function getPnLView(
         entryLiquidity = openEvent.liquidity;
 
         // Persist entry data + open_tx if not already stored
-         if (!hasStoredEntry || !storedPos?.open_tx) {
-           persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-         }
+        if (!hasStoredEntry || !storedPos?.open_tx) {
+          persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+        }
       } else {
         // not_found — could not resolve entry from config tx — skip this position
         continue;
@@ -242,7 +244,7 @@ export async function getPnLView(
         entryLiquidity = openEvent.liquidity;
 
         // Store entry data + open_tx for future use
-         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+        persistPositionEntry(pos, openEvent, { token0Info, token1Info });
       } else {
         // not_found — could not find entry — skip this position
         continue;
@@ -416,7 +418,11 @@ export async function getPnLView(
             exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
           } else {
             // Get pool price at close block for accurate exit price
-            const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
+            const closePrice = await getPoolPriceAtBlock(
+              client,
+              poolAddress,
+              closeEvent.blockNumber,
+            );
             if (closePrice) {
               exitSqrtPriceX96 = closePrice.sqrtPriceX96;
             } else {
@@ -432,8 +438,8 @@ export async function getPnLView(
             }
           }
 
-           // Persist close data for future fast-path use
-           upsertPosition({
+          // Persist close data for future fast-path use
+          upsertPosition({
             token_id: pos.tokenId.toString(),
             token0: pos.token0,
             token1: pos.token1,
@@ -497,10 +503,10 @@ export async function getPnLView(
         try {
           const block = await client.getBlock({ blockNumber: BigInt(storedPos!.close_block!) });
           const isoTimestamp = new Date(Number(block.timestamp * 1000n)).toISOString();
-           [token0UsdPrice, token1UsdPrice] = await Promise.all([
-             getHistoricalPrice(config, t0sym, isoTimestamp, "usd"),
-             getHistoricalPrice(config, t1sym, isoTimestamp, "usd"),
-           ]);
+          [token0UsdPrice, token1UsdPrice] = await Promise.all([
+            getHistoricalPrice(config, t0sym, isoTimestamp, "usd"),
+            getHistoricalPrice(config, t1sym, isoTimestamp, "usd"),
+          ]);
           // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
           upsertPosition({
             ...storedPos!,

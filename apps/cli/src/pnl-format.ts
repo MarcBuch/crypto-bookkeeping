@@ -43,8 +43,10 @@ export function formatPnLDisplayData(
     let netPnl: string | undefined;
 
     if (hedge) {
-      const { lpPnlUsd, hedgePnlUsd, combinedPnlUsd, combinedRoiPct } =
-        buildNetHedgePnL(pos, hedge);
+      const { lpPnlUsd, hedgePnlUsd, combinedPnlUsd, combinedRoiPct } = buildNetHedgePnL(
+        pos,
+        hedge,
+      );
 
       // lpPnl: USD if available, else token1-denominated (same as absolutePnl but relabeled)
       if (lpPnlUsd != null) {

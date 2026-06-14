@@ -1,15 +1,16 @@
 import { createClient } from "../chain/client.js";
 import { findOpenEvent } from "../chain/events.js";
 import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import { computeUnclaimedFees, getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
+import {
+  computeUnclaimedFees,
+  getPoolAddress,
+  getPoolState,
+  getTokenInfo,
+} from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import { getPosition, insertSnapshot } from "../db/store.js";
-import {
-  deriveEntryPriceFromAmounts,
-  getTokenAmounts,
-  sqrtPriceX96ToPrice,
-} from "../math/divergence-loss.js";
+import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 import { persistPositionEntry } from "./position-entry.js";
 
 export interface SnapshotResult {
@@ -38,10 +39,7 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
 
   // Number of blocks to scan back when discovering events (window size).
   // undefined → findOpenEvent uses its 30-day default.
-  const logsWindowBlocks =
-    config.logsFromBlock != null
-      ? BigInt(config.logsFromBlock)
-      : undefined;
+  const logsWindowBlocks = config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined;
 
   for (const pos of positions) {
     // Skip positions with 0 liquidity (closed)
@@ -70,14 +68,12 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
     const poolState = await getPoolState(client, poolAddress);
 
     // Get or determine entry price
-    let entrySqrtPriceX96: bigint | null = null;
     let entryAmount0 = 0n;
     let entryAmount1 = 0n;
 
     const posConfigSnap = config.positions?.[pos.tokenId.toString()];
     const storedPos = getPosition(pos.tokenId.toString());
     if (storedPos?.entry_sqrt_price_x96) {
-      entrySqrtPriceX96 = BigInt(storedPos.entry_sqrt_price_x96);
       entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
       entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
     } else {
@@ -100,22 +96,14 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
         );
         continue;
       }
-       if (openResult.status === "found") {
-         const openEvent = openResult.event;
-         entryAmount0 = openEvent.amount0;
-         entryAmount1 = openEvent.amount1;
-         entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-           openEvent.amount0,
-           openEvent.amount1,
-           openEvent.liquidity,
-           pos.tickLower,
-           pos.tickUpper,
-         );
+      if (openResult.status === "found") {
+        const openEvent = openResult.event;
+        entryAmount0 = openEvent.amount0;
+        entryAmount1 = openEvent.amount1;
 
-         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-       } else {
+        persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+      } else {
         // not_found — use current price as fallback (matching original behavior)
-        entrySqrtPriceX96 = poolState.sqrtPriceX96;
         const currentAmounts = getTokenAmounts(
           pos.liquidity,
           poolState.sqrtPriceX96,

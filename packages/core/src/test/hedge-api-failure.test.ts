@@ -8,8 +8,9 @@
  *  - Null assetPositions
  */
 
-import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
+
 import { initSchema } from "../db/schema.js";
 
 // Mock getDb before importing store functions
@@ -40,8 +41,8 @@ globalThis.fetch = ((url: string, options: unknown) => mockFetch(url, options)) 
 // Import module under test (after mocks)
 // ---------------------------------------------------------------------------
 
-import { getHedgeView } from "../services/hedge.js";
 import type { Config } from "../config.js";
+import { getHedgeView } from "../services/hedge.js";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -96,7 +97,7 @@ beforeEach(() => {
   // Create a fresh in-memory database for each test
   testDb = new Database(":memory:");
   initSchema(testDb);
-  
+
   mockFetch = async () => ({
     ok: true,
     status: 200,
@@ -241,9 +242,7 @@ describe("getHedgeView() — API failure scenarios", () => {
 
   // Additional edge case: assetPositions is empty array
   it("assetPositions is empty array: no matching HYPE position → throws error", async () => {
-    let callCount = 0;
     mockFetch = async (_url: string, options: unknown) => {
-      callCount++;
       const body = JSON.parse((options as { body?: string })?.body ?? "{}");
       if (body.type === "userFillsByTime") {
         // No fills found — resolveAbsentPosition returns null → falls through to throw

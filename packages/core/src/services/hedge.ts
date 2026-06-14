@@ -185,9 +185,7 @@ export function snapshotHedge(view: HedgeView): void {
  *   - All fills are closing fills and none mention liquidation → "manual_close"
  *   - Fallback (unknown dir format) → "manual_close"
  */
-function inferCloseReason(
-  closingFills: HyperliquidFill[],
-): "liquidation" | "manual_close" {
+function inferCloseReason(closingFills: HyperliquidFill[]): "liquidation" | "manual_close" {
   if (closingFills.some((f) => f.dir.toLowerCase().includes("liquidat"))) {
     return "liquidation";
   }
@@ -202,15 +200,10 @@ function inferCloseReason(
 function vwapClose(fills: HyperliquidFill[]): number {
   const totalSize = fills.reduce((s, f) => s + parseFloat(f.sz), 0);
   if (totalSize === 0) {
-    const largest = fills.reduce((m, f) =>
-      parseFloat(f.sz) > parseFloat(m.sz) ? f : m,
-    );
+    const largest = fills.reduce((m, f) => (parseFloat(f.sz) > parseFloat(m.sz) ? f : m));
     return parseFloat(largest.px);
   }
-  const weightedSum = fills.reduce(
-    (s, f) => s + parseFloat(f.px) * parseFloat(f.sz),
-    0,
-  );
+  const weightedSum = fills.reduce((s, f) => s + parseFloat(f.px) * parseFloat(f.sz), 0);
   return weightedSum / totalSize;
 }
 
@@ -264,24 +257,21 @@ async function resolveAbsentPosition(
   if (closingFills.length === 0) return null;
 
   const entryPx =
-    openFills.length > 0
-      ? parseFloat(openFills.reduce((e, f) => (f.time < e.time ? f : e)).px)
-      : 0;
+    openFills.length > 0 ? parseFloat(openFills.reduce((e, f) => (f.time < e.time ? f : e)).px) : 0;
 
   const totalClosedPnl = closingFills.reduce((s, f) => s + parseFloat(f.closedPnl), 0);
   const closePx = vwapClose(closingFills);
-  const largestFill = closingFills.reduce((m, f) =>
-    parseFloat(f.sz) > parseFloat(m.sz) ? f : m,
-  );
+  const largestFill = closingFills.reduce((m, f) => (parseFloat(f.sz) > parseFloat(m.sz) ? f : m));
   const totalSize =
     openFills.length > 0
       ? openFills.reduce((s, f) => s + parseFloat(f.sz), 0)
       : closingFills.reduce((s, f) => s + parseFloat(f.sz), 0);
 
   // Write the open event (bootstrap) then close it
-  const openedAt = openFills.length > 0
-    ? new Date(Math.min(...openFills.map((f) => f.time))).toISOString()
-    : new Date(Math.min(...closingFills.map((f) => f.time))).toISOString();
+  const openedAt =
+    openFills.length > 0
+      ? new Date(Math.min(...openFills.map((f) => f.time))).toISOString()
+      : new Date(Math.min(...closingFills.map((f) => f.time))).toISOString();
 
   // Insert open event (idempotent — partial unique index guards duplicates)
   try {
@@ -316,18 +306,15 @@ async function resolveAbsentPosition(
     hl_fill_hash: String(largestFill.tid),
   });
 
-  const finalEvent = closedEvent ?? getHedgeEvents(tokenId).find(
-    (e) => e.coin === coin && e.status === "closed",
-  ) ?? null;
+  const finalEvent =
+    closedEvent ??
+    getHedgeEvents(tokenId).find((e) => e.coin === coin && e.status === "closed") ??
+    null;
 
   return finalEvent ? buildClosedView(tokenId, coin, finalEvent) : null;
 }
 
-function buildClosedView(
-  tokenId: string,
-  coin: string,
-  event: StoredHedgeEvent,
-): HedgeView {
+function buildClosedView(tokenId: string, coin: string, event: StoredHedgeEvent): HedgeView {
   return {
     tokenId,
     coin,
@@ -345,10 +332,7 @@ function buildClosedView(
   };
 }
 
-export function resolveHedgeOpen(
-  tokenId: string,
-  coin: string,
-): StoredHedgeEvent | null {
+export function resolveHedgeOpen(tokenId: string, coin: string): StoredHedgeEvent | null {
   // Check if an open event already exists (idempotent)
   const existingOpen = getOpenHedgeEvent(tokenId, coin);
   if (existingOpen) {
@@ -408,16 +392,16 @@ export async function resolveHedgeClose(
   const mostRecentSnapshot = snapshots.find((s) => s.coin === coin);
   const fundingEarned = mostRecentSnapshot?.funding_earned ?? 0;
 
-   // Step 4: Fetch fills from Hyperliquid userFillsByTime API
-   const response = await fetch("https://api.hyperliquid.xyz/info", {
-     method: "POST",
-     headers: { "Content-Type": "application/json" },
-     body: JSON.stringify({
-       type: "userFillsByTime",
-       user: config.wallet,
-       startTime: new Date(openEvent.opened_at).getTime(),
-     }),
-   });
+  // Step 4: Fetch fills from Hyperliquid userFillsByTime API
+  const response = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "userFillsByTime",
+      user: config.wallet,
+      startTime: new Date(openEvent.opened_at).getTime(),
+    }),
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -442,10 +426,7 @@ export async function resolveHedgeClose(
   }
 
   // Step 6: Sum up closedPnl across all closing fills
-  const totalClosedPnl = closingFills.reduce(
-    (sum, fill) => sum + parseFloat(fill.closedPnl),
-    0,
-  );
+  const totalClosedPnl = closingFills.reduce((sum, fill) => sum + parseFloat(fill.closedPnl), 0);
 
   // Step 7: VWAP close price across all closing fills; largest fill used for
   // the representative tid (hl_fill_hash) and closed_at timestamp.
@@ -473,10 +454,7 @@ export async function resolveHedgeClose(
 
   // Re-fetch in case of race condition
   const allEventsAfter = getHedgeEvents(tokenId);
-  return (
-    allEventsAfter.find((event) => event.status === "closed" && event.coin === coin) ||
-    null
-  );
+  return allEventsAfter.find((event) => event.status === "closed" && event.coin === coin) || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,17 +506,12 @@ export function buildNetHedgePnL(pnl: PnLView, hedge: HedgeView): NetHedgePnL {
       : hedge.unrealizedPnl + hedge.fundingEarned;
 
   const lpPnlUsd: number | null =
-    pnl.token1UsdPrice != null
-      ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
-      : null;
+    pnl.token1UsdPrice != null ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice : null;
 
   const lpEntryUsd: number | null =
-    pnl.token1UsdPrice != null
-      ? pnl.entryValueInToken1 * pnl.token1UsdPrice
-      : null;
+    pnl.token1UsdPrice != null ? pnl.entryValueInToken1 * pnl.token1UsdPrice : null;
 
-  const combinedPnlUsd =
-    lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
+  const combinedPnlUsd = lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
 
   const combinedRoiPct =
     combinedPnlUsd != null && lpEntryUsd != null && lpEntryUsd > 0

@@ -1,7 +1,12 @@
 import { createClient } from "../chain/client.js";
 import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
 import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import { computeUnclaimedFees, getPoolAddress, getPoolState, getTokenInfo } from "../chain/pools.js";
+import {
+  computeUnclaimedFees,
+  getPoolAddress,
+  getPoolState,
+  getTokenInfo,
+} from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import { getPosition } from "../db/store.js";
@@ -62,10 +67,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
 
   // Number of blocks to scan back when discovering events (window size).
   // undefined → findOpenEvent/findCloseEvent use their 30-day default.
-  const logsWindowBlocks =
-    config.logsFromBlock != null
-      ? BigInt(config.logsFromBlock)
-      : undefined;
+  const logsWindowBlocks = config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined;
 
   for (const pos of filteredPositions) {
     const [token0Info, token1Info] = await Promise.all([
@@ -116,22 +118,22 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
         );
         continue;
       }
-       if (openResult.status === "found") {
-         const openEvent = openResult.event;
-         entryAmount0 = openEvent.amount0;
-         entryAmount1 = openEvent.amount1;
-         // Derive entry price from actual deposit amounts (most accurate)
-         entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-           openEvent.amount0,
-           openEvent.amount1,
-           openEvent.liquidity,
-           pos.tickLower,
-           pos.tickUpper,
-         );
+      if (openResult.status === "found") {
+        const openEvent = openResult.event;
+        entryAmount0 = openEvent.amount0;
+        entryAmount1 = openEvent.amount1;
+        // Derive entry price from actual deposit amounts (most accurate)
+        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
+          openEvent.amount0,
+          openEvent.amount1,
+          openEvent.liquidity,
+          pos.tickLower,
+          pos.tickUpper,
+        );
 
-         // Store for future use
-         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-       } else {
+        // Store for future use
+        persistPositionEntry(pos, openEvent, { token0Info, token1Info });
+      } else {
         // not_found — could not find entry — skip this position
         continue;
       }

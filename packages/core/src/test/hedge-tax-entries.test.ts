@@ -9,16 +9,14 @@
 
 import { describe, expect, it } from "bun:test";
 
-import { buildHedgeTaxEntries } from "../services/tax-transactions.js";
 import type { StoredHedgeEvent } from "../db/store.js";
+import { buildHedgeTaxEntries } from "../services/tax-transactions.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeHedgeEvent(
-  overrides: Partial<StoredHedgeEvent> = {},
-): StoredHedgeEvent {
+function makeHedgeEvent(overrides: Partial<StoredHedgeEvent> = {}): StoredHedgeEvent {
   return {
     id: 1,
     token_id: "123456",

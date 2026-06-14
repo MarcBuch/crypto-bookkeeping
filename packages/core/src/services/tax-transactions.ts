@@ -93,8 +93,10 @@ export async function syncLpTaxFlows(
   // Build a map of unique block numbers → timestamps
   const blockNumbers = new Set<number>();
   for (const pos of positions) {
-    if (pos.entry_block !== null && pos.entry_block !== undefined) blockNumbers.add(pos.entry_block);
-    if (pos.close_block !== null && pos.close_block !== undefined) blockNumbers.add(pos.close_block);
+    if (pos.entry_block !== null && pos.entry_block !== undefined)
+      blockNumbers.add(pos.entry_block);
+    if (pos.close_block !== null && pos.close_block !== undefined)
+      blockNumbers.add(pos.close_block);
   }
 
   const blockTimestampMap = new Map<number, number | null>();
@@ -113,8 +115,9 @@ export async function syncLpTaxFlows(
   for (const position of positions) {
     // ── Deposit entries ────────────────────────────────────────────────────
     if (position.open_tx) {
-      const hasEntry = (position.entry_amount0 !== null && position.entry_amount0 !== "0") ||
-                       (position.entry_amount1 !== null && position.entry_amount1 !== "0");
+      const hasEntry =
+        (position.entry_amount0 !== null && position.entry_amount0 !== "0") ||
+        (position.entry_amount1 !== null && position.entry_amount1 !== "0");
       if (hasEntry && position.entry_block !== null) {
         // Token0
         if (position.entry_amount0 !== null && position.entry_amount0 !== "0") {
@@ -156,9 +159,10 @@ export async function syncLpTaxFlows(
 
     // ── Withdrawal entries ─────────────────────────────────────────────────
     if (position.close_tx && position.close_block !== null) {
-      const hasExit = (position.exit_amount0 !== null && position.exit_amount0 !== "0") ||
-                      (position.exit_amount1 !== null && position.exit_amount1 !== "0");
-      
+      const hasExit =
+        (position.exit_amount0 !== null && position.exit_amount0 !== "0") ||
+        (position.exit_amount1 !== null && position.exit_amount1 !== "0");
+
       if (hasExit) {
         // Token0
         if (position.exit_amount0 !== null && position.exit_amount0 !== "0") {
@@ -194,9 +198,10 @@ export async function syncLpTaxFlows(
 
     // ── Fee entries ────────────────────────────────────────────────────────
     if (position.close_tx && position.close_block !== null) {
-      const hasFees = (position.fees_collected0 !== null && position.fees_collected0 !== "0") ||
-                      (position.fees_collected1 !== null && position.fees_collected1 !== "0");
-      
+      const hasFees =
+        (position.fees_collected0 !== null && position.fees_collected0 !== "0") ||
+        (position.fees_collected1 !== null && position.fees_collected1 !== "0");
+
       if (hasFees) {
         // Token0
         if (position.fees_collected0 !== null && position.fees_collected0 !== "0") {
@@ -250,7 +255,8 @@ function buildLpDepositEntry(
   const tokenDecimals = token0 ? position.token0_decimals : position.token1_decimals;
   const amount = token0 ? position.entry_amount0 : position.entry_amount1;
   const quantity = formatTaxQuantity(amount, tokenDecimals);
-  const timeStamp = blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
+  const timeStamp =
+    blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
   const timeStampIso = timeStamp ? new Date(timeStamp * 1000).toISOString() : null;
 
   return {
@@ -300,7 +306,8 @@ function buildLpWithdrawalEntry(
   const tokenDecimals = token0 ? position.token0_decimals : position.token1_decimals;
   const amount = (token0 ? position.exit_amount0 : position.exit_amount1) ?? null;
   const quantity = formatTaxQuantity(amount, tokenDecimals);
-  const timeStamp = blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
+  const timeStamp =
+    blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
   const timeStampIso = timeStamp ? new Date(timeStamp * 1000).toISOString() : null;
 
   return {
@@ -350,7 +357,8 @@ function buildLpFeeEntry(
   const tokenDecimals = token0 ? position.token0_decimals : position.token1_decimals;
   const amount = (token0 ? position.fees_collected0 : position.fees_collected1) ?? null;
   const quantity = formatTaxQuantity(amount, tokenDecimals);
-  const timeStamp = blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
+  const timeStamp =
+    blockNumber !== undefined && blockNumber !== null ? blockTimestampMap.get(blockNumber) : null;
   const timeStampIso = timeStamp ? new Date(timeStamp * 1000).toISOString() : null;
 
   return {
@@ -473,10 +481,14 @@ export async function syncHedgeTaxFlows(
       // Already enriched in DB — skip pricing API, upsert as-is
       const existing = getTaxTransaction(entry.id);
       const alreadyEnriched =
-        existing !== null &&
-        (existing.cost_eur !== null || existing.proceeds_eur !== null);
+        existing !== null && (existing.cost_eur !== null || existing.proceeds_eur !== null);
 
-      if (alreadyEnriched || entry.cost_eur !== null || entry.proceeds_eur !== null || !entry.time_stamp) {
+      if (
+        alreadyEnriched ||
+        entry.cost_eur !== null ||
+        entry.proceeds_eur !== null ||
+        !entry.time_stamp
+      ) {
         upsertSyncedTaxTransaction(entry);
       } else {
         const [enriched] = await enrichTaxTransactionsWithEurValues([entry], config);
@@ -505,8 +517,7 @@ export async function syncTaxTransactions(
   let latestBlockNumber: number | null = null;
 
   // ── HyperSync path: txlist + tokentx + tokennfttx ─────────────────────────
-  const hyperSyncUrl =
-    config.tax?.hyperSyncUrl ?? config.hyperSync?.url ?? DEFAULT_HYPERSYNC_URL;
+  const hyperSyncUrl = config.tax?.hyperSyncUrl ?? config.hyperSync?.url ?? DEFAULT_HYPERSYNC_URL;
   const hyperSyncApiToken =
     normalizedHyperSyncApiToken(config.tax?.hyperSyncApiToken) ??
     normalizedHyperSyncApiToken(config.hyperSync?.apiToken);
@@ -587,7 +598,14 @@ export async function syncTaxTransactions(
     source: "hypersync",
   });
 
-  return { synced, insertedOrUpdated: synced, source: "hypersync", wallet, latestBlockNumber, hedgeFlowsSynced: hedgeFlowResult.synced };
+  return {
+    synced,
+    insertedOrUpdated: synced,
+    source: "hypersync",
+    wallet,
+    latestBlockNumber,
+    hedgeFlowsSynced: hedgeFlowResult.synced,
+  };
 }
 
 // ---------------------------------------------------------------------------

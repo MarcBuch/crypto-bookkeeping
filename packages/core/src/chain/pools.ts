@@ -1,9 +1,9 @@
 import type { Address } from "viem";
 
+import { calculateFeeGrowthInside, calculateUnclaimedFees } from "../math/divergence-loss.js";
 import { factoryAbi, poolAbi, erc20Abi } from "./abis";
 import type { Client } from "./client";
 import { withRetry } from "./rpc";
-import { calculateFeeGrowthInside, calculateUnclaimedFees } from "../math/divergence-loss.js";
 
 export interface Slot0 {
   address: Address;

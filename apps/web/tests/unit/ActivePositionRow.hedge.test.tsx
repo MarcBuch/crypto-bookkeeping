@@ -25,10 +25,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
 
 import type { DashboardPosition, HedgeView } from "../../src/api";
-import { formatNumber, formatUsd } from "../../src/App";
+import { formatUsd } from "../../src/App";
 
 // ============================================================================
 // Test Fixtures

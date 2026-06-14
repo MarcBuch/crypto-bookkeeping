@@ -8,10 +8,11 @@
  *  - assetPositions missing from response
  */
 
-import { afterEach, describe, expect, it, mock, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { initSchema } from "../db/schema.js";
+import { afterEach, describe, expect, it, mock, beforeEach } from "bun:test";
+
 import type { Config } from "../config.js";
+import { initSchema } from "../db/schema.js";
 import { getHedgeView } from "../services/hedge.js";
 
 // Mock getDb before importing store functions
@@ -54,20 +55,6 @@ function mockFetchJson(data: unknown, responseInit: ResponseInit = {}): FetchCal
       status,
       statusText: "OK",
       json: async () => responseData,
-    } as Response;
-  }) as unknown as typeof fetch;
-  return calls;
-}
-
-function mockFetchError(status: number, statusText: string): FetchCall[] {
-  const calls: FetchCall[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
-    calls.push({ url: String(input), body: requestInit?.body as string });
-    return {
-      ok: false,
-      status,
-      statusText,
-      json: async () => ({}),
     } as Response;
   }) as unknown as typeof fetch;
   return calls;
@@ -137,7 +124,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "456")).rejects.toThrow(/does not have a hedge configuration/i);
+    await expect(getHedgeView(config, "456")).rejects.toThrow(
+      /does not have a hedge configuration/i,
+    );
   });
 
   // =========================================================================
@@ -278,8 +267,7 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
     // Mock fetch to return closed position on first call (clearinghouseState)
     // and empty fills on second call (userFillsByTime)
     let callCount = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
+    globalThis.fetch = (async (_input: RequestInfo | URL, _requestInit?: RequestInit) => {
       callCount++;
       if (callCount === 1) {
         // First call: clearinghouseState with szi=0
@@ -338,8 +326,7 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
     // Mock fetch to return closed position on first call (clearinghouseState)
     // and empty fills on second call (userFillsByTime)
     let callCount = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
+    globalThis.fetch = (async (_input: RequestInfo | URL, _requestInit?: RequestInit) => {
       callCount++;
       if (callCount === 1) {
         // First call: clearinghouseState with szi=0

@@ -37,16 +37,14 @@ mock.module("../services/pricing.js", () => ({
 // Now import the module under test
 // ---------------------------------------------------------------------------
 
-import { buildHedgeTaxEntries, syncHedgeTaxFlows } from "../services/tax-transactions.js";
 import type { StoredHedgeEvent } from "../db/store.js";
+import { buildHedgeTaxEntries, syncHedgeTaxFlows } from "../services/tax-transactions.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeHedgeEvent(
-  overrides: Partial<StoredHedgeEvent> = {},
-): StoredHedgeEvent {
+function makeHedgeEvent(overrides: Partial<StoredHedgeEvent> = {}): StoredHedgeEvent {
   return {
     id: 1,
     token_id: "123456",

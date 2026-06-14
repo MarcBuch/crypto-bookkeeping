@@ -6,8 +6,9 @@
  *  - Cluster D: Active position still returns status: "active"
  */
 
-import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
+
 import { initSchema } from "../db/schema.js";
 
 // Mock getDb before importing store functions
@@ -20,9 +21,9 @@ mock.module("../db/schema.js", () => ({
   resetDb: () => {},
 }));
 
-import { getHedgeView } from "../services/hedge.js";
-import { insertHedgeSnapshot } from "../db/store.js";
 import type { Config } from "../config.js";
+import { insertHedgeSnapshot } from "../db/store.js";
+import { getHedgeView } from "../services/hedge.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -110,8 +111,8 @@ describe("getHedgeView() — closed position path", () => {
         throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
       }) as unknown as typeof fetch;
 
-      const result = await getHedgeView(config, "123");
-
+      const result = await getHedgeView(config, "456");
+      expect(result).toBeDefined();
       expect(result.status).toBe("closed");
       expect(result.szi).toBe("0");
       expect(result.unrealizedPnl).toBe(0);
@@ -132,9 +133,7 @@ describe("getHedgeView() — closed position path", () => {
         },
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {
@@ -186,9 +185,7 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {
@@ -228,9 +225,7 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {
@@ -254,7 +249,7 @@ describe("getHedgeView() — closed position path", () => {
       await expect(promise).rejects.toThrow();
       await expect(promise).rejects.toThrow("502");
     });
-  });;
+  });
 
   // =========================================================================
   // Cluster C: Closed shape contract (with closing fill)
@@ -282,9 +277,7 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {
@@ -359,9 +352,7 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {
@@ -432,9 +423,7 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {
@@ -493,9 +482,7 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      let callCount = 0;
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        callCount++;
         const body = JSON.parse((init?.body as string) ?? "{}");
         if (body.type === "clearinghouseState") {
           return {

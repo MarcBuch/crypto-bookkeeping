@@ -9,8 +9,8 @@ import {
   upsertPnLViewCache,
 } from "../db/store.js";
 import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
-import { getPnLView } from "./pnl.js";
 import { getHedgeView, snapshotHedge } from "./hedge.js";
+import { getPnLView } from "./pnl.js";
 
 export interface PositionView {
   tokenId: string;

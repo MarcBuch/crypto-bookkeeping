@@ -1,8 +1,8 @@
 import type { Address } from "viem";
 
 import type { PositionOpenEvent } from "../chain/events.js";
-import { deriveEntryPriceFromAmounts } from "../math/divergence-loss.js";
 import { upsertPosition } from "../db/store.js";
+import { deriveEntryPriceFromAmounts } from "../math/divergence-loss.js";
 
 /**
  * Persist a position entry to the database.

@@ -1,5 +1,6 @@
-import { mock, describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mock, describe, it, expect, beforeEach } from "bun:test";
+
 import { initSchema } from "../db/schema.js";
 
 // Mock getDb before importing store functions
@@ -12,14 +13,9 @@ mock.module("../db/schema.js", () => ({
   resetDb: () => {},
 }));
 
-import {
-  insertHedgeSnapshot,
-  insertHedgeEvent,
-  getOpenHedgeEvent,
-  getHedgeEvents,
-} from "../db/store.js";
-import { resolveHedgeOpen } from "../services/hedge.js";
+import { insertHedgeSnapshot, getHedgeEvents } from "../db/store.js";
 import type { StoredHedgeSnapshot } from "../db/store.js";
+import { resolveHedgeOpen } from "../services/hedge.js";
 
 // Helper to create a minimal hedge snapshot
 function minimalHedgeSnapshot(
@@ -185,8 +181,6 @@ describe("resolveHedgeOpen — adversarial tests", () => {
     });
 
     it("resolveHedgeOpen creates event with opened_at from snapshot_at", () => {
-      const snapshotTime = "2026-06-11T18:31:00.000Z";
-
       // Insert a snapshot with specific timestamp
       insertHedgeSnapshot(
         minimalHedgeSnapshot("token-123", "HYPE", {

@@ -1,5 +1,6 @@
-import { mock, describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mock, describe, it, expect, beforeEach } from "bun:test";
+
 import { initSchema } from "../db/schema.js";
 
 // Mock getDb before importing store functions

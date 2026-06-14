@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+
 import { getHedge } from "../api";
 
 export function useHedge(tokenId: string | undefined) {

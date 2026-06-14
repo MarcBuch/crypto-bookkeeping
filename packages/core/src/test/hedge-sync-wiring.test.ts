@@ -193,23 +193,6 @@ describe("hedge sync wiring — getHedgeView throws", () => {
 
     // Mock getAllPositions to return one position
     mockGetPositionData = async () => fakeRawPosition;
-    const fakePositionView = {
-      tokenId: "12345",
-      token0: { address: "0xaaa", symbol: "WHYPE", decimals: 18 },
-      token1: { address: "0xbbb", symbol: "USDC", decimals: 6 },
-      fee: 3000,
-      feePercent: 0.3,
-      tickLower: -100,
-      tickUpper: 100,
-      priceLower: 1.0,
-      priceUpper: 2.0,
-      currentPrice: 1.5,
-      liquidity: "1000000000",
-      status: "active",
-      inRange: true,
-      currentAmount0: 5.0,
-      currentAmount1: 7.5,
-    };
 
     let getAllPositionsCallCount = 0;
     mock.module("../chain/positions.js", () => ({

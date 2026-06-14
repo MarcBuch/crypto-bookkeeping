@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 
 import type { DashboardPosition } from "./api";
+import { buildNetHedgePnL } from "./hedge-pnl";
 import {
   useDashboardPositions,
   useSyncPositions,
   useSyncPosition,
 } from "./hooks/useDashboardPositions";
 import { useHedge } from "./hooks/useHedge";
-import { buildNetHedgePnL } from "./hedge-pnl";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -300,130 +300,160 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const { data: hedgeData } = useHedge(position.tokenId);
 
   // Hedge-adjusted ROI — computed via shared helper (same logic as CLI pnl-format.ts)
-  const { lpPnlUsd: lpAbsPnlUsd, hedgePnlUsd, lpEntryUsd, combinedPnlUsd: combinedAbsUsd, combinedRoiPct } =
-    hedgeData ? buildNetHedgePnL(pnl, hedgeData) : { lpPnlUsd: null, hedgePnlUsd: null, lpEntryUsd: null, combinedPnlUsd: null, combinedRoiPct: null };
+  const {
+    lpPnlUsd: lpAbsPnlUsd,
+    hedgePnlUsd,
+    lpEntryUsd,
+    combinedPnlUsd: combinedAbsUsd,
+    combinedRoiPct,
+  } = hedgeData
+    ? buildNetHedgePnL(pnl, hedgeData)
+    : {
+        lpPnlUsd: null,
+        hedgePnlUsd: null,
+        lpEntryUsd: null,
+        combinedPnlUsd: null,
+        combinedRoiPct: null,
+      };
+
+  const roiDetail = pnl
+    ? (() => {
+        const netUsd = combinedAbsUsd ?? lpAbsPnlUsd;
+        const netToken = `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`;
+        const display = netUsd != null ? formatUsd(netUsd) : netToken;
+        const tone = darkToneClass(netUsd != null ? netUsd : pnl.absolutePnlInToken1);
+        return <span className={tone}>{display}</span>;
+      })()
+    : undefined;
 
   return (
     <div>
       <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
-      <div className="flex min-w-0 items-center gap-3">
-        <TokenPairIcon token0={position.token0.symbol} token1={position.token1.symbol} />
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="truncate text-lg font-black tracking-[-0.03em] text-neutral-950">
-              {position.token0.symbol}/{position.token1.symbol}
-            </h2>
+        <div className="flex min-w-0 items-center gap-3">
+          <TokenPairIcon token0={position.token0.symbol} token1={position.token1.symbol} />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="truncate text-lg font-black tracking-[-0.03em] text-neutral-950">
+                {position.token0.symbol}/{position.token1.symbol}
+              </h2>
+            </div>
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-neutral-600">
+              <span className={`h-2.5 w-2.5 rounded-full ${venue.dotClass}`} />
+              <span>{venue.name}</span>
+              <span className="text-neutral-400">♦</span>
+              <span>{position.feePercent}%</span>
+            </p>
           </div>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-neutral-600">
-            <span className={`h-2.5 w-2.5 rounded-full ${venue.dotClass}`} />
-            <span>{venue.name}</span>
-            <span className="text-neutral-400">♦</span>
-            <span>{position.feePercent}%</span>
-          </p>
         </div>
-      </div>
 
-      <DarkStat label="Balance" value={balance == null ? "USD unavailable" : formatUsd(balance)} />
-      <DarkStat
-        label="Pending Earnings"
-        value={pnl ? `${formatNumber(pnl.pendingFeesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
-        detail={pnl?.pendingFeesValueUsd != null ? formatUsdFeeValue(pnl.pendingFeesValueUsd) : undefined}
-      />
-      <DarkStat
-        label="ROI"
-        value={pnl ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent) : "n/a"}
-        valueClassName={pnl ? darkToneClass(combinedRoiPct ?? pnl.absolutePnlPercent) : undefined}
-        detail={
-          pnl
-            ? (() => {
-                const netUsd = combinedAbsUsd ?? lpAbsPnlUsd;
-                const netToken = `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`;
-                const display = netUsd != null ? formatUsd(netUsd) : netToken;
-                const tone = darkToneClass(
-                  netUsd != null ? netUsd : pnl.absolutePnlInToken1,
-                );
-                return <span className={tone}>{display}</span>;
-              })()
-            : undefined
-        }
-        tooltip={
-          pnl
-            ? (() => {
-                const lines: string[] = [];
-                if (combinedRoiPct != null) {
-                  lines.push(`Net (LP + hedge): ${formatUsd(combinedAbsUsd!)}`);
-                  lines.push(`  LP P&L:      ${formatUsd(lpAbsPnlUsd!)}`);
-                  lines.push(`  Hedge P&L:   ${formatUsd(hedgePnlUsd!)}`);
-                  lines.push(`Entry value:   ${formatUsd(lpEntryUsd!)}`);
-                } else if (lpAbsPnlUsd != null) {
-                  lines.push(`LP P&L: ${formatUsd(lpAbsPnlUsd)}`);
-                  lines.push(`  Fees: ${formatUsd(pnl.feesValueUsd ?? pnl.feesValueInToken1)} ${pnl.feesValueUsd == null ? pnl.token1Symbol : ""}`);
-                  lines.push(`Entry: ${formatUsd(lpEntryUsd!)}`);
-                } else {
-                  lines.push(`LP P&L: ${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`);
-                  lines.push(`  Fees: ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}`);
-                  lines.push(`Entry: ${formatNumber(pnl.entryValueInToken1)} ${pnl.token1Symbol}`);
-                }
-                lines.push(`ROI = net P&L ÷ entry value`);
-                return lines.join("\n");
-              })()
-            : undefined
-        }
-      />
+        <DarkStat
+          label="Balance"
+          value={balance == null ? "USD unavailable" : formatUsd(balance)}
+        />
+        <DarkStat
+          label="Pending Earnings"
+          value={pnl ? `${formatNumber(pnl.pendingFeesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
+          detail={
+            pnl?.pendingFeesValueUsd != null
+              ? formatUsdFeeValue(pnl.pendingFeesValueUsd)
+              : undefined
+          }
+        />
+        <DarkStat
+          label="ROI"
+          value={pnl ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent) : "n/a"}
+          valueClassName={pnl ? darkToneClass(combinedRoiPct ?? pnl.absolutePnlPercent) : undefined}
+          detail={roiDetail}
+          tooltip={
+            pnl
+              ? (() => {
+                  const lines: string[] = [];
+                  if (combinedRoiPct != null) {
+                    lines.push(`Net (LP + hedge): ${formatUsd(combinedAbsUsd!)}`);
+                    lines.push(`  LP P&L:      ${formatUsd(lpAbsPnlUsd!)}`);
+                    lines.push(`  Hedge P&L:   ${formatUsd(hedgePnlUsd!)}`);
+                    lines.push(`Entry value:   ${formatUsd(lpEntryUsd!)}`);
+                  } else if (lpAbsPnlUsd != null) {
+                    lines.push(`LP P&L: ${formatUsd(lpAbsPnlUsd)}`);
+                    lines.push(
+                      `  Fees: ${formatUsd(pnl.feesValueUsd ?? pnl.feesValueInToken1)} ${pnl.feesValueUsd == null ? pnl.token1Symbol : ""}`,
+                    );
+                    lines.push(`Entry: ${formatUsd(lpEntryUsd!)}`);
+                  } else {
+                    lines.push(
+                      `LP P&L: ${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}`,
+                    );
+                    lines.push(
+                      `  Fees: ${formatNumber(pnl.feesValueInToken1)} ${pnl.token1Symbol}`,
+                    );
+                    lines.push(
+                      `Entry: ${formatNumber(pnl.entryValueInToken1)} ${pnl.token1Symbol}`,
+                    );
+                  }
+                  lines.push(`ROI = net P&L ÷ entry value`);
+                  return lines.join("\n");
+                })()
+              : undefined
+          }
+        />
 
-      <div className="min-w-0 font-mono text-xs font-bold">
-        <div className="mb-1 flex justify-between gap-3 text-neutral-600">
-          <span>{formatPrice(position.priceLower)}</span>
-          <span>{formatPrice(position.priceUpper)}</span>
+        <div className="min-w-0 font-mono text-xs font-bold">
+          <div className="mb-1 flex justify-between gap-3 text-neutral-600">
+            <span>{formatPrice(position.priceLower)}</span>
+            <span>{formatPrice(position.priceUpper)}</span>
+          </div>
+          <div className="relative h-1.5 rounded-full bg-neutral-400/70">
+            {/* Left outer-third rerange zone */}
+            <div className="absolute inset-y-0 left-0 w-1/3 rounded-l-full bg-amber-400/20" />
+            {/* Right outer-third rerange zone */}
+            <div className="absolute inset-y-0 right-0 w-1/3 rounded-r-full bg-amber-400/20" />
+            {/* Gradient fill */}
+            <div
+              className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${rangeTone}`}
+              style={{ width: `${marker}%` }}
+            />
+            {/* Third-boundary dividers */}
+            <div className="absolute inset-y-0 z-10 w-px bg-white/70" style={{ left: "33.33%" }} />
+            <div className="absolute inset-y-0 z-10 w-px bg-white/70" style={{ left: "66.67%" }} />
+            {/* Current price marker dot */}
+            <span
+              className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-700 shadow-[0_0_0_2px_rgba(0,0,0,0.08)]"
+              style={{ left: `${marker}%` }}
+            />
+          </div>
+          <div className="mt-2 flex justify-between gap-3">
+            <span className={position.inRange ? "text-rose-600" : "text-neutral-500"}>
+              {formatSignedPercent(leftDistance)}
+            </span>
+            <span className={position.inRange ? "text-emerald-700" : "text-rose-600"}>
+              {formatSignedPercent(rightDistance)}
+            </span>
+          </div>
         </div>
-        <div className="relative h-1.5 rounded-full bg-neutral-400/70">
-          {/* Left outer-third rerange zone */}
-          <div className="absolute inset-y-0 left-0 w-1/3 rounded-l-full bg-amber-400/20" />
-          {/* Right outer-third rerange zone */}
-          <div className="absolute inset-y-0 right-0 w-1/3 rounded-r-full bg-amber-400/20" />
-          {/* Gradient fill */}
-          <div
-            className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${rangeTone}`}
-            style={{ width: `${marker}%` }}
-          />
-          {/* Third-boundary dividers */}
-          <div className="absolute inset-y-0 z-10 w-px bg-white/70" style={{ left: "33.33%" }} />
-          <div className="absolute inset-y-0 z-10 w-px bg-white/70" style={{ left: "66.67%" }} />
-          {/* Current price marker dot */}
-          <span
-            className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-700 shadow-[0_0_0_2px_rgba(0,0,0,0.08)]"
-            style={{ left: `${marker}%` }}
-          />
-        </div>
-        <div className="mt-2 flex justify-between gap-3">
-          <span className={position.inRange ? "text-rose-600" : "text-neutral-500"}>
-            {formatSignedPercent(leftDistance)}
-          </span>
-          <span className={position.inRange ? "text-emerald-700" : "text-rose-600"}>
-            {formatSignedPercent(rightDistance)}
-          </span>
-        </div>
-      </div>
 
-      <div className="flex items-center lg:justify-end">
-        <button
-          onClick={() => void syncPosition()}
-          disabled={isSyncingPosition}
-          className="rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-40"
-        >
-          {isSyncingPosition ? "Syncing…" : "Sync"}
-        </button>
-      </div>
-    </article>
+        <div className="flex items-center lg:justify-end">
+          <button
+            onClick={() => void syncPosition()}
+            disabled={isSyncingPosition}
+            className="rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-40"
+          >
+            {isSyncingPosition ? "Syncing…" : "Sync"}
+          </button>
+        </div>
+      </article>
 
-    {hedgeData && (
-      <HedgePanel hedge={hedgeData} pnl={position.pnl ?? undefined} />
-    )}
+      {hedgeData && <HedgePanel hedge={hedgeData} pnl={position.pnl ?? undefined} />}
     </div>
   );
 }
 
-function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: import("./api").PnLView }) {
+function HedgePanel({
+  hedge,
+  pnl,
+}: {
+  hedge: import("./api").HedgeView;
+  pnl?: import("./api").PnLView;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   const size = Math.abs(parseFloat(hedge.szi));
@@ -432,9 +462,17 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
   const markTone = hedge.unrealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
 
   // Use shared helper — same logic as CLI pnl-format.ts and core buildNetHedgePnL
-  const { lpPnlUsd: lpAbsPnl, hedgePnlUsd: hedgePnl, combinedPnlUsd: combinedPnl } =
-    buildNetHedgePnL(pnl, hedge);
-  const combinedTone = combinedPnl == null ? "text-neutral-950" : combinedPnl >= 0 ? "text-emerald-700" : "text-rose-600";
+  const {
+    lpPnlUsd: lpAbsPnl,
+    hedgePnlUsd: hedgePnl,
+    combinedPnlUsd: combinedPnl,
+  } = buildNetHedgePnL(pnl, hedge);
+  const combinedTone =
+    combinedPnl == null
+      ? "text-neutral-950"
+      : combinedPnl >= 0
+        ? "text-emerald-700"
+        : "text-rose-600";
 
   return (
     <div className="bg-neutral-300">
@@ -442,38 +480,38 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
       <button
         type="button"
         onClick={() => setExpanded((x) => !x)}
-        className="w-full px-5 py-2 sm:px-7 flex items-center justify-between gap-3 text-left transition hover:bg-black/[0.04]"
+        className="flex w-full items-center justify-between gap-3 px-5 py-2 text-left transition hover:bg-black/[0.04] sm:px-7"
       >
         {/* Left — identity */}
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           {hedge.status === "closed" ? (
-            <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-neutral-400 bg-neutral-200 px-2 py-0.5 text-[0.6rem] font-black tracking-[0.18em] text-neutral-700 uppercase">
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-neutral-400 bg-neutral-200 px-2 py-0.5 text-[0.6rem] font-black tracking-[0.18em] text-neutral-700 uppercase">
               ■ CLOSED
             </span>
           ) : (
-            <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-rose-400 bg-rose-100 px-2 py-0.5 text-[0.6rem] font-black tracking-[0.18em] text-rose-700 uppercase">
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-rose-400 bg-rose-100 px-2 py-0.5 text-[0.6rem] font-black tracking-[0.18em] text-rose-700 uppercase">
               ▼ SHORT
             </span>
           )}
-          <span className="font-mono text-xs font-bold tracking-tight text-neutral-950 truncate">
+          <span className="truncate font-mono text-xs font-bold tracking-tight text-neutral-950">
             {size} {hedge.coin}-PERP
           </span>
-          <span className="text-[0.65rem] font-medium text-neutral-400 truncate hidden sm:inline">
+          <span className="hidden truncate text-[0.65rem] font-medium text-neutral-400 sm:inline">
             {hedge.status === "closed" && hedge.closeReason
               ? hedge.closeReason
               : hedge.leverage.value > 0
-              ? `${hedge.leverage.value}× ${hedge.leverage.type}`
-              : hedge.leverage.type}
+                ? `${hedge.leverage.value}× ${hedge.leverage.type}`
+                : hedge.leverage.type}
           </span>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex shrink-0 items-center gap-3">
           {/* Net hedged P&L — single line */}
           {combinedPnl != null && (
-            <span className="text-xs font-mono font-bold">
-              <span className="text-neutral-400 font-medium mr-1">net</span>
+            <span className="font-mono text-xs font-bold">
+              <span className="mr-1 font-medium text-neutral-400">net</span>
               <span className={combinedTone}>{formatUsd(combinedPnl)}</span>
-              <span className="text-neutral-400 font-normal ml-1 hidden sm:inline">
+              <span className="ml-1 hidden font-normal text-neutral-400 sm:inline">
                 (LP {formatUsd(lpAbsPnl!)} · hedge {formatUsd(hedgePnl)})
               </span>
             </span>
@@ -491,7 +529,7 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
 
       {/* Expandable detail section */}
       {expanded && (
-        <div className="border-t border-neutral-400/40 px-5 pb-5 pt-4 sm:px-7">
+        <div className="border-t border-neutral-400/40 px-5 pt-4 pb-5 sm:px-7">
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
             {hedge.status === "closed" ? (
               <>
@@ -500,7 +538,13 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
                 <HedgeStat
                   label="Realized P&L"
                   value={hedge.realizedPnl != null ? formatUsd(hedge.realizedPnl) : "unknown"}
-                  valueClassName={hedge.realizedPnl == null ? "text-neutral-400" : hedge.realizedPnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+                  valueClassName={
+                    hedge.realizedPnl == null
+                      ? "text-neutral-400"
+                      : hedge.realizedPnl >= 0
+                        ? "text-emerald-700"
+                        : "text-rose-600"
+                  }
                 />
                 <HedgeStat
                   label="Funding earned"
@@ -519,7 +563,11 @@ function HedgePanel({ hedge, pnl }: { hedge: import("./api").HedgeView; pnl?: im
             ) : (
               <>
                 <HedgeStat label="Entry" value={`$${formatPrice(hedge.entryPx)}`} />
-                <HedgeStat label="Mark" value={`$${formatPrice(hedge.markPx)}`} valueClassName={markTone} />
+                <HedgeStat
+                  label="Mark"
+                  value={`$${formatPrice(hedge.markPx)}`}
+                  valueClassName={markTone}
+                />
                 <HedgeStat
                   label="Unrealized"
                   value={formatUsd(hedge.unrealizedPnl)}
@@ -563,7 +611,9 @@ function HedgeStat({
 }) {
   return (
     <div>
-      <p className="text-[0.62rem] font-semibold tracking-[0.15em] text-neutral-500 uppercase">{label}</p>
+      <p className="text-[0.62rem] font-semibold tracking-[0.15em] text-neutral-500 uppercase">
+        {label}
+      </p>
       <p className={`mt-1 font-mono text-sm font-black ${valueClassName}`}>{value}</p>
       {detail && <p className="mt-0.5 text-[0.6rem] text-neutral-600">{detail}</p>}
     </div>

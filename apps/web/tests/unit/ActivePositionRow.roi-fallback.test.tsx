@@ -116,7 +116,7 @@ interface RoiComputationResult {
 
 function computeRoiValues(
   position: DashboardPosition | undefined,
-  hedgeData: HedgeView | undefined
+  hedgeData: HedgeView | undefined,
 ): RoiComputationResult {
   const pnl = position?.pnl;
 
@@ -129,12 +129,10 @@ function computeRoiValues(
       : hedgeData.unrealizedPnl + hedgeData.fundingEarned
     : null;
 
-  const lpAbsPnlUsd = pnl?.token1UsdPrice != null
-    ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
-    : null;
-  const lpEntryUsd = pnl?.token1UsdPrice != null
-    ? pnl.entryValueInToken1 * pnl.token1UsdPrice
-    : null;
+  const lpAbsPnlUsd =
+    pnl?.token1UsdPrice != null ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice : null;
+  const lpEntryUsd =
+    pnl?.token1UsdPrice != null ? pnl.entryValueInToken1 * pnl.token1UsdPrice : null;
 
   const combinedAbsUsd =
     lpAbsPnlUsd != null && hedgePnlUsd != null ? lpAbsPnlUsd + hedgePnlUsd : null;
@@ -144,9 +142,7 @@ function computeRoiValues(
       : null;
 
   // DarkStat output logic
-  const roiValue = pnl
-    ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent)
-    : "n/a";
+  const roiValue = pnl ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent) : "n/a";
 
   const roiDetail = pnl
     ? combinedAbsUsd != null

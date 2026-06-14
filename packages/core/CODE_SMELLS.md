@@ -14,17 +14,17 @@ Entry resolution, exit resolution, fee calculation, USD pricing (with 2-level fa
 
 ## High — Duplication
 
-| # | Pattern | Locations |
-|---|---|---|
-| 1 | HyperSync client construction block (6 lines, verbatim) | `il.ts:41`, `pnl.ts:95`, `snapshot.ts:25` |
-| 2 | `logsWindowBlocks` derivation | same 3 files |
-| 3 | `findOpenEvent` + error handling + `upsertPosition` block | `il.ts`, `pnl.ts` (3×), `snapshot.ts` |
+| #     | Pattern                                                                | Locations                                               |
+| ----- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| 1     | HyperSync client construction block (6 lines, verbatim)                | `il.ts:41`, `pnl.ts:95`, `snapshot.ts:25`               |
+| 2     | `logsWindowBlocks` derivation                                          | same 3 files                                            |
+| 3     | `findOpenEvent` + error handling + `upsertPosition` block              | `il.ts`, `pnl.ts` (3×), `snapshot.ts`                   |
 | ~~4~~ | ~~`getHistoricalEurPrice` ≈ `getHistoricalUsdPrice` (~95% identical)~~ | **FIXED** — unified into `getHistoricalPrice(currency)` |
-| 5 | HyperSync pagination loop (paginate + timestamp join + dedup) | `hypersync.ts` × 3 functions |
-| 6 | LP entry builder token-field selection block | `tax-transactions.ts:241`, `291`, `341` |
-| 7 | `buildLpWithdrawalEntry` ≈ `buildLpFeeEntry` (~90% identical) | `tax-transactions.ts:283`, `333` |
-| 8 | `slot0` ABI inlined verbatim, duplicating `poolAbi` | `events.ts:644`, `abis.ts:88` |
-| 9 | Three single-function ERC-20 ABIs duplicating `erc20Abi` | `token-metadata.ts:6–34`, `abis.ts:179` |
+| 5     | HyperSync pagination loop (paginate + timestamp join + dedup)          | `hypersync.ts` × 3 functions                            |
+| 6     | LP entry builder token-field selection block                           | `tax-transactions.ts:241`, `291`, `341`                 |
+| 7     | `buildLpWithdrawalEntry` ≈ `buildLpFeeEntry` (~90% identical)          | `tax-transactions.ts:283`, `333`                        |
+| 8     | `slot0` ABI inlined verbatim, duplicating `poolAbi`                    | `events.ts:644`, `abis.ts:88`                           |
+| 9     | Three single-function ERC-20 ABIs duplicating `erc20Abi`               | `token-metadata.ts:6–34`, `abis.ts:179`                 |
 
 ---
 
@@ -39,12 +39,12 @@ Both resolve the same ERC-20 metadata. Used by different service files with no c
 
 ### God modules
 
-| File | Lines | Concerns mixed |
-|---|---|---|
-| `services/tax-transactions.ts` | 1086 | 3 public APIs, LP entry builders, HyperSync normalisation, explorer pagination, EUR enrichment |
-| `db/store.ts` | 777 | positions, snapshots, tax transactions, view caches, sync state |
-| `math/divergence-loss.ts` | 438 | tick/price conversions, token amounts, divergence loss, fee math, full PnL |
-| `chain/events.ts` | 674 | open/close event resolution, `getPoolPriceAtBlock` (unrelated) |
+| File                           | Lines | Concerns mixed                                                                                 |
+| ------------------------------ | ----- | ---------------------------------------------------------------------------------------------- |
+| `services/tax-transactions.ts` | 1086  | 3 public APIs, LP entry builders, HyperSync normalisation, explorer pagination, EUR enrichment |
+| `db/store.ts`                  | 777   | positions, snapshots, tax transactions, view caches, sync state                                |
+| `math/divergence-loss.ts`      | 438   | tick/price conversions, token amounts, divergence loss, fee math, full PnL                     |
+| `chain/events.ts`              | 674   | open/close event resolution, `getPoolPriceAtBlock` (unrelated)                                 |
 
 ### TLS disabled globally at import time (`chain/client.ts:9`)
 
@@ -60,12 +60,12 @@ This runs the moment any consumer imports `client.ts`, disabling TLS verificatio
 
 ### Oversized functions beyond `getPnLView`
 
-| Function | Lines | File |
-|---|---|---|
-| `findCloseEvent` | ~222 | `chain/events.ts:195–417` |
-| `getILView` | ~233 | `services/il.ts:38–297` |
-| `takeSnapshot` | ~187 | `services/snapshot.ts:22–239` |
-| `findOpenEvent` | ~117 | `chain/events.ts:70–186` |
+| Function         | Lines | File                          |
+| ---------------- | ----- | ----------------------------- |
+| `findCloseEvent` | ~222  | `chain/events.ts:195–417`     |
+| `getILView`      | ~233  | `services/il.ts:38–297`       |
+| `takeSnapshot`   | ~187  | `services/snapshot.ts:22–239` |
+| `findOpenEvent`  | ~117  | `chain/events.ts:70–186`      |
 
 ---
 
@@ -77,7 +77,7 @@ This runs the moment any consumer imports `client.ts`, disabling TLS verificatio
 
 ### `exitAmount0/1` used as "current amounts" for active positions (`services/pnl.ts:294–309`)
 
-The "exit" prefix implies closure. For open positions these hold the *current* pool amounts.
+The "exit" prefix implies closure. For open positions these hold the _current_ pool amounts.
 
 ### ~~Ticket IDs in production comments~~
 
@@ -87,18 +87,18 @@ The "exit" prefix implies closure. For open positions these hold the *current* p
 
 ## Medium — Missing Abstractions
 
-| Missing helper | Current situation | Count |
-|---|---|---|
-| `toHumanAmount(raw: bigint, decimals: number)` | `Number(amount) / 10 ** decimals` inlined | **26 times** |
-| `TICK_BASE = 1.0001` | magic literal | **12 times** |
-| `tickToAdjustedPrice(tick, d0, d1)` | `1.0001 ** tick * 10 ** (d0 - d1)` inlined outside math module | 4 times |
-| `persistPositionEntry(pos, openEvent, tokens)` | `deriveEntryPrice → upsertPosition` block copied | 5 times |
-| `createHyperSyncClientFromConfig(config)` | 6-line construction block copied | 3 times |
-| `resolveLogsWindow(config)` | 4-line derivation copied | 3 times |
-| `isActivePosition(pos)` | `pos.liquidity > 0n` inlined | 4 times |
-| `assertValidUrl(path, field, value)` | `!URL.canParse(v) → throw` pattern | 2 times |
-| `upsertViewCache(table, tokenId, data, syncedAt)` | `upsertPositionViewCache` and `upsertPnLViewCache` are identical modulo table name | — |
-| `paginateHyperSync<T>(client, query, normalise)` | full pagination shell with block-timestamp join copied | 3 times |
+| Missing helper                                    | Current situation                                                                  | Count        |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------ |
+| `toHumanAmount(raw: bigint, decimals: number)`    | `Number(amount) / 10 ** decimals` inlined                                          | **26 times** |
+| `TICK_BASE = 1.0001`                              | magic literal                                                                      | **12 times** |
+| `tickToAdjustedPrice(tick, d0, d1)`               | `1.0001 ** tick * 10 ** (d0 - d1)` inlined outside math module                     | 4 times      |
+| `persistPositionEntry(pos, openEvent, tokens)`    | `deriveEntryPrice → upsertPosition` block copied                                   | 5 times      |
+| `createHyperSyncClientFromConfig(config)`         | 6-line construction block copied                                                   | 3 times      |
+| `resolveLogsWindow(config)`                       | 4-line derivation copied                                                           | 3 times      |
+| `isActivePosition(pos)`                           | `pos.liquidity > 0n` inlined                                                       | 4 times      |
+| `assertValidUrl(path, field, value)`              | `!URL.canParse(v) → throw` pattern                                                 | 2 times      |
+| `upsertViewCache(table, tokenId, data, syncedAt)` | `upsertPositionViewCache` and `upsertPnLViewCache` are identical modulo table name | —            |
+| `paginateHyperSync<T>(client, query, normalise)`  | full pagination shell with block-timestamp join copied                             | 3 times      |
 
 ---
 
@@ -120,11 +120,11 @@ Service files use `[lp-tracker]` prefix. `chain/events.ts` uses 4-space indent w
 
 ## Medium — Error Handling
 
-| Issue | Location |
-|---|---|
-| `getHistoricalPrice` writes negative-cache in 3 separate branches | `pricing.ts` |
-| `syncLpTaxFlows` silently converts RPC failures to `null` timestamps | `tax-transactions.ts:96–102` |
-| Some positions throw `NotFoundError`, others silently `continue` on `findOpenEvent` `not_found` — callers cannot predict which | `il.ts:59` vs `pnl.ts` |
+| Issue                                                                                                                          | Location                     |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| `getHistoricalPrice` writes negative-cache in 3 separate branches                                                              | `pricing.ts`                 |
+| `syncLpTaxFlows` silently converts RPC failures to `null` timestamps                                                           | `tax-transactions.ts:96–102` |
+| Some positions throw `NotFoundError`, others silently `continue` on `findOpenEvent` `not_found` — callers cannot predict which | `il.ts:59` vs `pnl.ts`       |
 
 ---
 
@@ -133,6 +133,7 @@ Service files use `[lp-tracker]` prefix. `chain/events.ts` uses 4-space indent w
 ### USD price resolution in `getPnLView` (`pnl.ts:505–556`)
 
 Three levels of nesting with double try/catch:
+
 ```
 if (closed)
   if (usd prices stored) → use them
@@ -175,17 +176,17 @@ Fast-path and slow-path each branch again on `hyperSyncClient` presence, giving:
 
 ## Low — Magic Values
 
-| Value | Meaning | Occurrences |
-|---|---|---|
-| `1.0001` | Uniswap V3 tick base | 12 (should be `TICK_BASE`) |
-| `18` | Native token decimals | `history.ts:32–33` |
-| `2n ** 256n` | uint256 wrap-around | `divergence-loss.ts:241,247` (should be `UINT256_MAX_PLUS_ONE`) |
-| `-32005` | RPC rate-limit error code | `rpc.ts:51,54,68` |
-| `-32099` | RPC timeout error code | `client.ts:68` |
-| `30_000` | Transport timeout ms | `client.ts:32`, `hypersync.ts:38` (defined independently) |
-| ~~`"https://hyperliquid.hypersync.xyz"`~~ | ~~HyperSync URL~~ | **FIXED** — `tax-transactions.ts` now imports `DEFAULT_HYPERSYNC_URL` |
-| `"YOUR_HYPERSYNC_API_TOKEN"` / `"YOUR_ETHERSCAN_API_KEY"` | Sentinel strings for unconfigured keys | `tax-transactions.ts:1045,1052–1053` |
-| `"ProjectX"` | Stale placeholder name in display output | `display/table.ts:83` |
+| Value                                                     | Meaning                                  | Occurrences                                                           |
+| --------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `1.0001`                                                  | Uniswap V3 tick base                     | 12 (should be `TICK_BASE`)                                            |
+| `18`                                                      | Native token decimals                    | `history.ts:32–33`                                                    |
+| `2n ** 256n`                                              | uint256 wrap-around                      | `divergence-loss.ts:241,247` (should be `UINT256_MAX_PLUS_ONE`)       |
+| `-32005`                                                  | RPC rate-limit error code                | `rpc.ts:51,54,68`                                                     |
+| `-32099`                                                  | RPC timeout error code                   | `client.ts:68`                                                        |
+| `30_000`                                                  | Transport timeout ms                     | `client.ts:32`, `hypersync.ts:38` (defined independently)             |
+| ~~`"https://hyperliquid.hypersync.xyz"`~~                 | ~~HyperSync URL~~                        | **FIXED** — `tax-transactions.ts` now imports `DEFAULT_HYPERSYNC_URL` |
+| `"YOUR_HYPERSYNC_API_TOKEN"` / `"YOUR_ETHERSCAN_API_KEY"` | Sentinel strings for unconfigured keys   | `tax-transactions.ts:1045,1052–1053`                                  |
+| `"ProjectX"`                                              | Stale placeholder name in display output | `display/table.ts:83`                                                 |
 
 ---
 

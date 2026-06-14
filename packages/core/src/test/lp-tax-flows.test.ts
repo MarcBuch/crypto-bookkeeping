@@ -15,10 +15,7 @@ import type { HypersyncClient } from "@envio-dev/hypersync-client";
 
 import type { Client } from "../chain/client.js";
 import { getTaxTransaction, updateTaxTransactionEurValues, upsertPosition } from "../db/store.js";
-import {
-  syncLpTaxFlows,
-  syncTaxTransactions,
-} from "../services/tax-transactions.js";
+import { syncLpTaxFlows, syncTaxTransactions } from "../services/tax-transactions.js";
 import { useTestDb } from "./helpers/db.js";
 
 // ---------------------------------------------------------------------------
@@ -30,10 +27,8 @@ const TOKEN0 = "0x5555555555555555555555555555555555555555"; // WHYPE
 const TOKEN1 = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
 const POSITION_MANAGER = "0xead19ae861c29bbb2101e834922b2feee69b9091";
 
-const OPEN_TX =
-  "0x1111111111111111111111111111111111111111111111111111111111111111";
-const CLOSE_TX =
-  "0x2222222222222222222222222222222222222222222222222222222222222222";
+const OPEN_TX = "0x1111111111111111111111111111111111111111111111111111111111111111";
+const CLOSE_TX = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
 // ---------------------------------------------------------------------------
 // Config helpers
@@ -109,14 +104,17 @@ function makePosition(
     tick_upper: 100,
     entry_sqrt_price_x96: null,
     entry_block: overrides.entry_block !== undefined ? overrides.entry_block : 1000,
-    entry_amount0: overrides.entry_amount0 !== undefined ? overrides.entry_amount0 : "1000000000000000000",
+    entry_amount0:
+      overrides.entry_amount0 !== undefined ? overrides.entry_amount0 : "1000000000000000000",
     entry_amount1: overrides.entry_amount1 !== undefined ? overrides.entry_amount1 : "2000000",
     entry_liquidity: null,
     open_tx: overrides.open_tx !== undefined ? overrides.open_tx : OPEN_TX,
     close_tx: overrides.close_tx !== undefined ? overrides.close_tx : CLOSE_TX,
-    exit_amount0: overrides.exit_amount0 !== undefined ? overrides.exit_amount0 : "900000000000000000",
+    exit_amount0:
+      overrides.exit_amount0 !== undefined ? overrides.exit_amount0 : "900000000000000000",
     exit_amount1: overrides.exit_amount1 !== undefined ? overrides.exit_amount1 : "1900000",
-    fees_collected0: overrides.fees_collected0 !== undefined ? overrides.fees_collected0 : "50000000000000000",
+    fees_collected0:
+      overrides.fees_collected0 !== undefined ? overrides.fees_collected0 : "50000000000000000",
     fees_collected1: overrides.fees_collected1 !== undefined ? overrides.fees_collected1 : "500000",
     close_block: overrides.close_block !== undefined ? overrides.close_block : 2000,
     close_usd_price0: null,
@@ -168,7 +166,7 @@ describe("m1t2 — missing/null position data, zero amounts", () => {
 
   it("position with no open_tx: no deposit entries created", async () => {
     makePosition({ open_tx: null });
-    const result = await syncLpTaxFlows(makeConfig(), {
+    await syncLpTaxFlows(makeConfig(), {
       viemClient: makeDefaultViemMock(),
     });
     // No deposit entries — withdrawal and fee entries are still created if close_tx present
@@ -208,7 +206,7 @@ describe("m1t2 — missing/null position data, zero amounts", () => {
 
   it("only token0 entry amount set: only token0 deposit entry created", async () => {
     makePosition({ entry_amount1: null });
-    const result = await syncLpTaxFlows(makeConfig(), {
+    await syncLpTaxFlows(makeConfig(), {
       viemClient: makeDefaultViemMock(),
     });
     // token0 deposit created
@@ -322,7 +320,12 @@ describe("m1t3 — idempotency and EUR preservation on re-run", () => {
       close_block: 4000,
     });
     const result2 = await syncLpTaxFlows(makeConfig(), {
-      viemClient: makeViemMock({ 1000: 1700000000n, 2000: 1700100000n, 3000: 1700200000n, 4000: 1700300000n }),
+      viemClient: makeViemMock({
+        1000: 1700000000n,
+        2000: 1700100000n,
+        3000: 1700200000n,
+        4000: 1700300000n,
+      }),
     });
 
     expect(result2.synced).toBe(12); // 6 from pos1 (upserted) + 6 from pos2 (new)
@@ -341,7 +344,14 @@ describe("m1t4 — block timestamp resolution", () => {
   useTestDb();
 
   it("RPC failure for entry block: entry still created with time_stamp=null", async () => {
-    makePosition({ close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null });
+    makePosition({
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
+    });
     const result = await syncLpTaxFlows(makeConfig(), {
       viemClient: makeViemMock({ 1000: "throw" }),
     });
@@ -365,10 +375,29 @@ describe("m1t4 — block timestamp resolution", () => {
   it("same block number shared by two positions: getBlock called exactly once for that block", async () => {
     const getBlockCalls: number[] = [];
     // Two positions using the same entry_block = 1000
-    makePosition({ token_id: "111111", open_tx: OPEN_TX, close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null });
+    makePosition({
+      token_id: "111111",
+      open_tx: OPEN_TX,
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
+    });
 
     const open2 = "0x5555555555555555555555555555555555555555555555555555555555555555";
-    makePosition({ token_id: "222222", open_tx: open2, close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null, entry_block: 1000 });
+    makePosition({
+      token_id: "222222",
+      open_tx: open2,
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
+      entry_block: 1000,
+    });
 
     await syncLpTaxFlows(makeConfig(), {
       viemClient: makeViemMock({ 1000: 1700000000n }, getBlockCalls),
@@ -379,7 +408,14 @@ describe("m1t4 — block timestamp resolution", () => {
   });
 
   it("block.timestamp = 0n (falsy BigInt): treated as null, entry created with time_stamp=null", async () => {
-    makePosition({ close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null });
+    makePosition({
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
+    });
     await syncLpTaxFlows(makeConfig(), {
       viemClient: makeViemMock({ 1000: 0n }),
     });
@@ -391,7 +427,14 @@ describe("m1t4 — block timestamp resolution", () => {
 
   it("valid block timestamp: entry has correct ISO 8601 time_stamp", async () => {
     const unixTs = 1700000000;
-    makePosition({ close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null });
+    makePosition({
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
+    });
     await syncLpTaxFlows(makeConfig(), {
       viemClient: makeViemMock({ 1000: BigInt(unixTs) }),
     });
@@ -409,7 +452,14 @@ describe("m1t5 — LP entry construction", () => {
   useTestDb();
 
   it("deposit entry: from_address=wallet, to_address=positionManager, outgoing set, incoming null", async () => {
-    makePosition({ close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null });
+    makePosition({
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
+    });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
     const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
@@ -438,7 +488,12 @@ describe("m1t5 — LP entry construction", () => {
   });
 
   it("fee entry: incoming set, outgoing null, transaction_type=lp-fees", async () => {
-    makePosition({ entry_amount0: null, entry_amount1: null, exit_amount0: null, exit_amount1: null }); // only fees
+    makePosition({
+      entry_amount0: null,
+      entry_amount1: null,
+      exit_amount0: null,
+      exit_amount1: null,
+    }); // only fees
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
     const row = getTaxTransaction(`lp:fees:${CLOSE_TX}:${TOKEN0}:0`);
@@ -466,7 +521,12 @@ describe("m1t5 — LP entry construction", () => {
     makePosition({
       entry_amount0: "1000000000000000000", // 1 WHYPE
       entry_amount1: null,
-      close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null,
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
@@ -478,7 +538,12 @@ describe("m1t5 — LP entry construction", () => {
     makePosition({
       entry_amount0: "1500000000000000000", // 1.5 WHYPE
       entry_amount1: null,
-      close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null,
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
@@ -490,7 +555,12 @@ describe("m1t5 — LP entry construction", () => {
     makePosition({
       entry_amount0: null,
       entry_amount1: "1000000", // 1 USDC
-      close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null,
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
@@ -503,7 +573,12 @@ describe("m1t5 — LP entry construction", () => {
     makePosition({
       entry_amount0: null,
       entry_amount1: "9538000",
-      close_tx: null, close_block: null, exit_amount0: null, exit_amount1: null, fees_collected0: null, fees_collected1: null,
+      close_tx: null,
+      close_block: null,
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: null,
+      fees_collected1: null,
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
@@ -581,10 +656,21 @@ describe("m1t5 — LP entry construction", () => {
     const open2 = "0x9999999999999999999999999999999999999999999999999999999999999999";
     const close2 = "0x8888888888888888888888888888888888888888888888888888888888888888";
     makePosition({ token_id: "111111", open_tx: OPEN_TX, close_tx: CLOSE_TX });
-    makePosition({ token_id: "222222", open_tx: open2, close_tx: close2, entry_block: 3000, close_block: 4000 });
+    makePosition({
+      token_id: "222222",
+      open_tx: open2,
+      close_tx: close2,
+      entry_block: 3000,
+      close_block: 4000,
+    });
 
     await syncLpTaxFlows(makeConfig(), {
-      viemClient: makeViemMock({ 1000: 1700000000n, 2000: 1700100000n, 3000: 1700200000n, 4000: 1700300000n }),
+      viemClient: makeViemMock({
+        1000: 1700000000n,
+        2000: 1700100000n,
+        3000: 1700200000n,
+        4000: 1700300000n,
+      }),
     });
 
     // All 12 IDs are distinct

@@ -830,9 +830,7 @@ export function getEarliestHedgeSnapshot(
     .get(token_id, coin) as StoredHedgeSnapshot | null;
 }
 
-export function insertHedgeEvent(
-  event: Omit<StoredHedgeEvent, "id">,
-): StoredHedgeEvent {
+export function insertHedgeEvent(event: Omit<StoredHedgeEvent, "id">): StoredHedgeEvent {
   const db = getDb();
   db.run(
     `INSERT INTO hedge_events
@@ -866,7 +864,7 @@ export function closeHedgeEvent(params: {
   closed_at: string;
   close_px: number;
   realized_pnl: number;
-  funding_earned: number;
+  funding_earned: number | null;
   close_reason: string;
   hl_fill_hash: string;
 }): StoredHedgeEvent | null {
@@ -883,9 +881,7 @@ export function closeHedgeEvent(params: {
 
   // Find the open event for this token_id and coin
   const openEvent = db
-    .query(
-      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
-    )
+    .query("SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'")
     .get(params.token_id, params.coin) as StoredHedgeEvent | null;
 
   if (!openEvent) {
@@ -914,15 +910,10 @@ export function closeHedgeEvent(params: {
   return updated;
 }
 
-export function getOpenHedgeEvent(
-  token_id: string,
-  coin: string,
-): StoredHedgeEvent | null {
+export function getOpenHedgeEvent(token_id: string, coin: string): StoredHedgeEvent | null {
   const db = getDb();
   return db
-    .query(
-      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
-    )
+    .query("SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'")
     .get(token_id, coin) as StoredHedgeEvent | null;
 }
 

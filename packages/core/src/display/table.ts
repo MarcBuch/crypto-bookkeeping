@@ -171,7 +171,9 @@ export function displayPnL(positions: PnLDisplayData[]): void {
 
   console.log("\n--- Legend ---");
   console.log("LP P&L          = What you actually gained/lost vs your deposit (LP fees included)");
-  console.log("Hedge P&L       = Unrealized P&L + funding earned (active) or realized P&L + funding (closed)");
+  console.log(
+    "Hedge P&L       = Unrealized P&L + funding earned (active) or realized P&L + funding (closed)",
+  );
   console.log("Net P&L         = LP P&L + hedge P&L (shown only when both are in USD)");
   console.log("Divergence Loss = Money left on the table vs simply holding");
   console.log("Opportunity Cost= HODL value - LP value (how much more HODL would have earned)\n");

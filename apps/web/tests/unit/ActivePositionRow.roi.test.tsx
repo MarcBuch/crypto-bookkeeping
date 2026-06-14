@@ -66,12 +66,10 @@ function computeCombinedRoi(
       : hedgeData.unrealizedPnl + hedgeData.fundingEarned
     : null;
 
-  const lpAbsPnlUsd = pnl?.token1UsdPrice != null
-    ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice
-    : null;
-  const lpEntryUsd = pnl?.token1UsdPrice != null
-    ? pnl.entryValueInToken1 * pnl.token1UsdPrice
-    : null;
+  const lpAbsPnlUsd =
+    pnl?.token1UsdPrice != null ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice : null;
+  const lpEntryUsd =
+    pnl?.token1UsdPrice != null ? pnl.entryValueInToken1 * pnl.token1UsdPrice : null;
 
   const combinedAbsUsd =
     lpAbsPnlUsd != null && hedgePnlUsd != null ? lpAbsPnlUsd + hedgePnlUsd : null;
@@ -92,25 +90,6 @@ function computeCombinedRoi(
 // ============================================================================
 // Test Fixtures
 // ============================================================================
-
-const basePnl: PnlData = {
-  absolutePnlInToken1: 25.5,
-  token1UsdPrice: 1,
-  entryValueInToken1: 100,
-};
-
-const baseActiveHedge: HedgeData = {
-  status: "active",
-  unrealizedPnl: 350,
-  fundingEarned: 25.5,
-};
-
-const baseClosedHedge: HedgeData = {
-  status: "closed",
-  unrealizedPnl: 0,
-  realizedPnl: 350,
-  fundingEarned: 25.5,
-};
 
 // ============================================================================
 // Tests: Cluster A — Combined ROI math

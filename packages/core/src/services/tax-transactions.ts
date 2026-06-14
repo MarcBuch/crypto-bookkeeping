@@ -15,6 +15,7 @@ import {
   getAllPositions,
   getAllClosedHedgeEvents,
   getTaxSyncState,
+  getTaxTransaction,
   getTaxTransactionsNeedingEurEnrichment,
   updateTaxTransactionEurValues,
   upsertSyncedTaxTransaction,
@@ -482,8 +483,13 @@ export async function syncHedgeTaxFlows(
   for (const event of closedEvents) {
     const entries = buildHedgeTaxEntries(event, syncedAt);
     for (const entry of entries) {
-      // Skip enrichment for rows already priced (pnl=0 sentinel) or without a timestamp
-      if (entry.cost_eur !== null || entry.proceeds_eur !== null || !entry.time_stamp) {
+      // Already enriched in DB — skip pricing API, upsert as-is
+      const existing = getTaxTransaction(entry.id);
+      const alreadyEnriched =
+        existing !== null &&
+        (existing.cost_eur !== null || existing.proceeds_eur !== null);
+
+      if (alreadyEnriched || entry.cost_eur !== null || entry.proceeds_eur !== null || !entry.time_stamp) {
         upsertSyncedTaxTransaction(entry);
       } else {
         const [enriched] = await enrichTaxTransactionsWithEurValues([entry], config);

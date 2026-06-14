@@ -14,6 +14,8 @@ export type UsdPriceMap = Record<string, number | null>;
 const COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_HISTORY_URL = "https://api.coingecko.com/api/v3/coins";
 const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
+const ECB_EXCHANGE_RATE_URL = "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A";
+const ECB_SERIES_KEY = "0:0:0:0:0";
 const PRICE_CACHE_TTL_MS = 60_000;
 const NEGATIVE_CACHE_TTL_MS = 5_000;
 const HISTORICAL_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -176,6 +178,10 @@ function cacheUnavailable(coinGeckoIds: string[]): void {
   }
 }
 
+function cacheHistorical(key: string, price: number | null, ttlMs: number): void {
+  historicalPriceCache.set(key, { price, expiresAt: Date.now() + ttlMs });
+}
+
 function getCachedHistoricalPrice(cacheKey: string): number | null | undefined {
   const cached = historicalPriceCache.get(cacheKey);
   if (!cached) return undefined;
@@ -242,10 +248,7 @@ export async function getHistoricalPrice(
     if (hlUsdPrice !== null && ecbRate !== null) {
       const eurPrice = hlUsdPrice / ecbRate;
       if (Number.isFinite(eurPrice) && eurPrice > 0) {
-        historicalPriceCache.set(cacheKey, {
-          price: eurPrice,
-          expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
-        });
+        cacheHistorical(cacheKey, eurPrice, HISTORICAL_PRICE_CACHE_TTL_MS);
         return eurPrice;
       }
     }
@@ -256,10 +259,7 @@ export async function getHistoricalPrice(
     const url = `${COINGECKO_HISTORY_URL}/${coinGeckoId}/history?date=${dateStr}&localization=false`;
     const response = await fetch(url);
     if (!response.ok) {
-      historicalPriceCache.set(cacheKey, {
-        price: null,
-        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
       return null;
     }
 
@@ -270,24 +270,15 @@ export async function getHistoricalPrice(
     const currentPrice = marketData?.["current_price"] as Record<string, unknown> | undefined;
     const price = currentPrice?.[currency];
 
-    if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {
-      historicalPriceCache.set(cacheKey, {
-        price: null,
-        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-      });
+    if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
+      cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
       return null;
     }
 
-    historicalPriceCache.set(cacheKey, {
-      price,
-      expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
-    });
+    cacheHistorical(cacheKey, price, HISTORICAL_PRICE_CACHE_TTL_MS);
     return price;
   } catch {
-    historicalPriceCache.set(cacheKey, {
-      price: null,
-      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-    });
+    cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
     return null;
   }
 }
@@ -315,13 +306,10 @@ export async function getEcbFxRate(isoDate: string): Promise<number | null> {
 
   try {
     // Primary fetch: try to get the exact date
-    const primaryUrl = `https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?startPeriod=${dateStr}&endPeriod=${dateStr}&format=jsondata`;
+    const primaryUrl = `${ECB_EXCHANGE_RATE_URL}?startPeriod=${dateStr}&endPeriod=${dateStr}&format=jsondata`;
     const primaryResponse = await fetch(primaryUrl);
     if (!primaryResponse.ok) {
-      historicalPriceCache.set(cacheKey, {
-        price: null,
-        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
       return null;
     }
 
@@ -329,21 +317,15 @@ export async function getEcbFxRate(isoDate: string): Promise<number | null> {
     const rate = extractEcbRate(primaryData, dateStr);
 
     if (rate !== null) {
-      historicalPriceCache.set(cacheKey, {
-        price: rate,
-        expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, rate, HISTORICAL_PRICE_CACHE_TTL_MS);
       return rate;
     }
 
     // Fallback: get the last observation before or on the requested date
-    const fallbackUrl = `https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=1&endPeriod=${dateStr}&format=jsondata`;
+    const fallbackUrl = `${ECB_EXCHANGE_RATE_URL}?lastNObservations=1&endPeriod=${dateStr}&format=jsondata`;
     const fallbackResponse = await fetch(fallbackUrl);
     if (!fallbackResponse.ok) {
-      historicalPriceCache.set(cacheKey, {
-        price: null,
-        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
       return null;
     }
 
@@ -351,73 +333,62 @@ export async function getEcbFxRate(isoDate: string): Promise<number | null> {
     const fallbackRate = extractEcbRateFromFallback(fallbackData);
 
     if (fallbackRate !== null) {
-      historicalPriceCache.set(cacheKey, {
-        price: fallbackRate,
-        expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, fallbackRate, HISTORICAL_PRICE_CACHE_TTL_MS);
       return fallbackRate;
     }
 
-    historicalPriceCache.set(cacheKey, {
-      price: null,
-      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-    });
+    cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
     return null;
   } catch {
-    historicalPriceCache.set(cacheKey, {
-      price: null,
-      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-    });
+    cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
+    return null;
+  }
+}
+
+function extractEcbObservations(data: unknown): Record<string, unknown> | null {
+  try {
+    const obj = data as Record<string, unknown>;
+    const dataSets = obj.dataSets as unknown[];
+    if (!Array.isArray(dataSets) || dataSets.length === 0) return null;
+    const dataSet = dataSets[0] as Record<string, unknown>;
+    const series = dataSet.series as Record<string, unknown>;
+    if (!series) return null;
+    const seriesData = series[ECB_SERIES_KEY] as Record<string, unknown>;
+    if (!seriesData) return null;
+    const observations = seriesData.observations as Record<string, unknown>;
+    if (!observations) return null;
+    return observations;
+  } catch {
     return null;
   }
 }
 
 function extractEcbRate(data: unknown, dateStr: string): number | null {
   try {
-    const obj = data as Record<string, unknown>;
-    const dataSets = obj.dataSets as unknown[];
-    if (!Array.isArray(dataSets) || dataSets.length === 0) return null;
-
-    const dataSet = dataSets[0] as Record<string, unknown>;
-    const series = dataSet.series as Record<string, unknown>;
-    if (!series) return null;
-
-    const seriesData = series["0:0:0:0:0"] as Record<string, unknown>;
-    if (!seriesData) return null;
-
-    const observations = seriesData.observations as Record<string, unknown>;
+    const observations = extractEcbObservations(data);
     if (!observations) return null;
 
+    const obj = data as Record<string, unknown>;
     const structure = obj.structure as Record<string, unknown>;
     if (!structure) return null;
-
     const dimensions = structure.dimensions as Record<string, unknown>;
     if (!dimensions) return null;
-
     const observationDim = dimensions.observation as unknown[];
     if (!Array.isArray(observationDim) || observationDim.length === 0) return null;
-
-    const observationValues = (observationDim[0] as Record<string, unknown>)
-      .values as unknown[];
+    const observationValues = (observationDim[0] as Record<string, unknown>).values as unknown[];
     if (!Array.isArray(observationValues)) return null;
 
     let targetIndex = -1;
     for (let i = 0; i < observationValues.length; i++) {
       const val = observationValues[i] as Record<string, unknown>;
-      if (val.id === dateStr) {
-        targetIndex = i;
-        break;
-      }
+      if (val.id === dateStr) { targetIndex = i; break; }
     }
-
     if (targetIndex === -1) return null;
 
     const observationArray = observations[String(targetIndex)] as unknown[];
     if (!Array.isArray(observationArray) || observationArray.length === 0) return null;
-
     const rate = observationArray[0];
     if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
-
     return rate;
   } catch {
     return null;
@@ -426,27 +397,13 @@ function extractEcbRate(data: unknown, dateStr: string): number | null {
 
 function extractEcbRateFromFallback(data: unknown): number | null {
   try {
-    const obj = data as Record<string, unknown>;
-    const dataSets = obj.dataSets as unknown[];
-    if (!Array.isArray(dataSets) || dataSets.length === 0) return null;
-
-    const dataSet = dataSets[0] as Record<string, unknown>;
-    const series = dataSet.series as Record<string, unknown>;
-    if (!series) return null;
-
-    const seriesData = series["0:0:0:0:0"] as Record<string, unknown>;
-    if (!seriesData) return null;
-
-    const observations = seriesData.observations as Record<string, unknown>;
+    const observations = extractEcbObservations(data);
     if (!observations) return null;
-
     // lastNObservations=1 guarantees exactly one observation, always at index "0"
     const observationArray = observations["0"] as unknown[];
     if (!Array.isArray(observationArray) || observationArray.length === 0) return null;
-
     const rate = observationArray[0];
     if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
-
     return rate;
   } catch {
     return null;
@@ -528,32 +485,20 @@ export async function getHyperliquidHistoricalUsdPrice(
     const closePrice = candle["c"];
 
     if (typeof closePrice !== "string") {
-      historicalPriceCache.set(cacheKey, {
-        price: null,
-        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
       return null;
     }
 
-    const price = parseFloat(closePrice);
+    const price = Number(closePrice);
     if (!Number.isFinite(price) || price <= 0) {
-      historicalPriceCache.set(cacheKey, {
-        price: null,
-        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-      });
+      cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
       return null;
     }
 
-    historicalPriceCache.set(cacheKey, {
-      price,
-      expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
-    });
+    cacheHistorical(cacheKey, price, HISTORICAL_PRICE_CACHE_TTL_MS);
     return price;
   } catch {
-    historicalPriceCache.set(cacheKey, {
-      price: null,
-      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-    });
+    cacheHistorical(cacheKey, null, NEGATIVE_CACHE_TTL_MS);
     return null;
   }
 }

@@ -396,12 +396,8 @@ export function buildHedgeTaxEntries(
 
   const entries: SyncedTaxTransaction[] = [];
 
-  // --- close row (realized P&L) ---
-  const pnl = event.realized_pnl ?? 0;
-  const absPnl = Math.abs(pnl).toFixed(8);
-  const closeEntry: SyncedTaxTransaction = {
-    id: `hedge:close:${event.token_id}:${event.coin}:${disc}`,
-    hash: event.hl_fill_hash ?? `hedge:close:${event.token_id}:${event.coin}:evt${event.id}`,
+  // Base entry with common fields shared by close and funding rows
+  const baseEntry = {
     block_number: null,
     time_stamp: timeStamp,
     from_address: null,
@@ -414,12 +410,23 @@ export function buildHedgeTaxEntries(
     function_name: null,
     input: null,
     contract_address: null,
-    token_symbol: "USDC",
+    token_symbol: "USDC" as const,
     token_decimal: 6,
     token_name: "USD Coin",
-    transaction_type: "hedge-close",
     source: "hedge-events",
     is_error: 0,
+    holding_duration_days: null,
+    synced_at: syncedAt,
+  } satisfies Partial<SyncedTaxTransaction>;
+
+  // --- close row (realized P&L) ---
+  const pnl = event.realized_pnl ?? 0;
+  const absPnl = Math.abs(pnl).toFixed(8);
+  const closeEntry: SyncedTaxTransaction = {
+    ...baseEntry,
+    id: `hedge:close:${event.token_id}:${event.coin}:${disc}`,
+    hash: event.hl_fill_hash ?? `hedge:close:${event.token_id}:${event.coin}:${disc}`,
+    transaction_type: "hedge-close",
     incoming_quantity: pnl > 0 ? absPnl : null,
     incoming_asset: pnl > 0 ? "USDC" : null,
     outgoing_quantity: pnl < 0 ? absPnl : null,
@@ -427,8 +434,6 @@ export function buildHedgeTaxEntries(
     cost_eur: pnl === 0 ? "0" : null,
     proceeds_eur: pnl === 0 ? "0" : null,
     gain_eur: pnl === 0 ? "0" : null,
-    holding_duration_days: null,
-    synced_at: syncedAt,
   };
   entries.push(closeEntry);
 
@@ -437,26 +442,10 @@ export function buildHedgeTaxEntries(
   if (funding !== 0) {
     const absFunding = Math.abs(funding).toFixed(8);
     const fundingEntry: SyncedTaxTransaction = {
+      ...baseEntry,
       id: `hedge:funding:${event.token_id}:${event.coin}:${disc}:funding`,
-      hash: `${event.hl_fill_hash ?? `hedge:funding:${event.token_id}:${event.coin}:evt${event.id}`}:funding`,
-      block_number: null,
-      time_stamp: timeStamp,
-      from_address: null,
-      to_address: null,
-      value: null,
-      gas_used: null,
-      gas_price: null,
-      fee: null,
-      method_id: null,
-      function_name: null,
-      input: null,
-      contract_address: null,
-      token_symbol: "USDC",
-      token_decimal: 6,
-      token_name: "USD Coin",
+      hash: `${event.hl_fill_hash ?? `hedge:funding:${event.token_id}:${event.coin}:${disc}`}:funding`,
       transaction_type: "hedge-funding",
-      source: "hedge-events",
-      is_error: 0,
       incoming_quantity: funding > 0 ? absFunding : null,
       incoming_asset: funding > 0 ? "USDC" : null,
       outgoing_quantity: funding < 0 ? absFunding : null,
@@ -464,8 +453,6 @@ export function buildHedgeTaxEntries(
       cost_eur: null,
       proceeds_eur: null,
       gain_eur: null,
-      holding_duration_days: null,
-      synced_at: syncedAt,
     };
     entries.push(fundingEntry);
   }

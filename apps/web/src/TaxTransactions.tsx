@@ -386,14 +386,20 @@ export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransac
   const groups = new Map<string, TaxTransactionGroup>();
 
   for (const transaction of transactions) {
-    const existing = groups.get(transaction.hash);
+    // Hedge close and funding rows share an event key (hedge:close:tid:coin:hash vs
+    // hedge:funding:tid:coin:hash) — group them together under the same key so they
+    // appear as a single expandable row rather than two unrelated entries.
+    const hedgeMatch = transaction.id.match(/^hedge:(?:close|funding):(.+)$/);
+    const groupKey = hedgeMatch ? `hedge:event:${hedgeMatch[1]}` : transaction.hash;
+
+    const existing = groups.get(groupKey);
     if (existing) {
       existing.transactions.push(transaction);
       continue;
     }
 
-    groups.set(transaction.hash, {
-      id: `hash:${transaction.hash}`,
+    groups.set(groupKey, {
+      id: hedgeMatch ? groupKey : `hash:${transaction.hash}`,
       hash: transaction.hash,
       primary: transaction,
       transactions: [transaction],
@@ -1716,6 +1722,13 @@ function AddressLine({ label, value }: { label: string; value: string | null }) 
 }
 
 export function TransactionHashLink({ hash }: { hash: string }) {
+  if (!hash.startsWith("0x")) {
+    return (
+      <span className="block truncate text-neutral-400" title={hash}>
+        {shortHash(hash)}
+      </span>
+    );
+  }
   return (
     <a
       className="block truncate transition hover:text-blue-700 hover:underline"

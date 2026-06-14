@@ -119,10 +119,27 @@ Returns historical snapshots for a position (requires prior snapshots).
     "opportunityCostInToken1": 0.000014,
     "netVsHodlPercent": 0.011,
     "priceLower": 0.000600,
-    "priceUpper": 0.000800
+    "priceUpper": 0.000800,
+    "hedge": {
+      "tokenId": "123456",
+      "coin": "HYPE",
+      "szi": "-30.1",
+      "entryPx": 58.37,
+      "markPx": 61.64,
+      "unrealizedPnl": 0,
+      "fundingEarned": 1.67,
+      "liquidationPx": null,
+      "leverage": { "type": "cross", "value": 4 },
+      "status": "closed",
+      "realizedPnl": -98.56,
+      "closedAt": "2026-06-12T17:09:46.918Z",
+      "closeReason": "manual_close"
+    }
   }]
 }
 ```
+
+The `hedge` field is present only when `config.positions[tokenId].hedge` is configured. For active hedges, `status` is `"active"` and `unrealizedPnl` / `fundingEarned` reflect the open position. For closed hedges, `status` is `"closed"` and `realizedPnl` contains the final P&L. Always surface the hedge block when present — it is part of the position's full P&L picture.
 
 ## Key Concepts
 

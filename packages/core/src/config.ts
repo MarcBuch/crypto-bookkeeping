@@ -14,6 +14,8 @@ export interface PositionConfig {
 export interface PricingConfig {
   /** CoinGecko ids keyed by token symbol or token address */
   coingeckoIds?: Record<string, string>;
+  /** Hyperliquid coin names keyed by token symbol or address (e.g. { UBTC: "BTC", WHYPE: "HYPE" }) */
+  hyperliquidSymbols?: Record<string, string>;
 }
 
 export interface HyperSyncSharedConfig {

@@ -13,6 +13,7 @@ export type UsdPriceMap = Record<string, number | null>;
 
 const COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_HISTORY_URL = "https://api.coingecko.com/api/v3/coins";
+const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
 const PRICE_CACHE_TTL_MS = 60_000;
 const NEGATIVE_CACHE_TTL_MS = 5_000;
 const HISTORICAL_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -25,6 +26,20 @@ type PriceCacheEntry = {
 const priceCache = new Map<string, PriceCacheEntry>();
 const historicalPriceCache = new Map<string, PriceCacheEntry>();
 
+// For testing only: clear all caches
+export function __clearCaches(): void {
+  priceCache.clear();
+  historicalPriceCache.clear();
+}
+
+/** Symbols that are always treated as exactly 1.00 USD without a CoinGecko call. */
+const USD_STABLECOIN_SYMBOLS = new Set(["USDC", "USDT", "DAI", "USDE", "FRAX", "PYUSD"]);
+
+function isUsdStablecoin(token: PricingToken): boolean {
+  const sym = typeof token === "string" ? token : token.symbol;
+  return sym != null && USD_STABLECOIN_SYMBOLS.has(sym.toUpperCase());
+}
+
 export async function getUsdPrices(
   config: Pick<Config, "pricing">,
   tokens: PricingToken[],
@@ -35,6 +50,12 @@ export async function getUsdPrices(
   for (const token of tokens) {
     const key = tokenKey(token);
     if (!key) continue;
+
+    // Short-circuit well-known USD stablecoins to avoid an unnecessary CoinGecko call
+    if (isUsdStablecoin(token)) {
+      result[key] = 1.0;
+      continue;
+    }
 
     result[key] = null;
 
@@ -92,6 +113,19 @@ function resolveCoinGeckoId(config: Pick<Config, "pricing">, token: PricingToken
 
   for (const candidate of candidates) {
     if (candidate && ids[candidate]) return ids[candidate];
+  }
+
+  return null;
+}
+
+function resolveHyperliquidSymbol(config: Pick<Config, "pricing">, token: string): string | null {
+  const symbols = config.pricing?.hyperliquidSymbols;
+  if (!symbols) return null;
+
+  const candidates = [token, token.toLowerCase(), token.toUpperCase()];
+
+  for (const candidate of candidates) {
+    if (candidate && symbols[candidate]) return symbols[candidate];
   }
 
   return null;
@@ -161,12 +195,29 @@ function isoToddmmyyyy(isoTimestamp: string): string {
   return `${day}-${month}-${year}`;
 }
 
+function isoToYyyyMmDd(isoTimestamp: string): string {
+  const d = new Date(isoTimestamp);
+  if (isNaN(d.getTime())) throw new Error("Invalid timestamp");
+  const year = String(d.getUTCFullYear());
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export async function getHistoricalPrice(
   config: Pick<Config, "pricing">,
   symbol: string,
   isoTimestamp: string,
   currency: "eur" | "usd",
 ): Promise<number | null> {
+  // Short-circuit USD stablecoins: their USD price is always 1.0.
+  // For EUR, derive from the ECB rate (1 USDC = 1 USD = 1/ecbRate EUR).
+  if (isUsdStablecoin(symbol)) {
+    if (currency === "usd") return 1.0;
+    const ecbRate = await getEcbFxRate(isoTimestamp);
+    return ecbRate !== null ? 1.0 / ecbRate : null;
+  }
+
   const coinGeckoId = resolveCoinGeckoId(config, symbol);
   if (!coinGeckoId) return null;
 
@@ -181,6 +232,26 @@ export async function getHistoricalPrice(
   const cached = getCachedHistoricalPrice(cacheKey);
   if (cached !== undefined) return cached;
 
+  // For EUR: try composed path (Hyperliquid USD price / ECB FX rate) first
+  if (currency === "eur") {
+    const [hlUsdPrice, ecbRate] = await Promise.all([
+      getHyperliquidHistoricalUsdPrice(config, symbol, isoTimestamp),
+      getEcbFxRate(isoTimestamp),
+    ]);
+
+    if (hlUsdPrice !== null && ecbRate !== null) {
+      const eurPrice = hlUsdPrice / ecbRate;
+      if (Number.isFinite(eurPrice) && eurPrice > 0) {
+        historicalPriceCache.set(cacheKey, {
+          price: eurPrice,
+          expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
+        });
+        return eurPrice;
+      }
+    }
+  }
+
+  // Fallback to CoinGecko for both EUR and USD
   try {
     const url = `${COINGECKO_HISTORY_URL}/${coinGeckoId}/history?date=${dateStr}&localization=false`;
     const response = await fetch(url);
@@ -200,6 +271,272 @@ export async function getHistoricalPrice(
     const price = currentPrice?.[currency];
 
     if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    historicalPriceCache.set(cacheKey, {
+      price,
+      expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
+    });
+    return price;
+  } catch {
+    historicalPriceCache.set(cacheKey, {
+      price: null,
+      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+    });
+    return null;
+  }
+}
+
+/**
+ * Returns the ECB reference exchange rate for the given date: how many USD equal 1 EUR
+ * (e.g. 1.0945 means 1 EUR = 1.0945 USD). Source: ECB series D.USD.EUR.SP00.A.
+ *
+ * If the requested date has no fix (weekend, public holiday, or future date), falls back
+ * to the most recent prior business day rate via a second request.
+ *
+ * To convert a USD price to EUR: price_eur = price_usd / getEcbFxRate(date)
+ */
+export async function getEcbFxRate(isoDate: string): Promise<number | null> {
+  let dateStr: string;
+  try {
+    dateStr = isoToYyyyMmDd(isoDate);
+  } catch {
+    return null;
+  }
+
+  const cacheKey = `ecb:${dateStr}`;
+  const cached = getCachedHistoricalPrice(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    // Primary fetch: try to get the exact date
+    const primaryUrl = `https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?startPeriod=${dateStr}&endPeriod=${dateStr}&format=jsondata`;
+    const primaryResponse = await fetch(primaryUrl);
+    if (!primaryResponse.ok) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const primaryData = await primaryResponse.json();
+    const rate = extractEcbRate(primaryData, dateStr);
+
+    if (rate !== null) {
+      historicalPriceCache.set(cacheKey, {
+        price: rate,
+        expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
+      });
+      return rate;
+    }
+
+    // Fallback: get the last observation before or on the requested date
+    const fallbackUrl = `https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=1&endPeriod=${dateStr}&format=jsondata`;
+    const fallbackResponse = await fetch(fallbackUrl);
+    if (!fallbackResponse.ok) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const fallbackData = await fallbackResponse.json();
+    const fallbackRate = extractEcbRateFromFallback(fallbackData);
+
+    if (fallbackRate !== null) {
+      historicalPriceCache.set(cacheKey, {
+        price: fallbackRate,
+        expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
+      });
+      return fallbackRate;
+    }
+
+    historicalPriceCache.set(cacheKey, {
+      price: null,
+      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+    });
+    return null;
+  } catch {
+    historicalPriceCache.set(cacheKey, {
+      price: null,
+      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+    });
+    return null;
+  }
+}
+
+function extractEcbRate(data: unknown, dateStr: string): number | null {
+  try {
+    const obj = data as Record<string, unknown>;
+    const dataSets = obj.dataSets as unknown[];
+    if (!Array.isArray(dataSets) || dataSets.length === 0) return null;
+
+    const dataSet = dataSets[0] as Record<string, unknown>;
+    const series = dataSet.series as Record<string, unknown>;
+    if (!series) return null;
+
+    const seriesData = series["0:0:0:0:0"] as Record<string, unknown>;
+    if (!seriesData) return null;
+
+    const observations = seriesData.observations as Record<string, unknown>;
+    if (!observations) return null;
+
+    const structure = obj.structure as Record<string, unknown>;
+    if (!structure) return null;
+
+    const dimensions = structure.dimensions as Record<string, unknown>;
+    if (!dimensions) return null;
+
+    const observationDim = dimensions.observation as unknown[];
+    if (!Array.isArray(observationDim) || observationDim.length === 0) return null;
+
+    const observationValues = (observationDim[0] as Record<string, unknown>)
+      .values as unknown[];
+    if (!Array.isArray(observationValues)) return null;
+
+    let targetIndex = -1;
+    for (let i = 0; i < observationValues.length; i++) {
+      const val = observationValues[i] as Record<string, unknown>;
+      if (val.id === dateStr) {
+        targetIndex = i;
+        break;
+      }
+    }
+
+    if (targetIndex === -1) return null;
+
+    const observationArray = observations[String(targetIndex)] as unknown[];
+    if (!Array.isArray(observationArray) || observationArray.length === 0) return null;
+
+    const rate = observationArray[0];
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+
+    return rate;
+  } catch {
+    return null;
+  }
+}
+
+function extractEcbRateFromFallback(data: unknown): number | null {
+  try {
+    const obj = data as Record<string, unknown>;
+    const dataSets = obj.dataSets as unknown[];
+    if (!Array.isArray(dataSets) || dataSets.length === 0) return null;
+
+    const dataSet = dataSets[0] as Record<string, unknown>;
+    const series = dataSet.series as Record<string, unknown>;
+    if (!series) return null;
+
+    const seriesData = series["0:0:0:0:0"] as Record<string, unknown>;
+    if (!seriesData) return null;
+
+    const observations = seriesData.observations as Record<string, unknown>;
+    if (!observations) return null;
+
+    // lastNObservations=1 guarantees exactly one observation, always at index "0"
+    const observationArray = observations["0"] as unknown[];
+    if (!Array.isArray(observationArray) || observationArray.length === 0) return null;
+
+    const rate = observationArray[0];
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+
+    return rate;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the historical close price of a token in USD for the given date,
+ * sourced from Hyperliquid's candleSnapshot API.
+ *
+ * @param config - Must include `pricing.hyperliquidSymbols` mapping (e.g. { WHYPE: "HYPE" }).
+ * @param symbol - User-facing token symbol (e.g. "WHYPE"), NOT the Hyperliquid internal name.
+ *                 Resolution is case-insensitive and uses the hyperliquidSymbols config map.
+ * @param isoTimestamp - ISO 8601 date or datetime string; only the UTC date portion is used.
+ * @returns The USD close price for the day, or null if unavailable.
+ */
+export async function getHyperliquidHistoricalUsdPrice(
+  config: Pick<Config, "pricing">,
+  symbol: string,
+  isoTimestamp: string,
+): Promise<number | null> {
+  const hlSymbol = resolveHyperliquidSymbol(config, symbol);
+  if (!hlSymbol) return null;
+
+  let dateStr: string;
+  try {
+    dateStr = isoToYyyyMmDd(isoTimestamp);
+  } catch {
+    return null;
+  }
+
+  const cacheKey = `hl:${hlSymbol}:${dateStr}`;
+  const cached = getCachedHistoricalPrice(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const date = new Date(isoTimestamp);
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth();
+    const day = date.getUTCDate();
+
+    const startTime = Date.UTC(year, month, day, 0, 0, 0, 0);
+    const endTime = Date.UTC(year, month, day, 23, 59, 59, 999);
+
+    const response = await fetch(HYPERLIQUID_INFO_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "candleSnapshot",
+        req: {
+          coin: hlSymbol,
+          interval: "1d",
+          startTime,
+          endTime,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const candle = data[0] as Record<string, unknown>;
+    const closePrice = candle["c"];
+
+    if (typeof closePrice !== "string") {
+      historicalPriceCache.set(cacheKey, {
+        price: null,
+        expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const price = parseFloat(closePrice);
+    if (!Number.isFinite(price) || price <= 0) {
       historicalPriceCache.set(cacheKey, {
         price: null,
         expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,

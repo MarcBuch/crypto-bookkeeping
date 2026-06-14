@@ -439,6 +439,9 @@ tax
         console.log(
           `Synced ${sync.synced} tax transaction(s) from ${sync.source} for ${sync.wallet}.`,
         );
+        if (sync.hedgeFlowsSynced != null && sync.hedgeFlowsSynced > 0) {
+          console.log(`  of which ${sync.hedgeFlowsSynced} hedge flow(s).`);
+        }
         if (sync.latestBlockNumber !== null) {
           console.log(`Latest block: ${sync.latestBlockNumber}`);
         }

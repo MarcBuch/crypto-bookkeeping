@@ -1722,6 +1722,8 @@ function AddressLine({ label, value }: { label: string; value: string | null }) 
 }
 
 export function TransactionHashLink({ hash }: { hash: string }) {
+  // Non-0x hashes are Hyperliquid fill TIDs (numeric strings) or synthetic
+  // evt{id} fallbacks for events without an hl_fill_hash.
   if (!hash.startsWith("0x")) {
     return (
       <span className="block truncate text-neutral-400" title={hash}>

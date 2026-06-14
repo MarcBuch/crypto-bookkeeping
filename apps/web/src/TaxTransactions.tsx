@@ -389,7 +389,7 @@ export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransac
     // Hedge close and funding rows share an event key (hedge:close:tid:coin:hash vs
     // hedge:funding:tid:coin:hash) — group them together under the same key so they
     // appear as a single expandable row rather than two unrelated entries.
-    const hedgeMatch = transaction.id.match(/^hedge:(?:close|funding):(.+)$/);
+    const hedgeMatch = transaction.id.match(/^hedge:(?:close|funding):(.+?)(?::funding)?$/);
     const groupKey = hedgeMatch ? `hedge:event:${hedgeMatch[1]}` : transaction.hash;
 
     const existing = groups.get(groupKey);

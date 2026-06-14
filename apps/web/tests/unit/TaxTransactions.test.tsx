@@ -1654,7 +1654,7 @@ describe("groupTaxTransactions — hedge event grouping", () => {
   };
   const fundingRow: TaxTransaction = {
     ...taxTransaction,
-    id: `hedge:funding:484645:HYPE:${disc}`,
+    id: `hedge:funding:484645:HYPE:${disc}:funding`,
     hash: `${disc}:funding`,
     transaction_type: "hedge-funding",
     source: "hedge-events",

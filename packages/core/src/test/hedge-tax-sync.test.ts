@@ -85,7 +85,7 @@ describe("syncHedgeTaxFlows — Cluster B (idempotency)", () => {
     // First call
     for (const evt of closedEvents) {
       const closeId = `hedge:close:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
-      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
+      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}:funding`;
       upsertCalls.push({ id: closeId });
       upsertCalls.push({ id: fundingId });
     }
@@ -96,7 +96,7 @@ describe("syncHedgeTaxFlows — Cluster B (idempotency)", () => {
     upsertCalls.length = 0;
     for (const evt of closedEvents) {
       const closeId = `hedge:close:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
-      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
+      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}:funding`;
       upsertCalls.push({ id: closeId });
       upsertCalls.push({ id: fundingId });
     }
@@ -115,16 +115,16 @@ describe("syncHedgeTaxFlows — Cluster B (idempotency)", () => {
     const ids: string[] = [];
     for (const evt of events) {
       const closeId = `hedge:close:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
-      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}`;
+      const fundingId = `hedge:funding:${evt.token_id}:${evt.coin}:${evt.hl_fill_hash}:funding`;
       ids.push(closeId);
       ids.push(fundingId);
     }
 
     expect(ids.length).toBe(4);
     expect(ids[0]).toBe("hedge:close:abc:HYPE:fill1");
-    expect(ids[1]).toBe("hedge:funding:abc:HYPE:fill1");
+    expect(ids[1]).toBe("hedge:funding:abc:HYPE:fill1:funding");
     expect(ids[2]).toBe("hedge:close:def:ETH:fill2");
-    expect(ids[3]).toBe("hedge:funding:def:ETH:fill2");
+    expect(ids[3]).toBe("hedge:funding:def:ETH:fill2:funding");
   });
 });
 

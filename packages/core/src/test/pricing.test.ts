@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { __clearCaches, getEcbFxRate, getHistoricalPrice, getHyperliquidHistoricalUsdPrice, getUsdPrices } from "../services/pricing.js";
+import { clearCachesForTesting, getEcbFxRate, getHistoricalPrice, getHyperliquidHistoricalUsdPrice, getUsdPrices } from "../services/pricing.js";
 
 const originalFetch = globalThis.fetch;
 const originalDateNow = Date.now;
@@ -105,7 +105,7 @@ function mockFetchForEurPrice(
 afterEach(() => {
   globalThis.fetch = originalFetch;
   Date.now = originalDateNow;
-  __clearCaches();
+  clearCachesForTesting();
 });
 
 describe("getUsdPrices", () => {
@@ -1379,7 +1379,7 @@ describe("getHistoricalPrice EUR — fallback chain (source availability combina
    */
   function mockMultiSourceFetch(responses: Record<string, { ok: boolean; data: unknown }>) {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       calls.push({ url });
 
@@ -2386,11 +2386,9 @@ describe("getEcbFxRate — invalid/boundary dates and weekend fallback", () => {
 
   it("returns null when future date primary fetch returns 0 observations and fallback also returns 0 observations", async () => {
     const calls: FetchCall[] = [];
-    let callCount = 0;
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       calls.push({ url: String(input) });
-      callCount++;
 
       // Both primary and fallback return empty observations
       return {
@@ -2562,14 +2560,13 @@ describe("getEcbFxRate — invalid/boundary dates and weekend fallback", () => {
   });
 
   it("ECB public holiday: primary returns 0 observations, fallback returns rate from previous business day", async () => {
-     const calls: FetchCall[] = [];
-     let callCount = 0;
+    const calls: FetchCall[] = [];
 
-     globalThis.fetch = (async (input: RequestInfo | URL) => {
-       calls.push({ url: String(input) });
-       callCount++;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push({ url: String(input) });
 
-       if (callCount === 1) {
+
+       if (calls.length === 1) {
          // Primary fetch for holiday returns empty
          return {
            ok: true,
@@ -2713,7 +2710,7 @@ describe("getHyperliquidHistoricalUsdPrice — network failures and caching", ()
   it("different dates are not cached together: call with date A (success), call with date B (success) → 2 HTTP calls, each returns correct price for its date", async () => {
     let callCount = 0;
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
       calls.push({ url: String(input) });
       callCount++;
       // Return different prices based on call order
@@ -2744,7 +2741,7 @@ describe("getHyperliquidHistoricalUsdPrice — network failures and caching", ()
   it("different symbols are not cached together: call with symbol HYPE date X (success), call with symbol BTC date X (success) → 2 HTTP calls", async () => {
     let callCount = 0;
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
       calls.push({ url: String(input) });
       callCount++;
       // Return different prices based on call order

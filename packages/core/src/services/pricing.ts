@@ -29,7 +29,7 @@ const priceCache = new Map<string, PriceCacheEntry>();
 const historicalPriceCache = new Map<string, PriceCacheEntry>();
 
 // For testing only: clear all caches
-export function __clearCaches(): void {
+export function clearCachesForTesting(): void {
   priceCache.clear();
   historicalPriceCache.clear();
 }
@@ -381,7 +381,10 @@ function extractEcbRate(data: unknown, dateStr: string): number | null {
     let targetIndex = -1;
     for (let i = 0; i < observationValues.length; i++) {
       const val = observationValues[i] as Record<string, unknown>;
-      if (val.id === dateStr) { targetIndex = i; break; }
+      if (val.id === dateStr) {
+        targetIndex = i;
+        break;
+      }
     }
     if (targetIndex === -1) return null;
 

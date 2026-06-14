@@ -17,7 +17,7 @@ import {
   enrichTaxTransactionsEurValues,
   syncTaxTransactions,
 } from "../services/tax-transactions.js";
-import { __clearCaches } from "../services/pricing.js";
+import { clearCachesForTesting } from "../services/pricing.js";
 import { useTestDb } from "./helpers/db.js";
 
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
@@ -820,7 +820,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     globalThis.fetch = originalFetch;
-    __clearCaches();
+    clearCachesForTesting();
   });
 
   it("null time_stamp → EUR fields stay null", async () => {

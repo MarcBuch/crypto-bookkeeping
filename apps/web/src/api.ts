@@ -88,7 +88,7 @@ export interface HedgeEvent {
   hl_fill_hash: string | null;
 }
 
-export type TaxTransactionLabel = "Trade" | "Transfer" | null;
+export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | null;
 
 export interface TaxTransaction {
   id: string;

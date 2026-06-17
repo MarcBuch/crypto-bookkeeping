@@ -1,8 +1,11 @@
+import { Database } from "bun:sqlite";
 import { describe, it, expect } from "bun:test";
 
-import { getDb } from "../db/schema.js";
+import { getDb, resolveDbPath } from "../db/schema.js";
 import {
   createManualTaxTransaction,
+  getTaxTransactionsNeedingGermanTaxReview,
+  listGermanTaxableTransactions,
   getTaxSyncState,
   getTaxTransaction,
   listTaxTransactions,
@@ -300,12 +303,68 @@ describe("tax transaction persistence", () => {
     expect(getTaxTransaction("tx-1:external")?.label).toBeNull();
   });
 
-  it("accepts Trade, Transfer, and null labels", () => {
+  it("accepts Trade, Transfer, Approval, and null labels", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
 
     expect(updateTaxTransaction("tx-1:external", { label: "Trade" })?.label).toBe("Trade");
     expect(updateTaxTransaction("tx-1:external", { label: "Transfer" })?.label).toBe("Transfer");
+    expect(updateTaxTransaction("tx-1:external", { label: "Approval" })?.label).toBe("Approval");
     expect(updateTaxTransaction("tx-1:external", { label: null })?.label).toBeNull();
+  });
+
+  it("migrates legacy label constraint and allows Approval labels", () => {
+    const dbPath = resolveDbPath();
+    const legacyDb = new Database(dbPath, { create: true });
+    legacyDb.exec(`
+      CREATE TABLE tax_transactions (
+        id TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        block_number INTEGER,
+        time_stamp TEXT,
+        from_address TEXT,
+        to_address TEXT,
+        value TEXT,
+        gas_used TEXT,
+        gas_price TEXT,
+        fee TEXT,
+        method_id TEXT,
+        function_name TEXT,
+        input TEXT,
+        contract_address TEXT,
+        token_symbol TEXT,
+        token_decimal INTEGER,
+        token_name TEXT,
+        transaction_type TEXT,
+        source TEXT NOT NULL,
+        is_error INTEGER,
+        label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+        incoming_quantity TEXT,
+        incoming_asset TEXT,
+        outgoing_quantity TEXT,
+        outgoing_asset TEXT,
+        cost_eur TEXT,
+        proceeds_eur TEXT,
+        gain_eur TEXT,
+        holding_duration_days INTEGER,
+        comment TEXT,
+        synced_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO tax_transactions (id, hash, source, transaction_type, synced_at, label)
+      VALUES ('legacy-row', '0xlegacy', 'manual', 'manual', datetime('now'), 'Trade');
+    `);
+    legacyDb.close();
+
+    const migratedDb = getDb();
+    const tableSql = migratedDb
+      .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'")
+      .get() as { sql: string } | null;
+
+    expect(tableSql?.sql).toContain("Approval");
+    expect(updateTaxTransaction("legacy-row", { label: "Approval" })?.label).toBe("Approval");
+    expect(getTaxTransaction("legacy-row")?.label).toBe("Approval");
   });
 
   it("stores empty comments as empty strings and clears null comments to null", () => {
@@ -489,6 +548,7 @@ describe("tax transaction persistence", () => {
     updateTaxTransaction("transfer-newer", { label: "Transfer" });
     updateTaxTransaction("trade-middle", { label: "Trade" });
     updateTaxTransaction("transfer-old", { label: "Transfer" });
+    updateTaxTransaction("unlabeled-2", { label: "Approval" });
 
     expect(listTaxTransactions(50, 0).map((row) => row.id)).toEqual([
       "trade-newest",
@@ -507,20 +567,69 @@ describe("tax transaction persistence", () => {
       "transfer-newer",
       "transfer-old",
     ]);
+    expect(listTaxTransactions(50, 0, "Approval").map((row) => row.id)).toEqual(["unlabeled-2"]);
     expect(listTaxTransactions(50, 0, "unlabeled").map((row) => row.id)).toEqual([
       "unlabeled-3",
-      "unlabeled-2",
       "unlabeled-1",
     ]);
-    expect(listTaxTransactions(2, 1, "unlabeled").map((row) => row.id)).toEqual([
-      "unlabeled-2",
-      "unlabeled-1",
-    ]);
+    expect(listTaxTransactions(2, 1, "unlabeled").map((row) => row.id)).toEqual(["unlabeled-1"]);
   });
 
   it("returns null when getting or updating an unknown id", () => {
     expect(getTaxTransaction("missing")).toBeNull();
     expect(updateTaxTransaction("missing", { label: "Trade", comment: "ignored" })).toBeNull();
+  });
+
+  it("lists German-taxable rows by excluding Approval labels", () => {
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "approval", block_number: 103, time_stamp: "2026-05-30T12:03:00.000Z" }),
+    );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "trade", block_number: 102, time_stamp: "2026-05-30T12:02:00.000Z" }),
+    );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "transfer", block_number: 101, time_stamp: "2026-05-30T12:01:00.000Z" }),
+    );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "unlabeled", block_number: 100, time_stamp: "2026-05-30T12:00:00.000Z" }),
+    );
+
+    updateTaxTransaction("approval", { label: "Approval" });
+    updateTaxTransaction("trade", { label: "Trade" });
+    updateTaxTransaction("transfer", { label: "Transfer" });
+
+    expect(listGermanTaxableTransactions(50, 0).map((row) => row.id)).toEqual([
+      "trade",
+      "transfer",
+      "unlabeled",
+    ]);
+    expect(listGermanTaxableTransactions(1, 1).map((row) => row.id)).toEqual(["transfer"]);
+  });
+
+  it("lists rows needing German tax review as unlabeled only", () => {
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "approval", block_number: 103, time_stamp: "2026-05-30T12:03:00.000Z" }),
+    );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "trade", block_number: 102, time_stamp: "2026-05-30T12:02:00.000Z" }),
+    );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "unlabeled-a", block_number: 101, time_stamp: "2026-05-30T12:01:00.000Z" }),
+    );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({ id: "unlabeled-b", block_number: 100, time_stamp: "2026-05-30T12:00:00.000Z" }),
+    );
+
+    updateTaxTransaction("approval", { label: "Approval" });
+    updateTaxTransaction("trade", { label: "Trade" });
+
+    expect(getTaxTransactionsNeedingGermanTaxReview(50, 0).map((row) => row.id)).toEqual([
+      "unlabeled-a",
+      "unlabeled-b",
+    ]);
+    expect(getTaxTransactionsNeedingGermanTaxReview(1, 1).map((row) => row.id)).toEqual([
+      "unlabeled-b",
+    ]);
   });
 
   it("upserts and reads tax sync state by wallet", () => {

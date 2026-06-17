@@ -58,6 +58,22 @@ mock.module("@lp-tracker/core", () => ({
   getPnLView: async () => [],
   getILView: async () => [],
   getHistoryView: async () => [],
+  getHedgeView: async () => ({
+    tokenId: "42",
+    coin: "HYPE",
+    szi: "0",
+    entryPx: 0,
+    markPx: 0,
+    unrealizedPnl: 0,
+    fundingEarned: 0,
+    liquidationPx: null,
+    leverage: { type: "cross", value: 1 },
+    status: "closed",
+    realizedPnl: null,
+    closedAt: null,
+    closeReason: null,
+  }),
+  getHedgeEvents: async () => [],
   listTaxTransactions: (...args: unknown[]) => {
     lastListArgs = args;
     allListArgs.push(args);
@@ -163,7 +179,9 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions?label=Income" });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: "label must be Trade or Transfer, got: Income" });
+    expect(res.json()).toMatchObject({
+      error: "label must be Trade, Transfer, or Approval, got: Income",
+    });
   });
 
   it("rejects lowercase label filters", async () => {
@@ -172,8 +190,23 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions?label=trade" });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: "label must be Trade or Transfer, got: trade" });
+    expect(res.json()).toMatchObject({
+      error: "label must be Trade, Transfer, or Approval, got: trade",
+    });
     expect(lastListArgs).toEqual([]);
+  });
+
+  it("accepts Approval label filters", async () => {
+    mockListTaxTransactions = () => [];
+    lastListArgs = [];
+
+    const res = await server.inject({
+      method: "GET",
+      url: "/tax/transactions?limit=10&offset=5&label=Approval",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(lastListArgs).toEqual([10, 5, "Approval"]);
   });
 
   it.each(["abc", "10abc", "0", "-1"])("rejects invalid limit %s", async (limit) => {
@@ -446,8 +479,23 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, or null" });
+    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
     expect(allCreateArgs).toEqual([]);
+  });
+
+  it("accepts Approval labels", async () => {
+    const createdTransaction = { ...fakeTransaction, label: "Approval" };
+    mockCreateManualTaxTransaction = () => createdTransaction;
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { label: "Approval" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expect(allCreateArgs).toEqual([[{ label: "Approval" }]]);
   });
 
   it.each([
@@ -798,7 +846,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, or null" });
+    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -815,8 +863,23 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, or null" });
+    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
     expect(allUpdateArgs).toEqual([]);
+  });
+
+  it("accepts Approval labels", async () => {
+    const updatedTransaction = { ...fakeTransaction, label: "Approval" };
+    mockUpdateTaxTransaction = () => updatedTransaction;
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/tx-1%3Aexternal",
+      payload: { label: "Approval" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Approval" }]]);
   });
 
   it.each([

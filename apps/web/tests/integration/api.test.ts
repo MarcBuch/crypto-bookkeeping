@@ -290,6 +290,19 @@ describe("API client", () => {
     ]);
   });
 
+  it("fetches tax transactions filtered by Approval label", async () => {
+    const approvalTaxTransaction = { ...taxTransaction, label: "Approval" as const };
+    mockFetch((url, init) => {
+      expect(init?.method).toBeUndefined();
+      expect(url).toBe("http://localhost:3000/tax/transactions?label=Approval");
+      return jsonResponse({ transactions: [approvalTaxTransaction] });
+    });
+
+    await expect(getTaxTransactions({ label: "Approval" })).resolves.toEqual([
+      approvalTaxTransaction,
+    ]);
+  });
+
   it("omits null tax labels while preserving zero offset and provided limit", async () => {
     mockFetch((url) => {
       expect(url).toBe("http://localhost:3000/tax/transactions?limit=25&offset=0");

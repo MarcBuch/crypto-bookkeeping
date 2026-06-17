@@ -180,7 +180,7 @@ bun run cli tax sync
 bun run --filter @lp-tracker/cli start -- --json tax sync
 ```
 
-List synced transactions, optionally filtering labels with `Trade`, `Transfer`, or `unlabeled`:
+List synced transactions, optionally filtering labels with `Trade`, `Transfer`, `Approval`, or `unlabeled`:
 
 ```bash
 bun run cli tax list --limit 20
@@ -195,7 +195,7 @@ bun run cli tax get <transaction-id>
 bun run --filter @lp-tracker/cli start -- --json tax get "<transaction-id>"
 ```
 
-Label a transaction as `Trade` or `Transfer`; clear the label with `null`, `clear`, `none`, or `unlabeled`:
+Label a transaction as `Trade`, `Transfer`, or `Approval`; clear the label with `null`, `clear`, `none`, or `unlabeled`:
 
 ```bash
 bun run cli tax label <transaction-id> --label Trade --comment "..."
@@ -208,7 +208,7 @@ Agent workflow:
 2. Run `tax list --label unlabeled --limit 20` to find rows needing review.
 3. Run `tax get "<transaction-id>"` to inspect hashes, transfers, amounts, and existing notes.
 4. Look up the transaction hash externally or manually classify the activity.
-5. Run `tax label "<transaction-id>" --label Trade --comment "..."` or `--label Transfer`; use a clear value if the row should return to unlabeled.
+5. Run `tax label "<transaction-id>" --label Trade --comment "..."`, `--label Transfer`, or `--label Approval`; use a clear value if the row should return to unlabeled.
 
 Tax JSON commands return stable envelopes: `{ "sync": ... }`, `{ "transactions": [...] }`, `{ "transaction": ... }`, or controlled errors such as `{ "error": "...", "id": "..." }` for not found and validation failures.
 
@@ -261,7 +261,7 @@ PORT=8080 bun run start
 
 Success responses follow the shape of the corresponding CLI `--json` output, including best-effort USD fee fields such as `feesValueUsd`, per-token USD fee values, token USD prices, and `usdPriceSource` when pricing is available.
 
-Tax transaction responses are stored locally in SQLite and are not synced on read. Call `POST /tax/transactions/sync` when you want to fetch fresh blockchain data. Labels currently support `Trade` and `Transfer`; use `null` to clear a label. Comments are stored locally and limited to 1000 JavaScript string code units.
+Tax transaction responses are stored locally in SQLite and are not synced on read. Call `POST /tax/transactions/sync` when you want to fetch fresh blockchain data. Labels currently support `Trade`, `Transfer`, and `Approval`; use `null` to clear a label. For German tax workflows, `Approval` is treated as non-taxable and excluded from German tax counting. Comments are stored locally and limited to 1000 JavaScript string code units.
 
 Error responses:
 

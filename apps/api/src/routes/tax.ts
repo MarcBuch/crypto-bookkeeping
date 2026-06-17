@@ -33,7 +33,7 @@ type TaxTransactionUpdate = {
   token_decimal?: number | null;
   token_name?: string | null;
   is_error?: number | null;
-  label?: "Trade" | "Transfer" | null;
+  label?: "Trade" | "Transfer" | "Approval" | null;
   incoming_quantity?: string | null;
   incoming_asset?: string | null;
   outgoing_quantity?: string | null;
@@ -137,9 +137,9 @@ const maxTaxTransactionCommentLength = 1000;
 
 function assertValidTaxTransactionLabel(
   label: unknown,
-): asserts label is "Trade" | "Transfer" | null {
-  if (label !== "Trade" && label !== "Transfer" && label !== null) {
-    throw new ValidationError("label must be Trade, Transfer, or null");
+): asserts label is "Trade" | "Transfer" | "Approval" | null {
+  if (label !== "Trade" && label !== "Transfer" && label !== "Approval" && label !== null) {
+    throw new ValidationError("label must be Trade, Transfer, Approval, or null");
   }
 }
 
@@ -382,7 +382,7 @@ export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
 
       let limit: number;
       let offset: number;
-      let label: "Trade" | "Transfer" | undefined;
+      let label: "Trade" | "Transfer" | "Approval" | undefined;
       try {
         limit = parseLimit(limitRaw, 50, 200);
         offset = parseOffset(offsetRaw, 0);

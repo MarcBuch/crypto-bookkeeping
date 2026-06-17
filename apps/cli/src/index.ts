@@ -76,14 +76,16 @@ function parsePositiveInteger(raw: string, name: string): number {
 
 function parseListTaxLabel(raw: string | undefined): TaxTransactionLabelFilter | undefined {
   if (raw === undefined) return undefined;
-  if (raw === "Trade" || raw === "Transfer" || raw === "unlabeled") return raw;
-  throw new Error("label must be Trade, Transfer, or unlabeled");
+  if (raw === "Trade" || raw === "Transfer" || raw === "Approval" || raw === "unlabeled") {
+    return raw;
+  }
+  throw new Error("label must be Trade, Transfer, Approval, or unlabeled");
 }
 
 function parseUpdateTaxLabel(raw: string): TaxTransactionLabel {
-  if (raw === "Trade" || raw === "Transfer") return raw;
+  if (raw === "Trade" || raw === "Transfer" || raw === "Approval") return raw;
   if (raw === "null" || raw === "clear" || raw === "none" || raw === "unlabeled") return null;
-  throw new Error("label must be Trade, Transfer, null, clear, none, or unlabeled");
+  throw new Error("label must be Trade, Transfer, Approval, null, clear, none, or unlabeled");
 }
 
 function formatTaxTransaction(transaction: StoredTaxTransaction): string {
@@ -356,7 +358,7 @@ tax
   .option("--id <id>", "Manual transaction ID")
   .option("--hash <hash>", "Transaction hash or manual reference")
   .option("--time <iso>", "Transaction timestamp as an ISO string")
-  .option("--label <label>", "Trade, Transfer, null, clear, none, or unlabeled")
+  .option("--label <label>", "Trade, Transfer, Approval, null, clear, none, or unlabeled")
   .option("--comment <comment>", "Comment to store with the transaction")
   .option("--incoming-quantity <quantity>", "Incoming asset quantity")
   .option("--incoming-asset <asset>", "Incoming asset symbol")
@@ -456,7 +458,7 @@ tax
   .description("List stored tax transactions")
   .option("--limit <number>", "Number of transactions to show", "50")
   .option("--offset <number>", "Number of transactions to skip", "0")
-  .option("--label <label>", "Filter by Trade, Transfer, or unlabeled")
+  .option("--label <label>", "Filter by Trade, Transfer, Approval, or unlabeled")
   .action((options: { limit: string; offset: string; label?: string }) => {
     let limit: number;
     let offset: number;
@@ -504,7 +506,7 @@ tax
   .command("label")
   .description("Update a tax transaction label and/or comment")
   .argument("<id>", "Tax transaction ID")
-  .option("--label <label>", "Trade, Transfer, null, clear, none, or unlabeled")
+  .option("--label <label>", "Trade, Transfer, Approval, null, clear, none, or unlabeled")
   .option("--comment <comment>", "Comment to store with the transaction")
   .action((id: string, options: { label?: string; comment?: string }) => {
     const update: TaxTransactionUpdate = {};

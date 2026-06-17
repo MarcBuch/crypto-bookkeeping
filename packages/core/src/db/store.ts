@@ -80,7 +80,7 @@ export interface StoredHedgeEvent {
   hl_fill_hash: string | null;
 }
 
-export type TaxTransactionLabel = "Trade" | "Transfer" | null;
+export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | null;
 export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
 
 export interface StoredTaxTransaction {
@@ -197,8 +197,14 @@ export interface StoredTaxSyncState {
 }
 
 function assertValidTaxTransactionLabel(label: TaxTransactionLabel | undefined): void {
-  if (label !== undefined && label !== null && label !== "Trade" && label !== "Transfer") {
-    throw new Error("Tax transaction label must be 'Trade', 'Transfer', or null");
+  if (
+    label !== undefined &&
+    label !== null &&
+    label !== "Trade" &&
+    label !== "Transfer" &&
+    label !== "Approval"
+  ) {
+    throw new Error("Tax transaction label must be 'Trade', 'Transfer', 'Approval', or null");
   }
 }
 
@@ -540,6 +546,36 @@ export function listTaxTransactions(
   return db
     .query(
       `SELECT * FROM tax_transactions
+       ORDER BY time_stamp DESC, block_number DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset) as StoredTaxTransaction[];
+}
+
+export function listGermanTaxableTransactions(
+  limit = 100,
+  offset = 0,
+): StoredTaxTransaction[] {
+  const db = getDb();
+  return db
+    .query(
+      `SELECT * FROM tax_transactions
+       WHERE label IS NULL OR label != 'Approval'
+       ORDER BY time_stamp DESC, block_number DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset) as StoredTaxTransaction[];
+}
+
+export function getTaxTransactionsNeedingGermanTaxReview(
+  limit = 100,
+  offset = 0,
+): StoredTaxTransaction[] {
+  const db = getDb();
+  return db
+    .query(
+      `SELECT * FROM tax_transactions
+       WHERE label IS NULL
        ORDER BY time_stamp DESC, block_number DESC
        LIMIT ? OFFSET ?`,
     )

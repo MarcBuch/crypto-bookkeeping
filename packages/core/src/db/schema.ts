@@ -51,6 +51,8 @@ export function resetDb(): void {
 }
 
 export function initSchema(database: Database): void {
+  const taxLabelCheckConstraint = "label IS NULL OR label IN ('Trade', 'Transfer', 'Approval')";
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS positions (
       token_id TEXT PRIMARY KEY,
@@ -115,7 +117,7 @@ export function initSchema(database: Database): void {
       transaction_type TEXT,
       source TEXT NOT NULL,
       is_error INTEGER,
-      label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+      label TEXT CHECK (${taxLabelCheckConstraint}),
       incoming_quantity TEXT,
       incoming_asset TEXT,
       outgoing_quantity TEXT,
@@ -290,7 +292,7 @@ export function initSchema(database: Database): void {
         transaction_type TEXT,
         source TEXT NOT NULL,
         is_error INTEGER,
-        label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+        label TEXT CHECK (${taxLabelCheckConstraint}),
         incoming_quantity TEXT,
         incoming_asset TEXT,
         outgoing_quantity TEXT,
@@ -343,6 +345,71 @@ export function initSchema(database: Database): void {
     if (!migratedTaxTransactionCols.some((c) => c.name === name)) {
       database.exec(`ALTER TABLE tax_transactions ADD COLUMN ${name} ${type}`);
     }
+  }
+
+  const createTableSqlRow = database
+    .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'")
+    .get() as { sql: string } | null;
+  const needsApprovalLabelMigration =
+    createTableSqlRow?.sql.includes("label IN ('Trade', 'Transfer')") ?? false;
+
+  if (needsApprovalLabelMigration) {
+    database.exec(`
+      CREATE TABLE tax_transactions_new (
+        id TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        block_number INTEGER,
+        time_stamp TEXT,
+        from_address TEXT,
+        to_address TEXT,
+        value TEXT,
+        gas_used TEXT,
+        gas_price TEXT,
+        fee TEXT,
+        method_id TEXT,
+        function_name TEXT,
+        input TEXT,
+        contract_address TEXT,
+        token_symbol TEXT,
+        token_decimal INTEGER,
+        token_name TEXT,
+        transaction_type TEXT,
+        source TEXT NOT NULL,
+        is_error INTEGER,
+        label TEXT CHECK (${taxLabelCheckConstraint}),
+        incoming_quantity TEXT,
+        incoming_asset TEXT,
+        outgoing_quantity TEXT,
+        outgoing_asset TEXT,
+        cost_eur TEXT,
+        proceeds_eur TEXT,
+        gain_eur TEXT,
+        holding_duration_days INTEGER,
+        comment TEXT,
+        synced_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO tax_transactions_new
+        (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used,
+         gas_price, fee, method_id, function_name, input, contract_address, token_symbol,
+         token_decimal, token_name, transaction_type, source, is_error, label,
+         incoming_quantity, incoming_asset, outgoing_quantity, outgoing_asset, cost_eur,
+         proceeds_eur, gain_eur, holding_duration_days, comment, synced_at, created_at,
+         updated_at)
+      SELECT
+        id, hash, block_number, time_stamp, from_address, to_address, value, gas_used,
+        gas_price, fee, method_id, function_name, input, contract_address, token_symbol,
+        token_decimal, token_name, transaction_type, source, is_error, label,
+        incoming_quantity, incoming_asset, outgoing_quantity, outgoing_asset, cost_eur,
+        proceeds_eur, gain_eur, holding_duration_days, comment, synced_at, created_at,
+        updated_at
+      FROM tax_transactions;
+
+      DROP TABLE tax_transactions;
+      ALTER TABLE tax_transactions_new RENAME TO tax_transactions;
+    `);
   }
 
   database.exec(`

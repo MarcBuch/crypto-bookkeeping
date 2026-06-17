@@ -36,6 +36,8 @@ export {
   createManualTaxTransaction,
   getTaxTransaction,
   listTaxTransactions,
+  listGermanTaxableTransactions,
+  getTaxTransactionsNeedingGermanTaxReview,
   updateTaxTransaction,
   upsertTaxSyncState,
   getTaxSyncState,

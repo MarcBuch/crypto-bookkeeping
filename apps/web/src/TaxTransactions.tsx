@@ -31,6 +31,7 @@ export const taxTransactionLabelOptions: Array<{
   { label: "Unlabeled", value: "" },
   { label: "Trade", value: "Trade" },
   { label: "Transfer", value: "Transfer" },
+  { label: "Approval", value: "Approval" },
 ];
 
 export function taxCommentDraftState(transactionComment: string | null, draft: string) {

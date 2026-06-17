@@ -463,31 +463,6 @@ export function TaxTransactions() {
   return (
     <main className="min-h-screen bg-white text-neutral-950">
       <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
-          <div className="border-b border-neutral-200 px-5 py-3 sm:px-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
-              <span>HyperEVM ProjectX</span>
-              <a className="text-neutral-700 transition hover:text-neutral-950" href="/">
-                Portfolio Dashboard
-              </a>
-            </div>
-          </div>
-          <div className="p-5 sm:p-7">
-            <div>
-              <p className="text-xs font-semibold tracking-[0.35em] text-neutral-500 uppercase">
-                Tax Operations
-              </p>
-              <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-[-0.04em] text-neutral-950 sm:text-6xl lg:text-7xl">
-                Transaction Labeling Ledger
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-neutral-600 sm:text-base">
-                Review synced wallet activity, classify tax intent, and add notes for downstream
-                reconciliation. Sync runs only when requested.
-              </p>
-            </div>
-          </div>
-        </header>
-
         {isLoading ? <TaxLoadingState /> : null}
         {error ? <TaxErrorState error={error} /> : null}
         {!isLoading && !error && transactions ? (

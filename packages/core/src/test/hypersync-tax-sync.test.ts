@@ -937,6 +937,135 @@ describe("Suite 3 — token metadata integration, self-transfers, zero-value txs
     expect(row!.incoming_asset).toBe("HYPE");
   });
 
+  it("grouped zero-wrapper merge: skip wrapper and move full gas fields to first token row", async () => {
+    const hash = "0xccc000000000000000000000000000000000000000000000000000000000000a";
+    const contractAddr = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const gasUsed = 93_422n;
+    const gasPrice = 160_000_000n;
+
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash,
+          blockNumber: 600,
+          blockTimestamp: 1_700_000_000,
+          from: WALLET.toLowerCase(),
+          to: "0x6666666666666666666666666666666666666666",
+          value: 0n,
+          gasUsed,
+          gasPrice,
+          input: "0x",
+          status: 1,
+          sighash: "0x2b2dfd2c",
+        },
+      ],
+      [
+        erc20Log({
+          txHash: hash,
+          blockNumber: 600,
+          blockTimestamp: 1_700_000_000,
+          logIndex: 0,
+          contractAddress: contractAddr,
+          from: WALLET.toLowerCase(),
+          to: "0x6666666666666666666666666666666666666666",
+          value: 474_117_582n,
+        }),
+      ],
+    );
+
+    const summary = await syncTaxTransactions(makeConfig(), {
+      fetcher: noOpFetcher,
+      hyperSyncClient,
+      viemClient: makeViemMock({
+        [contractAddr]: { symbol: "USDC", name: "USD Coin", decimals: 6 },
+      }),
+    });
+
+    expect(summary.synced).toBe(1);
+    const wrapper = getTaxTransaction(`hypersync:txlist:${hash}:external`);
+    expect(wrapper).toBeNull();
+
+    const tokenRow = getTaxTransaction(`hypersync:tokentx:${hash}:0`);
+    expect(tokenRow).not.toBeNull();
+    expect(tokenRow!.gas_used).toBe(gasUsed.toString());
+    expect(tokenRow!.gas_price).toBe(gasPrice.toString());
+    expect(tokenRow!.fee).toBe((gasUsed * gasPrice).toString());
+  });
+
+  it("grouped zero-wrapper merge: with multiple token rows, only first log index gets gas fee", async () => {
+    const hash = "0xccc000000000000000000000000000000000000000000000000000000000000b";
+    const contractAddrA = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const contractAddrB = "0x6b175474e89094c44da98b954eedeac495271d0f";
+    const gasUsed = 50_000n;
+    const gasPrice = 3_000_000_000n;
+
+    const hyperSyncClient = makeHyperSyncMock(
+      [
+        {
+          hash,
+          blockNumber: 700,
+          blockTimestamp: 1_700_000_001,
+          from: WALLET.toLowerCase(),
+          to: "0x7777777777777777777777777777777777777777",
+          value: 0n,
+          gasUsed,
+          gasPrice,
+          input: "0x",
+          status: 1,
+          sighash: "0x2b2dfd2c",
+        },
+      ],
+      [
+        erc20Log({
+          txHash: hash,
+          blockNumber: 700,
+          blockTimestamp: 1_700_000_001,
+          logIndex: 3,
+          contractAddress: contractAddrB,
+          from: WALLET.toLowerCase(),
+          to: "0x7777777777777777777777777777777777777777",
+          value: 42n,
+        }),
+        erc20Log({
+          txHash: hash,
+          blockNumber: 700,
+          blockTimestamp: 1_700_000_001,
+          logIndex: 1,
+          contractAddress: contractAddrA,
+          from: WALLET.toLowerCase(),
+          to: "0x7777777777777777777777777777777777777777",
+          value: 100n,
+        }),
+      ],
+    );
+
+    const summary = await syncTaxTransactions(makeConfig(), {
+      fetcher: noOpFetcher,
+      hyperSyncClient,
+      viemClient: makeViemMock({
+        [contractAddrA]: { symbol: "USDC", name: "USD Coin", decimals: 6 },
+        [contractAddrB]: { symbol: "DAI", name: "Dai", decimals: 18 },
+      }),
+    });
+
+    expect(summary.synced).toBe(2);
+    const wrapper = getTaxTransaction(`hypersync:txlist:${hash}:external`);
+    expect(wrapper).toBeNull();
+
+    const firstRow = getTaxTransaction(`hypersync:tokentx:${hash}:1`);
+    const secondRow = getTaxTransaction(`hypersync:tokentx:${hash}:3`);
+    expect(firstRow).not.toBeNull();
+    expect(secondRow).not.toBeNull();
+
+    expect(firstRow!.gas_used).toBe(gasUsed.toString());
+    expect(firstRow!.gas_price).toBe(gasPrice.toString());
+    expect(firstRow!.fee).toBe((gasUsed * gasPrice).toString());
+
+    expect(secondRow!.gas_used).toBeNull();
+    expect(secondRow!.gas_price).toBeNull();
+    expect(secondRow!.fee).toBeNull();
+  });
+
   it("ERC-20 with decimals=0: quantity = raw value as-is", async () => {
     const txHash = "0xccc0000000000000000000000000000000000000000000000000000000000005";
     const contractAddr = "0x6b175474e89094c44da98b954eedeac495271d0f"; // DAI mainnet (valid addr)

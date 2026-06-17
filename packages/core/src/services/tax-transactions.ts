@@ -534,9 +534,55 @@ export async function syncTaxTransactions(
     createHyperSyncClient({ url: hyperSyncUrl, apiToken: hyperSyncApiToken! });
   const viemClient = options.viemClient ?? createClient(config as Config);
 
-  // Fetch external transactions
+  // Fetch both sets first so we can detect grouped zero-native wrappers and
+  // merge gas fields onto the first token row for that hash.
   const txs = await fetchTransactionsByAddress(hyperSyncClient, wallet, fromBlock);
+  const transfers = await fetchTokenTransfersByAddress(hyperSyncClient, wallet, fromBlock);
+
+  const transfersByHash = new Map<string, HyperSyncTokenTransfer[]>();
+  for (const transfer of transfers) {
+    const existing = transfersByHash.get(transfer.transactionHash);
+    if (existing) {
+      existing.push(transfer);
+      continue;
+    }
+    transfersByHash.set(transfer.transactionHash, [transfer]);
+  }
+
+  const wrapperGasByHash = new Map<
+    string,
+    { fee: string; gas_used: string; gas_price: string; firstLogIndex: number }
+  >();
+  for (const [hash, hashTransfers] of transfersByHash) {
+    let firstLogIndex = Number.POSITIVE_INFINITY;
+    for (const transfer of hashTransfers) {
+      if (transfer.logIndex < firstLogIndex) firstLogIndex = transfer.logIndex;
+    }
+    if (Number.isFinite(firstLogIndex)) {
+      wrapperGasByHash.set(hash, {
+        fee: "",
+        gas_used: "",
+        gas_price: "",
+        firstLogIndex,
+      });
+    }
+  }
+
+  // Fetch external transactions
   for (const tx of txs) {
+    const mergeTarget = wrapperGasByHash.get(tx.hash);
+    const shouldMergeAndSkipWrapper = tx.value === 0n && mergeTarget !== undefined;
+
+    if (shouldMergeAndSkipWrapper) {
+      mergeTarget.fee = (tx.gasUsed * tx.gasPrice).toString();
+      mergeTarget.gas_used = tx.gasUsed.toString();
+      mergeTarget.gas_price = tx.gasPrice.toString();
+      if (tx.blockNumber !== null) {
+        latestBlockNumber = Math.max(latestBlockNumber ?? tx.blockNumber, tx.blockNumber);
+      }
+      continue;
+    }
+
     const row = hyperSyncTxToSyncedTaxTransaction(tx, wallet, syncedAt);
     const [enriched] = await enrichTaxTransactionsWithEurValues([row], config);
     upsertSyncedTaxTransaction(enriched);
@@ -547,14 +593,27 @@ export async function syncTaxTransactions(
   }
 
   // Fetch token transfers
-  const transfers = await fetchTokenTransfersByAddress(hyperSyncClient, wallet, fromBlock);
   for (const transfer of transfers) {
-    const row = await hyperSyncTokenTransferToSyncedTaxTransaction(
+    const baseRow = await hyperSyncTokenTransferToSyncedTaxTransaction(
       transfer,
       wallet,
       viemClient,
       syncedAt,
     );
+    const mergeTarget = wrapperGasByHash.get(transfer.transactionHash);
+    const row =
+      mergeTarget !== undefined &&
+      mergeTarget.firstLogIndex === transfer.logIndex &&
+      mergeTarget.fee !== "" &&
+      mergeTarget.gas_used !== "" &&
+      mergeTarget.gas_price !== ""
+        ? {
+            ...baseRow,
+            fee: mergeTarget.fee,
+            gas_used: mergeTarget.gas_used,
+            gas_price: mergeTarget.gas_price,
+          }
+        : baseRow;
     const [enriched] = await enrichTaxTransactionsWithEurValues([row], config);
     upsertSyncedTaxTransaction(enriched);
     synced += 1;

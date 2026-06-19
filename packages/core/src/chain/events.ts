@@ -328,11 +328,11 @@ export async function findCloseEvent(
       const decreaseTotals = { amount0: decreaseAmount0, amount1: decreaseAmount1 };
       for (const decLog of decreaseLogs) {
         if (decLog === dLog || decLog.blockNumber > dLog.blockNumber) continue;
-        const decreaseDecoded = decodeHyperSyncLog(decLog, eventAbi);
-        if (decreaseDecoded && decreaseDecoded.eventName === "DecreaseLiquidity") {
-          const dArgs = decreaseDecoded.args as any;
-          decreaseTotals.amount0 += BigInt(dArgs.amount0);
-          decreaseTotals.amount1 += BigInt(dArgs.amount1);
+        const priorDecreaseDecoded = decodeHyperSyncLog(decLog, eventAbi);
+        if (priorDecreaseDecoded && priorDecreaseDecoded.eventName === "DecreaseLiquidity") {
+          const priorDecreaseArgs = priorDecreaseDecoded.args as any;
+          decreaseTotals.amount0 += BigInt(priorDecreaseArgs.amount0);
+          decreaseTotals.amount1 += BigInt(priorDecreaseArgs.amount1);
         }
       }
 
@@ -389,13 +389,7 @@ export async function findCloseEvent(
               startBlock,
               dLog.blockNumber!,
             ),
-            sumCollectLogs(
-              client,
-              positionManager,
-              tokenId,
-              startBlock,
-              dLog.blockNumber!,
-            ),
+            sumCollectLogs(client, positionManager, tokenId, startBlock, dLog.blockNumber!),
           ]);
           return {
             status: "found",

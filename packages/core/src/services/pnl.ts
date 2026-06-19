@@ -527,7 +527,8 @@ export async function getPnLView(
             fee: pos.fee,
             tick_lower: pos.tickLower,
             tick_upper: pos.tickUpper,
-            entry_sqrt_price_x96: entrySqrtPriceX96?.toString() ?? storedPos?.entry_sqrt_price_x96 ?? null,
+            entry_sqrt_price_x96:
+              entrySqrtPriceX96?.toString() ?? storedPos?.entry_sqrt_price_x96 ?? null,
             entry_block: entryBlock != null ? Number(entryBlock) : (storedPos?.entry_block ?? null),
             entry_amount0: entryAmount0.toString(),
             entry_amount1: entryAmount1.toString(),

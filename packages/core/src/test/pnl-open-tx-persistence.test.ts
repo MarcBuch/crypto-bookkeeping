@@ -432,9 +432,7 @@ describe("close_tx persistence and exit cache bypass", () => {
     });
 
     expect(findCloseEventCallCount).toBeGreaterThan(0);
-    expect(lastCalculateFullPnLParams?.exitSqrtPriceX96).toBe(
-      79228162514264337593543950336n,
-    );
+    expect(lastCalculateFullPnLParams?.exitSqrtPriceX96).toBe(79228162514264337593543950336n);
     expect(result[0].exitPrice).toBe(1.0);
   });
 

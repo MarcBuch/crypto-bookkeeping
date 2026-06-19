@@ -974,7 +974,9 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
         }
         return {
           data: {
-            logs: [mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1)],
+            logs: [
+              mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+            ],
             blocks: [{ number: closeBlock, timestamp: 1700000800 }],
             transactions: [],
             traces: [],

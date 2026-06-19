@@ -617,7 +617,7 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
       {
         ...baseConfig,
         positions: {
-          [TOKEN_ID]: { closeTx: "0xCLOSE" },
+          [TOKEN_ID]: { openTx: "", closeTx: "0xCLOSE" },
         },
       },
       undefined,

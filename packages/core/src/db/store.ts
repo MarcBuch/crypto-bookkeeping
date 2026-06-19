@@ -552,10 +552,7 @@ export function listTaxTransactions(
     .all(limit, offset) as StoredTaxTransaction[];
 }
 
-export function listGermanTaxableTransactions(
-  limit = 100,
-  offset = 0,
-): StoredTaxTransaction[] {
+export function listGermanTaxableTransactions(limit = 100, offset = 0): StoredTaxTransaction[] {
   const db = getDb();
   return db
     .query(

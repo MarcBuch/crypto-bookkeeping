@@ -582,16 +582,32 @@ describe("tax transaction persistence", () => {
 
   it("lists German-taxable rows by excluding Approval labels", () => {
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "approval", block_number: 103, time_stamp: "2026-05-30T12:03:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "approval",
+        block_number: 103,
+        time_stamp: "2026-05-30T12:03:00.000Z",
+      }),
     );
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "trade", block_number: 102, time_stamp: "2026-05-30T12:02:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "trade",
+        block_number: 102,
+        time_stamp: "2026-05-30T12:02:00.000Z",
+      }),
     );
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "transfer", block_number: 101, time_stamp: "2026-05-30T12:01:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "transfer",
+        block_number: 101,
+        time_stamp: "2026-05-30T12:01:00.000Z",
+      }),
     );
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "unlabeled", block_number: 100, time_stamp: "2026-05-30T12:00:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "unlabeled",
+        block_number: 100,
+        time_stamp: "2026-05-30T12:00:00.000Z",
+      }),
     );
 
     updateTaxTransaction("approval", { label: "Approval" });
@@ -608,16 +624,32 @@ describe("tax transaction persistence", () => {
 
   it("lists rows needing German tax review as unlabeled only", () => {
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "approval", block_number: 103, time_stamp: "2026-05-30T12:03:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "approval",
+        block_number: 103,
+        time_stamp: "2026-05-30T12:03:00.000Z",
+      }),
     );
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "trade", block_number: 102, time_stamp: "2026-05-30T12:02:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "trade",
+        block_number: 102,
+        time_stamp: "2026-05-30T12:02:00.000Z",
+      }),
     );
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "unlabeled-a", block_number: 101, time_stamp: "2026-05-30T12:01:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "unlabeled-a",
+        block_number: 101,
+        time_stamp: "2026-05-30T12:01:00.000Z",
+      }),
     );
     upsertSyncedTaxTransaction(
-      makeSyncedTaxTransaction({ id: "unlabeled-b", block_number: 100, time_stamp: "2026-05-30T12:00:00.000Z" }),
+      makeSyncedTaxTransaction({
+        id: "unlabeled-b",
+        block_number: 100,
+        time_stamp: "2026-05-30T12:00:00.000Z",
+      }),
     );
 
     updateTaxTransaction("approval", { label: "Approval" });

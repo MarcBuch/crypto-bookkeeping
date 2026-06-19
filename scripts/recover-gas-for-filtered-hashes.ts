@@ -118,7 +118,8 @@ if (!existsSync(dbPath)) {
 const rpcUrl = resolveRpcUrl();
 const db = new Database(dbPath);
 
-const hashFilterSql = hashes.length > 0 ? `AND tx.hash IN (${hashes.map(() => "?").join(",")})` : "";
+const hashFilterSql =
+  hashes.length > 0 ? `AND tx.hash IN (${hashes.map(() => "?").join(",")})` : "";
 
 const candidates = db
   .query(
@@ -165,8 +166,12 @@ db.exec("BEGIN");
 
 try {
   for (const candidate of candidates) {
-    const receipt = await rpcCall<RpcReceipt>(rpcUrl, "eth_getTransactionReceipt", [candidate.hash]);
-    const transaction = await rpcCall<RpcTransaction>(rpcUrl, "eth_getTransactionByHash", [candidate.hash]);
+    const receipt = await rpcCall<RpcReceipt>(rpcUrl, "eth_getTransactionReceipt", [
+      candidate.hash,
+    ]);
+    const transaction = await rpcCall<RpcTransaction>(rpcUrl, "eth_getTransactionByHash", [
+      candidate.hash,
+    ]);
 
     const gasUsed = hexToBigInt(receipt?.gasUsed);
     const gasPrice = hexToBigInt(receipt?.effectiveGasPrice) ?? hexToBigInt(transaction?.gasPrice);

@@ -292,6 +292,15 @@ describe("findCloseEvent scan window computation", () => {
         }
         expect(args.fromBlock).toBe(100n);
         expect(args.toBlock).toBe(300n);
+        if (callCount === 2) {
+          return [
+            {
+              args: { tokenId: 1n, liquidity: 50n, amount0: 1_000n, amount1: 2_000n },
+              blockNumber: 300n,
+              transactionHash: TX_HASH,
+            },
+          ];
+        }
         return [
           {
             args: { tokenId: 1n, amount0Collect: 10n, amount1Collect: 20n },
@@ -314,6 +323,61 @@ describe("findCloseEvent scan window computation", () => {
     if (result.status === "found") {
       expect(result.event.collectedFees0).toBe(15n);
       expect(result.event.collectedFees1).toBe(50n);
+    }
+  });
+
+  it("subtracts all prior decreased principal when summing lifecycle Collect logs", async () => {
+    let callCount = 0;
+    const client = {
+      getBlockNumber: async () => 1_000n,
+      getLogs: async (_args: { event: { name?: string }; fromBlock: bigint; toBlock: bigint }) => {
+        callCount += 1;
+        if (callCount === 1) {
+          return [
+            {
+              args: { tokenId: 1n, liquidity: 20n, amount0: 100n, amount1: 200n },
+              blockNumber: 300n,
+              transactionHash: TX_HASH,
+            },
+          ];
+        }
+        if (callCount === 2) {
+          return [
+            {
+              args: { tokenId: 1n, liquidity: 10n, amount0: 40n, amount1: 80n },
+              blockNumber: 200n,
+              transactionHash:
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
+            },
+            {
+              args: { tokenId: 1n, liquidity: 20n, amount0: 100n, amount1: 200n },
+              blockNumber: 300n,
+              transactionHash: TX_HASH,
+            },
+          ];
+        }
+        return [
+          {
+            args: { tokenId: 1n, amount0Collect: 45n, amount1Collect: 90n },
+            blockNumber: 200n,
+            transactionHash:
+              "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
+          },
+          {
+            args: { tokenId: 1n, amount0Collect: 105n, amount1Collect: 215n },
+            blockNumber: 300n,
+            transactionHash: TX_HASH,
+          },
+        ];
+      },
+    } as unknown as OpenClient;
+
+    const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 100n);
+
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect(result.event.collectedFees0).toBe(10n);
+      expect(result.event.collectedFees1).toBe(25n);
     }
   });
 });

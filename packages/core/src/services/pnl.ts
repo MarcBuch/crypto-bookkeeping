@@ -2,7 +2,6 @@ import { createClient } from "../chain/client.js";
 import {
   findOpenEvent,
   findCloseEvent,
-  getPoolPriceAtBlock,
   sumDecreaseLiquidityLogs,
   sumCollectLogsPublic,
 } from "../chain/events.js";
@@ -157,6 +156,7 @@ export async function getPnLView(
     let entryAmount0 = 0n;
     let entryAmount1 = 0n;
     let entryLiquidity = pos.liquidity;
+    let entrySqrtPriceX96: bigint | undefined;
 
     const posConfig = config.positions?.[pos.tokenId.toString()];
     if (!posConfig) {
@@ -167,6 +167,11 @@ export async function getPnLView(
     const storedPos = getPosition(pos.tokenId.toString());
     const hasStoredEntry = storedPos?.entry_amount0 && storedPos.entry_amount0 !== "0";
     const hasStoredLiquidity = storedPos?.entry_liquidity && storedPos.entry_liquidity !== "0";
+    let entryBlock = storedPos?.entry_block != null ? BigInt(storedPos.entry_block) : undefined;
+    let closeBlock = storedPos?.close_block ?? null;
+    if (storedPos?.entry_sqrt_price_x96) {
+      entrySqrtPriceX96 = BigInt(storedPos.entry_sqrt_price_x96);
+    }
 
     if (posConfig?.openTx) {
       // Config fast path: resolve entry amounts from known tx hash
@@ -194,9 +199,23 @@ export async function getPnLView(
         entryAmount0 = openEvent.amount0;
         entryAmount1 = openEvent.amount1;
         entryLiquidity = openEvent.liquidity;
+        entryBlock = openEvent.blockNumber;
+        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
+          openEvent.amount0,
+          openEvent.amount1,
+          openEvent.liquidity,
+          pos.tickLower,
+          pos.tickUpper,
+        );
 
-        // Persist entry data + open_tx if not already stored
-        if (!hasStoredEntry || !storedPos?.open_tx) {
+        // Persist entry data + open_tx if missing or partially populated.
+        if (
+          !hasStoredEntry ||
+          !hasStoredLiquidity ||
+          !storedPos?.open_tx ||
+          storedPos.entry_block == null ||
+          storedPos.entry_sqrt_price_x96 == null
+        ) {
           persistPositionEntry(pos, openEvent, { token0Info, token1Info });
         }
       } else {
@@ -242,6 +261,14 @@ export async function getPnLView(
         entryAmount0 = openEvent.amount0;
         entryAmount1 = openEvent.amount1;
         entryLiquidity = openEvent.liquidity;
+        entryBlock = openEvent.blockNumber;
+        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
+          openEvent.amount0,
+          openEvent.amount1,
+          openEvent.liquidity,
+          pos.tickLower,
+          pos.tickUpper,
+        );
 
         // Store entry data + open_tx for future use
         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
@@ -274,7 +301,6 @@ export async function getPnLView(
       // Account for partial withdrawals: any DecreaseLiquidity events since
       // the open block represent capital that was removed from the position.
       // Without this, reduced capital looks like a loss vs the original entry.
-      const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
       if (entryBlock !== undefined) {
         const [withdrawn, alreadyCollected] = await Promise.all([
           sumDecreaseLiquidityLogs(
@@ -344,24 +370,15 @@ export async function getPnLView(
         if (storedPos!.exit_sqrt_price_x96) {
           exitSqrtPriceX96 = BigInt(storedPos!.exit_sqrt_price_x96);
         } else if (storedPos!.close_block) {
-          const closePrice = await getPoolPriceAtBlock(
-            client,
-            poolAddress,
-            BigInt(storedPos!.close_block),
+          // Derive from fixed withdrawal amounts. Block-level slot0 can reflect
+          // later swaps/reopens in the same transaction, not the burn price.
+          exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
+            exitAmount0,
+            exitAmount1,
+            entryLiquidity,
+            pos.tickLower,
+            pos.tickUpper,
           );
-          if (closePrice) {
-            exitSqrtPriceX96 = closePrice.sqrtPriceX96;
-          } else {
-            // Historical pool state unavailable for old blocks; derive a stable price
-            // from the fixed on-chain exit amounts so P&L doesn't fluctuate with live price.
-            exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
-              exitAmount0,
-              exitAmount1,
-              entryLiquidity,
-              pos.tickLower,
-              pos.tickUpper,
-            );
-          }
           // Persist so future syncs skip getPoolPriceAtBlock entirely
           upsertPosition({
             token_id: pos.tokenId.toString(),
@@ -384,7 +401,6 @@ export async function getPnLView(
         }
       } else {
         // Slow path: find the close event on chain
-        const entryBlock = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
         const closeResult = await findCloseEvent(
           client,
           config.contracts.positionManager,
@@ -410,32 +426,23 @@ export async function getPnLView(
           exitAmount1 = closeEvent.amount1;
           feesCollected0 = closeEvent.collectedFees0;
           feesCollected1 = closeEvent.collectedFees1;
+          closeBlock = Number(closeEvent.blockNumber);
 
           // Use stored exit price if available (guards against RPC inconsistency for
           // historical blocks — once stored, the value never changes across syncs).
           // Only call getPoolPriceAtBlock when there is nothing stored yet.
-          if (storedPos?.exit_sqrt_price_x96) {
+          if (storedPos?.exit_sqrt_price_x96 && !posConfig?.closeTx) {
             exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
           } else {
-            // Get pool price at close block for accurate exit price
-            const closePrice = await getPoolPriceAtBlock(
-              client,
-              poolAddress,
-              closeEvent.blockNumber,
+            // Derive from the close event amounts. The pool's slot0 at the end
+            // of a rerange transaction can be after the next position opens.
+            exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
+              closeEvent.amount0,
+              closeEvent.amount1,
+              closeEvent.liquidity,
+              pos.tickLower,
+              pos.tickUpper,
             );
-            if (closePrice) {
-              exitSqrtPriceX96 = closePrice.sqrtPriceX96;
-            } else {
-              // Historical pool state unavailable for old blocks; derive a stable price
-              // from the fixed on-chain exit amounts so P&L doesn't fluctuate with live price.
-              exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
-                exitAmount0,
-                exitAmount1,
-                entryLiquidity,
-                pos.tickLower,
-                pos.tickUpper,
-              );
-            }
           }
 
           // Persist close data for future fast-path use
@@ -451,7 +458,7 @@ export async function getPnLView(
             tick_lower: pos.tickLower,
             tick_upper: pos.tickUpper,
             entry_sqrt_price_x96: storedPos?.entry_sqrt_price_x96 ?? null,
-            entry_block: storedPos?.entry_block ?? null,
+            entry_block: entryBlock != null ? Number(entryBlock) : null,
             entry_amount0: entryAmount0.toString(),
             entry_amount1: entryAmount1.toString(),
             entry_liquidity: entryLiquidity.toString(),
@@ -461,7 +468,7 @@ export async function getPnLView(
             exit_amount1: closeEvent.amount1.toString(),
             fees_collected0: closeEvent.collectedFees0.toString(),
             fees_collected1: closeEvent.collectedFees1.toString(),
-            close_block: Number(closeEvent.blockNumber),
+            close_block: closeBlock,
             exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
           });
         }
@@ -477,6 +484,7 @@ export async function getPnLView(
       exitAmount1Raw: exitAmount1,
       feesCollected0Raw: feesCollected0,
       feesCollected1Raw: feesCollected1,
+      entrySqrtPriceX96,
       exitSqrtPriceX96,
       tickLower: pos.tickLower,
       tickUpper: pos.tickUpper,
@@ -492,16 +500,16 @@ export async function getPnLView(
     let token0UsdPrice: number | null = null;
     let token1UsdPrice: number | null = null;
 
-    if ((storedPos?.close_block ?? null) !== null) {
+    if (closeBlock !== null) {
       // Closed position: use historical USD price at close time
-      if (storedPos!.close_usd_price0 != null && storedPos!.close_usd_price1 != null) {
+      if (storedPos?.close_usd_price0 != null && storedPos?.close_usd_price1 != null) {
         // Fast path: prices already persisted in DB
-        token0UsdPrice = storedPos!.close_usd_price0;
-        token1UsdPrice = storedPos!.close_usd_price1;
+        token0UsdPrice = storedPos.close_usd_price0;
+        token1UsdPrice = storedPos.close_usd_price1;
       } else {
         // Slow path: fetch historical price at close block timestamp
         try {
-          const block = await client.getBlock({ blockNumber: BigInt(storedPos!.close_block!) });
+          const block = await client.getBlock({ blockNumber: BigInt(closeBlock) });
           const isoTimestamp = new Date(Number(block.timestamp * 1000n)).toISOString();
           [token0UsdPrice, token1UsdPrice] = await Promise.all([
             getHistoricalPrice(config, t0sym, isoTimestamp, "usd"),
@@ -509,24 +517,39 @@ export async function getPnLView(
           ]);
           // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
           upsertPosition({
-            ...storedPos!,
+            token_id: pos.tokenId.toString(),
+            token0: pos.token0,
+            token1: pos.token1,
+            token0_symbol: token0Info.symbol,
+            token1_symbol: token1Info.symbol,
+            token0_decimals: token0Info.decimals,
+            token1_decimals: token1Info.decimals,
+            fee: pos.fee,
+            tick_lower: pos.tickLower,
+            tick_upper: pos.tickUpper,
+            entry_sqrt_price_x96:
+              entrySqrtPriceX96?.toString() ?? storedPos?.entry_sqrt_price_x96 ?? null,
+            entry_block: entryBlock != null ? Number(entryBlock) : (storedPos?.entry_block ?? null),
+            entry_amount0: entryAmount0.toString(),
+            entry_amount1: entryAmount1.toString(),
+            entry_liquidity: entryLiquidity.toString(),
+            close_block: closeBlock,
             close_usd_price0: token0UsdPrice,
             close_usd_price1: token1UsdPrice,
           });
         } catch {
           // Graceful degradation: leave prices as null
         }
-        // CoinGecko historical data can lag 1-2 days for recent closes. If both
-        // historical prices are still null, fall back to live prices so recently
-        // closed positions show USD fees instead of "USD unavailable".
-        if (token0UsdPrice === null && token1UsdPrice === null) {
+        // CoinGecko historical data can lag 1-2 days for recent closes. Fill any
+        // missing side from live prices so partial historical gaps don't hide USD fees.
+        if (token0UsdPrice === null || token1UsdPrice === null) {
           try {
             const usdPrices = await getUsdPrices(config, [
               { symbol: t0sym, address: pos.token0 },
               { symbol: t1sym, address: pos.token1 },
             ]);
-            token0UsdPrice = usdPrices[token0PriceKey] ?? null;
-            token1UsdPrice = usdPrices[token1PriceKey] ?? null;
+            token0UsdPrice ??= usdPrices[token0PriceKey] ?? null;
+            token1UsdPrice ??= usdPrices[token1PriceKey] ?? null;
           } catch {
             // Live fallback is also optional.
           }

@@ -18,6 +18,7 @@ let findOpenEventCallCount = 0;
 
 let mockFindCloseEvent: (..._args: unknown[]) => unknown = async () => ({ status: "not_found" });
 let findCloseEventCallCount = 0;
+let lastCalculateFullPnLParams: Record<string, unknown> | null = null;
 
 mock.module("../chain/events.js", () => ({
   findOpenEvent: (...args: unknown[]) => {
@@ -77,27 +78,30 @@ mock.module("../math/divergence-loss.js", () => ({
     feeGrowthInside1X128: 0n,
   }),
   calculateUnclaimedFees: () => ({ fees0: 0, fees1: 0 }),
-  calculateFullPnL: () => ({
-    entryPrice: 1.0,
-    exitPrice: 1.0,
-    entryAmount0: 1.0,
-    entryAmount1: 1.0,
-    exitAmount0: 1.0,
-    exitAmount1: 1.0,
-    feesCollected0: 0,
-    feesCollected1: 0,
-    feesValue: 0,
-    entryValue: 2.0,
-    exitValue: 2.0,
-    holdValue: 2.0,
-    absolutePnl: 0,
-    absolutePnlPercent: 0,
-    divergenceLoss: 0,
-    opportunityCost: 0,
-    netVsHodl: 0,
-    priceLower: 0.5,
-    priceUpper: 2.0,
-  }),
+  calculateFullPnL: (params: Record<string, unknown>) => {
+    lastCalculateFullPnLParams = params;
+    return {
+      entryPrice: 1.0,
+      exitPrice: params.exitSqrtPriceX96 === 79228162514264337593543950336n ? 1.0 : 2.0,
+      entryAmount0: 1.0,
+      entryAmount1: 1.0,
+      exitAmount0: 1.0,
+      exitAmount1: 1.0,
+      feesCollected0: 0,
+      feesCollected1: 0,
+      feesValue: 0,
+      entryValue: 2.0,
+      exitValue: 2.0,
+      holdValue: 2.0,
+      absolutePnl: 0,
+      absolutePnlPercent: 0,
+      divergenceLoss: 0,
+      opportunityCost: 0,
+      netVsHodl: 0,
+      priceLower: 0.5,
+      priceUpper: 2.0,
+    };
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -162,6 +166,7 @@ beforeEach(() => {
   mockFindOpenEvent = async () => ({ status: "not_found" });
   mockFindCloseEvent = async () => ({ status: "not_found" });
   mockGetAllPositions = async () => [fakePos];
+  lastCalculateFullPnLParams = null;
 });
 
 afterAll(() => {
@@ -203,6 +208,43 @@ describe("open_tx persistence and fast-path", () => {
 
     const stored = getPosition(TOKEN_ID);
     expect(stored).not.toBeNull();
+    expect(stored!.open_tx).toBe("0xCONFIG");
+  });
+
+  it("config fast-path repairs partial entry metadata when entry amounts already exist", async () => {
+    upsertPosition({
+      token_id: TOKEN_ID,
+      token0: fakePos.token0,
+      token1: fakePos.token1,
+      token0_symbol: "TOK",
+      token1_symbol: "TOK",
+      token0_decimals: 18,
+      token1_decimals: 18,
+      fee: fakePos.fee,
+      tick_lower: fakePos.tickLower,
+      tick_upper: fakePos.tickUpper,
+      entry_sqrt_price_x96: null,
+      entry_block: null,
+      entry_amount0: "1000",
+      entry_amount1: "2000",
+      entry_liquidity: "1000000",
+      open_tx: "0xCONFIG",
+    });
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xCONFIG" },
+    });
+
+    await getPnLView({
+      ...baseConfig,
+      positions: {
+        [TOKEN_ID]: { openTx: "0xCONFIG" },
+      },
+    });
+
+    const stored = getPosition(TOKEN_ID);
+    expect(stored!.entry_block).toBe(100);
+    expect(stored!.entry_sqrt_price_x96).toBe("79228162514264337593543950336");
     expect(stored!.open_tx).toBe("0xCONFIG");
   });
 
@@ -317,6 +359,81 @@ describe("close_tx persistence and exit cache bypass", () => {
     expect(stored!.fees_collected0).toBe("10");
     expect(stored!.fees_collected1).toBe("20");
     expect(stored!.close_block).toBe(5000);
+  });
+
+  it("closed config path preserves freshly persisted entry metadata when storing close data", async () => {
+    mockGetAllPositions = async () => [fakePosZeroLiquidity];
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xOPEN" },
+    });
+    mockFindCloseEvent = async () => ({
+      status: "found",
+      event: {
+        tokenId: 42n,
+        blockNumber: 5000n,
+        transactionHash: "0xCLOSE",
+        amount0: 100n,
+        amount1: 200n,
+        liquidity: 1000000n,
+        collectedFees0: 10n,
+        collectedFees1: 20n,
+      },
+    });
+
+    await getPnLView({
+      ...baseConfig,
+      positions: {
+        [TOKEN_ID]: { openTx: "0xOPEN", closeTx: "0xCLOSE" },
+      },
+    });
+
+    const stored = getPosition(TOKEN_ID);
+    expect(stored!.entry_block).toBe(100);
+    expect(stored!.entry_sqrt_price_x96).toBe("79228162514264337593543950336");
+    expect(stored!.close_tx).toBe("0xCLOSE");
+  });
+
+  it("derives close price from close event amounts when config closeTx is present", async () => {
+    mockGetAllPositions = async () => [fakePosZeroLiquidity];
+    upsertPosition({
+      ...fakePosWithEntry,
+      close_tx: "0xCACHED",
+      exit_amount0: "100",
+      exit_amount1: "200",
+      fees_collected0: "1",
+      fees_collected1: "2",
+      close_block: 5000,
+      exit_sqrt_price_x96: "79228162514264337593543950337",
+    });
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xCONFIG_OPEN" },
+    });
+    mockFindCloseEvent = async () => ({
+      status: "found",
+      event: {
+        tokenId: 42n,
+        blockNumber: 5000n,
+        transactionHash: "0xCONFIG_CLOSE",
+        amount0: 100n,
+        amount1: 200n,
+        liquidity: 1000000n,
+        collectedFees0: 10n,
+        collectedFees1: 20n,
+      },
+    });
+
+    const result = await getPnLView({
+      ...baseConfig,
+      positions: {
+        [TOKEN_ID]: { openTx: "0xCONFIG_OPEN", closeTx: "0xCONFIG_CLOSE" },
+      },
+    });
+
+    expect(findCloseEventCallCount).toBeGreaterThan(0);
+    expect(lastCalculateFullPnLParams?.exitSqrtPriceX96).toBe(79228162514264337593543950336n);
+    expect(result[0].exitPrice).toBe(1.0);
   });
 
   it("exit cache bypass skips findCloseEvent when close_tx and exit_amount0 are stored", async () => {

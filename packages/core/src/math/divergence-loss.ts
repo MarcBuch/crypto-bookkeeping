@@ -353,6 +353,7 @@ export function calculateFullPnL(params: {
   exitAmount1Raw: bigint;
   feesCollected0Raw: bigint;
   feesCollected1Raw: bigint;
+  entrySqrtPriceX96?: bigint;
   exitSqrtPriceX96: bigint;
   tickLower: number;
   tickUpper: number;
@@ -367,6 +368,7 @@ export function calculateFullPnL(params: {
     exitAmount1Raw,
     feesCollected0Raw,
     feesCollected1Raw,
+    entrySqrtPriceX96: providedEntrySqrtPriceX96,
     exitSqrtPriceX96,
     tickLower,
     tickUpper,
@@ -384,13 +386,9 @@ export function calculateFullPnL(params: {
   const feesCollected1 = Number(feesCollected1Raw) / 10 ** decimals1;
 
   // Derive entry price from deposit amounts
-  const entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-    entryAmount0Raw,
-    entryAmount1Raw,
-    liquidity,
-    tickLower,
-    tickUpper,
-  );
+  const entrySqrtPriceX96 =
+    providedEntrySqrtPriceX96 ??
+    deriveEntryPriceFromAmounts(entryAmount0Raw, entryAmount1Raw, liquidity, tickLower, tickUpper);
   const entryPrice = sqrtPriceX96ToPrice(entrySqrtPriceX96, decimals0, decimals1);
   const exitPrice = sqrtPriceX96ToPrice(exitSqrtPriceX96, decimals0, decimals1);
 

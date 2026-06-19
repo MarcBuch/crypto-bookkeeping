@@ -224,43 +224,31 @@ export async function findCloseEvent(
               ? receipt.blockNumber - window
               : 1n;
 
-        let collectTotals: { amount0: bigint; amount1: bigint };
-        if (hyperSyncClient) {
-          // SDK path: fetch all Collect logs for this tokenId in the range.
-          // HyperSync toBlock is exclusive, so add 1 to include the close block.
-          const paddedTokenId = padUint256(tokenId);
-          const collectLogs = await fetchLogsByAddressAndTopics(
-            hyperSyncClient,
-            positionManager,
-            [[COLLECT_TOPIC], [paddedTokenId]],
-            Number(collectFromBlock),
-            Number(receipt.blockNumber) + 1,
-          );
-          let amount0 = 0n;
-          let amount1 = 0n;
-          for (const cLog of collectLogs) {
-            const collectDecoded = decodeHyperSyncLog(cLog, eventAbi);
-            if (collectDecoded && collectDecoded.eventName === "Collect") {
-              const cArgs = collectDecoded.args as any;
-              amount0 += BigInt(cArgs.amount0Collect);
-              amount1 += BigInt(cArgs.amount1Collect);
-            }
-          }
-          collectTotals = { amount0, amount1 };
-        } else if (canScanLogs(client)) {
-          collectTotals = await sumCollectLogs(
-            client,
-            positionManager,
-            tokenId,
-            collectFromBlock,
-            receipt.blockNumber,
-          );
+        if (hyperSyncClient || canScanLogs(client)) {
+          const [decreaseTotals, collectTotals] = await Promise.all([
+            sumDecreaseLiquidityLogs(
+              client,
+              positionManager,
+              tokenId,
+              collectFromBlock,
+              receipt.blockNumber,
+              hyperSyncClient,
+            ),
+            sumCollectLogsPublic(
+              client,
+              positionManager,
+              tokenId,
+              collectFromBlock,
+              receipt.blockNumber,
+              hyperSyncClient,
+            ),
+          ]);
+          event = applyCollectTotals(event, collectTotals, decreaseTotals);
         } else {
           // No log-scanning capability available — use the Collect already
           // extracted from the close tx receipt (may miss prior fee claims).
           return { status: "found", event };
         }
-        event = applyCollectTotals(event, collectTotals);
       }
       if (event) return { status: "found", event };
       console.warn(`    DecreaseLiquidity not found in known tx, falling back to log scan...`);
@@ -337,6 +325,17 @@ export async function findCloseEvent(
         }
       }
 
+      const decreaseTotals = { amount0: decreaseAmount0, amount1: decreaseAmount1 };
+      for (const decLog of decreaseLogs) {
+        if (decLog === dLog || decLog.blockNumber > dLog.blockNumber) continue;
+        const priorDecreaseDecoded = decodeHyperSyncLog(decLog, eventAbi);
+        if (priorDecreaseDecoded && priorDecreaseDecoded.eventName === "DecreaseLiquidity") {
+          const priorDecreaseArgs = priorDecreaseDecoded.args as any;
+          decreaseTotals.amount0 += BigInt(priorDecreaseArgs.amount0);
+          decreaseTotals.amount1 += BigInt(priorDecreaseArgs.amount1);
+        }
+      }
+
       const collectTotals = { amount0: collectAmount0, amount1: collectAmount1 };
       return {
         status: "found",
@@ -352,6 +351,7 @@ export async function findCloseEvent(
             collectedFees1: 0n,
           },
           collectTotals,
+          decreaseTotals,
         ),
       };
     } else {
@@ -381,13 +381,16 @@ export async function findCloseEvent(
           const decreaseAmount1 = BigInt(dArgs.amount1);
 
           console.log(`    Found close event at block ${dLog.blockNumber}`);
-          const collectTotals = await sumCollectLogs(
-            client,
-            positionManager,
-            tokenId,
-            startBlock,
-            dLog.blockNumber!,
-          );
+          const [decreaseTotals, collectTotals] = await Promise.all([
+            sumDecreaseLiquidityLogs(
+              client,
+              positionManager,
+              tokenId,
+              startBlock,
+              dLog.blockNumber!,
+            ),
+            sumCollectLogs(client, positionManager, tokenId, startBlock, dLog.blockNumber!),
+          ]);
           return {
             status: "found",
             event: applyCollectTotals(
@@ -402,6 +405,7 @@ export async function findCloseEvent(
                 collectedFees1: 0n,
               },
               collectTotals,
+              decreaseTotals,
             ),
           };
         }
@@ -582,13 +586,21 @@ async function sumCollectLogs(
 function applyCollectTotals(
   event: PositionCloseEvent,
   collectTotals: { amount0: bigint; amount1: bigint },
+  principalTotals: { amount0: bigint; amount1: bigint } = {
+    amount0: event.amount0,
+    amount1: event.amount1,
+  },
 ): PositionCloseEvent {
   return {
     ...event,
     collectedFees0:
-      collectTotals.amount0 > event.amount0 ? collectTotals.amount0 - event.amount0 : 0n,
+      collectTotals.amount0 > principalTotals.amount0
+        ? collectTotals.amount0 - principalTotals.amount0
+        : 0n,
     collectedFees1:
-      collectTotals.amount1 > event.amount1 ? collectTotals.amount1 - event.amount1 : 0n,
+      collectTotals.amount1 > principalTotals.amount1
+        ? collectTotals.amount1 - principalTotals.amount1
+        : 0n,
   };
 }
 

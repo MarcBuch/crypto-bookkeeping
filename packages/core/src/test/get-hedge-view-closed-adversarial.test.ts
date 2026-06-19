@@ -83,7 +83,7 @@ describe("getHedgeView() — closed position path", () => {
     it("szi=0, no hedge_snapshots in DB, userFillsByTime returns [] → returns HedgeView with status: closed, realizedPnl: null, closedAt: null", async () => {
       const config = makeConfig({
         positions: {
-          "123": {
+          "456": {
             openTx: "0xOPEN",
             hedge: { coin: "HYPE" },
           },

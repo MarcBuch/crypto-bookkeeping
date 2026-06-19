@@ -850,24 +850,48 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
       },
     } as unknown as CloseClient;
 
-    // HyperSync: returns BOTH the prior Collect and the close-tx Collect
+    // HyperSync: first call returns decreases, second returns both Collect logs.
+    let sdkCallCount = 0;
     const hyperSyncClient = {
-      get: async (_query: unknown) => ({
-        data: {
-          logs: [
-            mockCollectLog(tokenId, WALLET, priorCollect0, priorCollect1, priorBlock, 0),
-            mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
-          ],
-          blocks: [
-            { number: priorBlock, timestamp: 1700000000 },
-            { number: closeBlock, timestamp: 1700000100 },
-          ],
-          transactions: [],
-          traces: [],
-        },
-        nextBlock: toBlock + 1,
-        archiveHeight: toBlock + 1,
-      }),
+      get: async (_query: unknown) => {
+        sdkCallCount++;
+        if (sdkCallCount === 1) {
+          return {
+            data: {
+              logs: [
+                mockDecreaseLiquidityLog(
+                  tokenId,
+                  liquidity,
+                  decreaseAmount0,
+                  decreaseAmount1,
+                  closeBlock,
+                ),
+              ],
+              blocks: [{ number: closeBlock, timestamp: 1700000100 }],
+              transactions: [],
+              traces: [],
+            },
+            nextBlock: toBlock + 1,
+            archiveHeight: toBlock + 1,
+          };
+        }
+        return {
+          data: {
+            logs: [
+              mockCollectLog(tokenId, WALLET, priorCollect0, priorCollect1, priorBlock, 0),
+              mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+            ],
+            blocks: [
+              { number: priorBlock, timestamp: 1700000000 },
+              { number: closeBlock, timestamp: 1700000100 },
+            ],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+        };
+      },
     } as unknown as HypersyncClient;
 
     const result = await findCloseEvent(
@@ -923,18 +947,42 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
       },
     } as unknown as CloseClient;
 
-    // HyperSync: returns only the close-tx Collect (no prior claims)
+    // HyperSync: first call returns decreases, second returns only the close-tx Collect.
+    let sdkCallCount = 0;
     const hyperSyncClient = {
-      get: async (_query: unknown) => ({
-        data: {
-          logs: [mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1)],
-          blocks: [{ number: closeBlock, timestamp: 1700000800 }],
-          transactions: [],
-          traces: [],
-        },
-        nextBlock: toBlock + 1,
-        archiveHeight: toBlock + 1,
-      }),
+      get: async (_query: unknown) => {
+        sdkCallCount++;
+        if (sdkCallCount === 1) {
+          return {
+            data: {
+              logs: [
+                mockDecreaseLiquidityLog(
+                  tokenId,
+                  liquidity,
+                  decreaseAmount0,
+                  decreaseAmount1,
+                  closeBlock,
+                ),
+              ],
+              blocks: [{ number: closeBlock, timestamp: 1700000800 }],
+              transactions: [],
+              traces: [],
+            },
+            nextBlock: toBlock + 1,
+            archiveHeight: toBlock + 1,
+          };
+        }
+        return {
+          data: {
+            logs: [mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1)],
+            blocks: [{ number: closeBlock, timestamp: 1700000800 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+        };
+      },
     } as unknown as HypersyncClient;
 
     const result = await findCloseEvent(

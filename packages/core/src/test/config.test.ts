@@ -4,7 +4,7 @@ import { join } from "path";
 
 import { loadConfig, resolveConfigPath } from "../config.js";
 
-const TMP = "/var/folders/bv/cfnpmk5j1l105w6mjddhgbfw0000gp/T/opencode/lp-tracker-config-tests";
+const TMP = join(import.meta.dir, "../../.test-tmp/lp-tracker-config-tests");
 
 function tmpFile(name: string): string {
   return join(TMP, name);

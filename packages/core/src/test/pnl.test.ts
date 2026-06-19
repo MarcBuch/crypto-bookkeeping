@@ -15,6 +15,7 @@ import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
 
 let mockGetUsdPrices: (..._args: unknown[]) => unknown = async () => ({});
 let mockGetHistoricalPrice: (..._args: unknown[]) => unknown = async () => null;
+let mockFindCloseEvent: (..._args: unknown[]) => unknown = async () => ({ status: "not_found" });
 
 mock.module("../services/pricing.js", () => ({
   getUsdPrices: (...args: unknown[]) => mockGetUsdPrices(...args),
@@ -58,7 +59,7 @@ mock.module("../chain/pools.js", () => ({
 
 mock.module("../chain/events.js", () => ({
   findOpenEvent: async () => ({ status: "not_found" }),
-  findCloseEvent: async () => ({ status: "not_found" }),
+  findCloseEvent: (...args: unknown[]) => mockFindCloseEvent(...args),
   getPoolPriceAtBlock: async () => null,
 }));
 
@@ -192,6 +193,7 @@ useTestDb();
 beforeEach(() => {
   mockGetUsdPrices = async () => ({});
   mockGetHistoricalPrice = async () => null;
+  mockFindCloseEvent = async () => ({ status: "not_found" });
   mockGetBlock = async () => ({ timestamp: 1700000000n });
 });
 
@@ -556,6 +558,75 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
     expect(result.length).toBe(1);
     expect(result[0].token0UsdPrice).toBeNull();
     expect(result[0].token1UsdPrice).toBe(3.14);
+  });
+
+  it("fills missing historical close price from live prices", async () => {
+    upsertPosition(storedWithClose);
+
+    let liveCallCount = 0;
+    mockGetBlock = async () => ({ timestamp: 1700000000n });
+    mockGetHistoricalPrice = async (_config, symbol) => {
+      if (symbol === "TKN0") return 88.0;
+      if (symbol === "TKN1") return null;
+      return null;
+    };
+    mockGetUsdPrices = async () => {
+      liveCallCount++;
+      return {
+        [TOKEN0_ADDR.toLowerCase()]: 999.0,
+        [TOKEN1_ADDR.toLowerCase()]: 1.01,
+      };
+    };
+
+    const result = await getPnLView(baseConfig, undefined, [fakeClosedPos]);
+
+    expect(result.length).toBe(1);
+    expect(liveCallCount).toBe(1);
+    expect(result[0].token0UsdPrice).toBe(88.0);
+    expect(result[0].token1UsdPrice).toBe(1.01);
+  });
+
+  it("uses freshly discovered close block for USD prices in the same sync", async () => {
+    upsertPosition(storedBase);
+
+    mockFindCloseEvent = async () => ({
+      status: "found",
+      event: {
+        tokenId: 42n,
+        blockNumber: 5000n,
+        transactionHash: "0xCLOSE",
+        amount0: 100n,
+        amount1: 200n,
+        liquidity: 1000000n,
+        collectedFees0: 10n,
+        collectedFees1: 20n,
+      },
+    });
+
+    mockGetBlock = async (args: { blockNumber: bigint }) => {
+      expect(args.blockNumber).toBe(5000n);
+      return { timestamp: 1700000000n };
+    };
+    mockGetHistoricalPrice = async (_config, symbol) => {
+      if (symbol === "TKN0") return 77.0;
+      if (symbol === "TKN1") return 1.02;
+      return null;
+    };
+
+    const result = await getPnLView(
+      {
+        ...baseConfig,
+        positions: {
+          [TOKEN_ID]: { closeTx: "0xCLOSE" },
+        },
+      },
+      undefined,
+      [fakeClosedPos],
+    );
+
+    expect(result.length).toBe(1);
+    expect(result[0].token0UsdPrice).toBe(77.0);
+    expect(result[0].token1UsdPrice).toBe(1.02);
   });
 
   it("upsertPosition throws on persist: fetched prices still returned, error swallowed by catch", async () => {

@@ -168,6 +168,7 @@ export async function getPnLView(
     const hasStoredEntry = storedPos?.entry_amount0 && storedPos.entry_amount0 !== "0";
     const hasStoredLiquidity = storedPos?.entry_liquidity && storedPos.entry_liquidity !== "0";
     let entryBlock = storedPos?.entry_block != null ? BigInt(storedPos.entry_block) : undefined;
+    let closeBlock = storedPos?.close_block ?? null;
     if (storedPos?.entry_sqrt_price_x96) {
       entrySqrtPriceX96 = BigInt(storedPos.entry_sqrt_price_x96);
     }
@@ -425,6 +426,7 @@ export async function getPnLView(
           exitAmount1 = closeEvent.amount1;
           feesCollected0 = closeEvent.collectedFees0;
           feesCollected1 = closeEvent.collectedFees1;
+          closeBlock = Number(closeEvent.blockNumber);
 
           // Use stored exit price if available (guards against RPC inconsistency for
           // historical blocks — once stored, the value never changes across syncs).
@@ -466,7 +468,7 @@ export async function getPnLView(
             exit_amount1: closeEvent.amount1.toString(),
             fees_collected0: closeEvent.collectedFees0.toString(),
             fees_collected1: closeEvent.collectedFees1.toString(),
-            close_block: Number(closeEvent.blockNumber),
+            close_block: closeBlock,
             exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
           });
         }
@@ -498,16 +500,16 @@ export async function getPnLView(
     let token0UsdPrice: number | null = null;
     let token1UsdPrice: number | null = null;
 
-    if ((storedPos?.close_block ?? null) !== null) {
+    if (closeBlock !== null) {
       // Closed position: use historical USD price at close time
-      if (storedPos!.close_usd_price0 != null && storedPos!.close_usd_price1 != null) {
+      if (storedPos?.close_usd_price0 != null && storedPos?.close_usd_price1 != null) {
         // Fast path: prices already persisted in DB
-        token0UsdPrice = storedPos!.close_usd_price0;
-        token1UsdPrice = storedPos!.close_usd_price1;
+        token0UsdPrice = storedPos.close_usd_price0;
+        token1UsdPrice = storedPos.close_usd_price1;
       } else {
         // Slow path: fetch historical price at close block timestamp
         try {
-          const block = await client.getBlock({ blockNumber: BigInt(storedPos!.close_block!) });
+          const block = await client.getBlock({ blockNumber: BigInt(closeBlock) });
           const isoTimestamp = new Date(Number(block.timestamp * 1000n)).toISOString();
           [token0UsdPrice, token1UsdPrice] = await Promise.all([
             getHistoricalPrice(config, t0sym, isoTimestamp, "usd"),
@@ -515,24 +517,38 @@ export async function getPnLView(
           ]);
           // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
           upsertPosition({
-            ...storedPos!,
+            token_id: pos.tokenId.toString(),
+            token0: pos.token0,
+            token1: pos.token1,
+            token0_symbol: token0Info.symbol,
+            token1_symbol: token1Info.symbol,
+            token0_decimals: token0Info.decimals,
+            token1_decimals: token1Info.decimals,
+            fee: pos.fee,
+            tick_lower: pos.tickLower,
+            tick_upper: pos.tickUpper,
+            entry_sqrt_price_x96: entrySqrtPriceX96?.toString() ?? storedPos?.entry_sqrt_price_x96 ?? null,
+            entry_block: entryBlock != null ? Number(entryBlock) : (storedPos?.entry_block ?? null),
+            entry_amount0: entryAmount0.toString(),
+            entry_amount1: entryAmount1.toString(),
+            entry_liquidity: entryLiquidity.toString(),
+            close_block: closeBlock,
             close_usd_price0: token0UsdPrice,
             close_usd_price1: token1UsdPrice,
           });
         } catch {
           // Graceful degradation: leave prices as null
         }
-        // CoinGecko historical data can lag 1-2 days for recent closes. If both
-        // historical prices are still null, fall back to live prices so recently
-        // closed positions show USD fees instead of "USD unavailable".
-        if (token0UsdPrice === null && token1UsdPrice === null) {
+        // CoinGecko historical data can lag 1-2 days for recent closes. Fill any
+        // missing side from live prices so partial historical gaps don't hide USD fees.
+        if (token0UsdPrice === null || token1UsdPrice === null) {
           try {
             const usdPrices = await getUsdPrices(config, [
               { symbol: t0sym, address: pos.token0 },
               { symbol: t1sym, address: pos.token1 },
             ]);
-            token0UsdPrice = usdPrices[token0PriceKey] ?? null;
-            token1UsdPrice = usdPrices[token1PriceKey] ?? null;
+            token0UsdPrice ??= usdPrices[token0PriceKey] ?? null;
+            token1UsdPrice ??= usdPrices[token1PriceKey] ?? null;
           } catch {
             // Live fallback is also optional.
           }

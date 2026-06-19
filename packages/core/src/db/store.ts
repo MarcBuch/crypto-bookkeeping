@@ -374,6 +374,9 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
         incoming_asset = excluded.incoming_asset,
         outgoing_quantity = excluded.outgoing_quantity,
         outgoing_asset = excluded.outgoing_asset,
+        cost_eur = COALESCE(cost_eur, excluded.cost_eur),
+        proceeds_eur = COALESCE(proceeds_eur, excluded.proceeds_eur),
+        gain_eur = COALESCE(gain_eur, excluded.gain_eur),
         synced_at = excluded.synced_at,
         updated_at = datetime('now')`,
     [

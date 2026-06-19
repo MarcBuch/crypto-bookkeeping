@@ -17,6 +17,7 @@ import {
   enrichTaxTransactionsEurValues,
   syncTaxTransactions,
 } from "../services/tax-transactions.js";
+import { clearCachesForTesting } from "../services/pricing.js";
 import { useTestDb } from "./helpers/db.js";
 
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
@@ -819,6 +820,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     globalThis.fetch = originalFetch;
+    clearCachesForTesting();
   });
 
   it("null time_stamp → EUR fields stay null", async () => {
@@ -1068,12 +1070,28 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   });
 
   it("USDC token transfer out → correct decimal handling", async () => {
+    // USDC is a stablecoin — EUR price is derived from the ECB rate (1 / ecbRate),
+    // not from CoinGecko. Mock ECB to return 1.0 (USD/EUR) → 1 USDC = 1.0 EUR.
     globalThis.fetch = (async (url: string | URL | Request) => {
       const urlStr = String(url);
-      if (urlStr.includes("coingecko.com") && urlStr.includes("usd-coin")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 0.92 } } }), {
-          status: 200,
-        });
+      if (urlStr.includes("ecb.europa.eu")) {
+        return new Response(
+          JSON.stringify({
+            dataSets: [
+              {
+                series: {
+                  "0:0:0:0:0": { observations: { "0": [1.0, 0, 0, null, null] } },
+                },
+              },
+            ],
+            structure: {
+              dimensions: {
+                observation: [{ values: [{ id: "2024-01-15" }] }],
+              },
+            },
+          }),
+          { status: 200 },
+        );
       }
       return new Response(JSON.stringify({}), { status: 404 });
     }) as unknown as typeof globalThis.fetch;
@@ -1105,13 +1123,15 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
       source: "eurtest5",
     });
 
+    // 50000000 raw / 10^6 decimals = 50 USDC
+    // ECB rate = 1.0 USD/EUR → 1 USDC = 1.0 EUR → cost_eur = 50 * (1/1.0) = 50
     const row = listTaxTransactions().find((r) => r.hash === "0xusdcout1");
     expect(row).toBeDefined();
     expect(row!.outgoing_asset).toBe("USDC");
     expect(row!.incoming_asset).toBeNull();
-    expect(row!.cost_eur).toBe("46");
+    expect(row!.cost_eur).toBe("50");
     expect(row!.proceeds_eur).toBeNull();
-    expect(row!.gain_eur).toBe("-46");
+    expect(row!.gain_eur).toBe("-50");
   });
 });
 

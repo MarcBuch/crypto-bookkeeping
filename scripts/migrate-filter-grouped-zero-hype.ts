@@ -2,6 +2,10 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function resolveDbPath(): string {
   if (process.env.LP_TRACKER_DATA_DIR) {
     return join(resolve(process.env.LP_TRACKER_DATA_DIR), "lp-tracker.db");
@@ -24,6 +28,15 @@ if (!existsSync(dbPath)) {
 
 const db = new Database(dbPath);
 
+function getCount(query: string): number {
+  const row = db.query(query).get();
+  if (!isRecord(row) || typeof row.count !== "number") {
+    throw new Error("Expected count query to return a numeric count");
+  }
+
+  return row.count;
+}
+
 const whereClause = `
   source = 'hypersync'
   AND transaction_type = 'txlist'
@@ -39,9 +52,9 @@ const whereClause = `
   )
 `;
 
-const wrappersBefore = db
-  .query(`SELECT COUNT(*) as count FROM tax_transactions WHERE ${whereClause}`)
-  .get() as { count: number };
+const wrappersBefore = getCount(
+  `SELECT COUNT(*) as count FROM tax_transactions WHERE ${whereClause}`,
+);
 
 const mergeTargetWhereClause = `
   source = 'hypersync'
@@ -64,14 +77,14 @@ const mergeTargetWhereClause = `
   AND (fee IS NULL OR gas_used IS NULL OR gas_price IS NULL)
 `;
 
-const mergeTargetsBefore = db
-  .query(`SELECT COUNT(*) as count FROM tax_transactions WHERE ${mergeTargetWhereClause}`)
-  .get() as { count: number };
+const mergeTargetsBefore = getCount(
+  `SELECT COUNT(*) as count FROM tax_transactions WHERE ${mergeTargetWhereClause}`,
+);
 
 if (dryRun) {
   console.log(`[dry-run] DB: ${dbPath}`);
-  console.log(`[dry-run] Wrapper rows matching cleanup criteria: ${wrappersBefore.count}`);
-  console.log(`[dry-run] Token rows that would receive gas fields: ${mergeTargetsBefore.count}`);
+  console.log(`[dry-run] Wrapper rows matching cleanup criteria: ${wrappersBefore}`);
+  console.log(`[dry-run] Token rows that would receive gas fields: ${mergeTargetsBefore}`);
   db.close(false);
   process.exit(0);
 }
@@ -122,14 +135,14 @@ try {
   const result = db.run(`DELETE FROM tax_transactions WHERE ${whereClause}`);
   db.exec("COMMIT");
 
-  const wrappersAfter = db
-    .query(`SELECT COUNT(*) as count FROM tax_transactions WHERE ${whereClause}`)
-    .get() as { count: number };
+  const wrappersAfter = getCount(
+    `SELECT COUNT(*) as count FROM tax_transactions WHERE ${whereClause}`,
+  );
 
   console.log(`DB: ${dbPath}`);
   console.log(`Token rows updated with merged gas fields: ${mergeResult.changes}`);
   console.log(`Rows deleted: ${result.changes}`);
-  console.log(`Wrapper rows still matching criteria: ${wrappersAfter.count}`);
+  console.log(`Wrapper rows still matching criteria: ${wrappersAfter}`);
 } catch (error) {
   db.exec("ROLLBACK");
   throw error;

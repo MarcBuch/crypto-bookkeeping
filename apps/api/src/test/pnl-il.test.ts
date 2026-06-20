@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, mock } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
+import type { Config } from "../config.js";
+
 // --- Minimal fake config ---
 const fakeConfig = {
   rpc: "http://test-rpc",
@@ -13,7 +15,7 @@ const fakeConfig = {
     quoter: "0x0000000000000000000000000000000000000003",
     swapRouter: "0x0000000000000000000000000000000000000004",
   },
-};
+} satisfies Config;
 
 // --- Error classes used in mocks ---
 class MockNotFoundError extends Error {
@@ -156,7 +158,7 @@ let server: FastifyInstance;
 
 beforeAll(async () => {
   const { buildServer } = await import("../index.js");
-  server = await buildServer(fakeConfig as Parameters<typeof buildServer>[0]);
+  server = await buildServer(fakeConfig);
   await server.ready();
 });
 

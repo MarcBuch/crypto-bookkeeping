@@ -135,6 +135,35 @@ const manualTaxTransactionIntegerFields = [
 const manualTaxTransactionPatchStringFields = manualTaxTransactionStringFields;
 const maxTaxTransactionCommentLength = 1000;
 
+type ManualTaxTransactionStringField = (typeof manualTaxTransactionStringFields)[number];
+type ManualTaxTransactionIntegerField = (typeof manualTaxTransactionIntegerFields)[number];
+type NullableStringFieldTarget = Partial<Record<ManualTaxTransactionStringField, string | null>>;
+type NullableIntegerFieldTarget = Partial<Record<ManualTaxTransactionIntegerField, number | null>>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assignNullableStringField(
+  target: NullableStringFieldTarget,
+  raw: Record<string, unknown>,
+  field: ManualTaxTransactionStringField,
+): void {
+  if (Object.hasOwn(raw, field)) {
+    target[field] = parseNullableString(field, raw[field]);
+  }
+}
+
+function assignNullableIntegerField(
+  target: NullableIntegerFieldTarget,
+  raw: Record<string, unknown>,
+  field: ManualTaxTransactionIntegerField,
+): void {
+  if (Object.hasOwn(raw, field)) {
+    target[field] = parseNullableInteger(field, raw[field]);
+  }
+}
+
 function assertValidTaxTransactionLabel(
   label: unknown,
 ): asserts label is "Trade" | "Transfer" | "Approval" | null {
@@ -182,7 +211,7 @@ function parseTaxTransactionComment(comment: unknown): string | null {
 }
 
 function parseTaxTransactionUpdateBody(body: unknown): TaxTransactionUpdate {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+  if (!isRecord(body)) {
     throw new ValidationError("request body must be an object");
   }
 
@@ -193,21 +222,17 @@ function parseTaxTransactionUpdateBody(body: unknown): TaxTransactionUpdate {
     }
   }
 
-  const raw = body as Record<string, unknown>;
+  const raw = body;
   if (Object.hasOwn(raw, "hash")) {
     update.hash = parseString("hash", raw.hash);
   }
 
   for (const field of manualTaxTransactionPatchStringFields) {
-    if (Object.hasOwn(raw, field)) {
-      update[field] = parseNullableString(field, raw[field]) as never;
-    }
+    assignNullableStringField(update, raw, field);
   }
 
   for (const field of manualTaxTransactionIntegerFields) {
-    if (Object.hasOwn(raw, field)) {
-      update[field] = parseNullableInteger(field, raw[field]);
-    }
+    assignNullableIntegerField(update, raw, field);
   }
 
   if (Object.hasOwn(raw, "label")) {
@@ -227,7 +252,7 @@ function parseTaxTransactionUpdateBody(body: unknown): TaxTransactionUpdate {
 }
 
 function parseManualTaxTransactionBody(body: unknown): ManualTaxTransactionInput {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+  if (!isRecord(body)) {
     throw new ValidationError("request body must be an object");
   }
 
@@ -237,7 +262,7 @@ function parseManualTaxTransactionBody(body: unknown): ManualTaxTransactionInput
     }
   }
 
-  const raw = body as Record<string, unknown>;
+  const raw = body;
   const transaction: ManualTaxTransactionInput = {};
 
   if (Object.hasOwn(raw, "id")) {
@@ -249,15 +274,11 @@ function parseManualTaxTransactionBody(body: unknown): ManualTaxTransactionInput
   }
 
   for (const field of manualTaxTransactionStringFields) {
-    if (Object.hasOwn(raw, field)) {
-      transaction[field] = parseNullableString(field, raw[field]);
-    }
+    assignNullableStringField(transaction, raw, field);
   }
 
   for (const field of manualTaxTransactionIntegerFields) {
-    if (Object.hasOwn(raw, field)) {
-      transaction[field] = parseNullableInteger(field, raw[field]);
-    }
+    assignNullableIntegerField(transaction, raw, field);
   }
 
   if (Object.hasOwn(raw, "label")) {

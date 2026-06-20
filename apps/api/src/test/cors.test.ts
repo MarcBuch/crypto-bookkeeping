@@ -4,17 +4,17 @@ import type { FastifyInstance } from "fastify";
 
 import type { Config } from "../config.js";
 
-const fakeConfig: Config = {
+const fakeConfig = {
   rpc: "http://test-rpc",
   chainId: 999,
-  wallet: "0xdeadbeef" as `0x${string}`,
+  wallet: "0xdeadbeef",
   contracts: {
-    factory: "0x0000000000000000000000000000000000000001" as `0x${string}`,
-    positionManager: "0x0000000000000000000000000000000000000002" as `0x${string}`,
-    quoter: "0x0000000000000000000000000000000000000003" as `0x${string}`,
-    swapRouter: "0x0000000000000000000000000000000000000004" as `0x${string}`,
+    factory: "0x0000000000000000000000000000000000000001",
+    positionManager: "0x0000000000000000000000000000000000000002",
+    quoter: "0x0000000000000000000000000000000000000003",
+    swapRouter: "0x0000000000000000000000000000000000000004",
   },
-};
+} satisfies Config;
 
 await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
@@ -181,9 +181,12 @@ describe("CORS", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
-      expect(res.json() as unknown).toEqual({
-        error: "tokenId must be a numeric string",
-      });
+      const body = res.json();
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        throw new Error("Expected JSON object response");
+      }
+
+      expect(body.error).toBe("tokenId must be a numeric string");
     });
   });
 });

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, mock } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
+import type { Config } from "../config.js";
+
 // --- Minimal fake config (no real config.json needed) ---
 const fakeConfig = {
   rpc: "http://test-rpc",
@@ -25,7 +27,7 @@ const fakeConfig = {
       // No hedge config for this position
     },
   },
-};
+} satisfies Config;
 
 // --- Fake HedgeView response ---
 const fakeHedgeView = {
@@ -92,7 +94,7 @@ let server: FastifyInstance;
 
 beforeAll(async () => {
   const { buildServer } = await import("../index.js");
-  server = await buildServer(fakeConfig as Parameters<typeof buildServer>[0]);
+  server = await buildServer(fakeConfig);
   await server.ready();
 });
 
@@ -417,11 +419,11 @@ describe("GET /positions/:tokenId/hedge", () => {
             hedge: { coin: "HYPE" },
           },
         },
-      };
+      } satisfies Config;
 
       // Rebuild server with extended config
       const { buildServer } = await import("../index.js");
-      const testServer = await buildServer(extendedConfig as Parameters<typeof buildServer>[0]);
+      const testServer = await buildServer(extendedConfig);
       await testServer.ready();
 
       mockGetHedgeView = async () => ({
@@ -890,11 +892,11 @@ describe("GET /positions/:tokenId/hedge/events", () => {
             hedge: { coin: "HYPE" },
           },
         },
-      };
+      } satisfies Config;
 
       // Rebuild server with extended config
       const { buildServer } = await import("../index.js");
-      const testServer = await buildServer(extendedConfig as Parameters<typeof buildServer>[0]);
+      const testServer = await buildServer(extendedConfig);
       await testServer.ready();
 
       mockGetHedgeEvents = async () => [];

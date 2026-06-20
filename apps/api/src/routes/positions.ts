@@ -165,7 +165,9 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const positions = listCachedPositionViews();
-      const position = positions.find((p) => (p as { tokenId: string }).tokenId === tokenId);
+      const position = positions.find(
+        (view) => typeof view.tokenId === "string" && view.tokenId === tokenId,
+      );
 
       if (!position) {
         return reply.status(404).send({ error: "Position not found", tokenId });

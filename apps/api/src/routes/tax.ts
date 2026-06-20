@@ -304,7 +304,7 @@ async function handleTaxTransactionUpdate(
 
   let transaction;
   try {
-    transaction = await updateTaxTransaction(id, update);
+    transaction = await Promise.resolve(updateTaxTransaction(id, update));
   } catch (err) {
     if (
       err instanceof Error &&

@@ -59,9 +59,7 @@ export async function hedgeRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       try {
-        // getHedgeEvents is synchronous in production, but await is kept to
-        // handle async mocks in tests and to allow future async migration.
-        const events = await getHedgeEvents(tokenId);
+        const events = await Promise.resolve(getHedgeEvents(tokenId));
         return reply.status(200).send({ events, tokenId });
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);

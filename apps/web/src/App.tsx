@@ -467,6 +467,8 @@ function HedgePanel({
     hedgePnlUsd: hedgePnl,
     combinedPnlUsd: combinedPnl,
   } = buildNetHedgePnL(pnl, hedge);
+  const summaryLpPnl = lpAbsPnl ?? 0;
+  const summaryHedgePnl = hedgePnl ?? 0;
   const combinedTone =
     combinedPnl == null
       ? "text-neutral-950"
@@ -512,7 +514,7 @@ function HedgePanel({
               <span className="mr-1 font-medium text-neutral-400">net</span>
               <span className={combinedTone}>{formatUsd(combinedPnl)}</span>
               <span className="ml-1 hidden font-normal text-neutral-400 sm:inline">
-                (LP {formatUsd(lpAbsPnl!)} · hedge {formatUsd(hedgePnl)})
+                (LP {formatUsd(summaryLpPnl)} · hedge {formatUsd(summaryHedgePnl)})
               </span>
             </span>
           )}
@@ -585,8 +587,8 @@ function HedgePanel({
                 />
                 <HedgeStat
                   label="Hedge P&L"
-                  value={formatUsd(hedgePnl)}
-                  valueClassName={hedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
+                  value={formatUsd(summaryHedgePnl)}
+                  valueClassName={summaryHedgePnl >= 0 ? "text-emerald-700" : "text-rose-600"}
                   detail="unrealized + funding"
                 />
               </>

@@ -39,6 +39,16 @@ function getRequestUrl(url: string | URL | Request): string {
   return url.url;
 }
 
+async function captureError<T>(promise: Promise<T>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+
+  throw new Error("Expected promise to reject");
+}
+
 const STUB_CONTRACTS = {
   factory: "0x0000000000000000000000000000000000000001" as `0x${string}`,
   positionManager: "0x0000000000000000000000000000000000000002" as `0x${string}`,
@@ -345,7 +355,7 @@ describe("tax transaction explorer sync", () => {
   });
 
   it("throws a clear error when hyperSyncApiToken is missing or empty", async () => {
-    await expect(
+    let error = await captureError(
       syncTaxTransactions(
         {
           wallet: WALLET,
@@ -356,9 +366,11 @@ describe("tax transaction explorer sync", () => {
         },
         { fetcher: noOpFetcher },
       ),
-    ).rejects.toThrow("tax.hyperSyncApiToken");
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("tax.hyperSyncApiToken");
 
-    await expect(
+    error = await captureError(
       syncTaxTransactions(
         {
           wallet: WALLET,
@@ -369,9 +381,11 @@ describe("tax transaction explorer sync", () => {
         },
         { fetcher: noOpFetcher },
       ),
-    ).rejects.toThrow("tax.hyperSyncApiToken");
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("tax.hyperSyncApiToken");
 
-    await expect(
+    error = await captureError(
       syncTaxTransactions(
         {
           wallet: WALLET,
@@ -382,13 +396,15 @@ describe("tax transaction explorer sync", () => {
         },
         { fetcher: noOpFetcher },
       ),
-    ).rejects.toThrow("tax.hyperSyncApiToken");
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("tax.hyperSyncApiToken");
   });
 
   it("fails before fetch when an explicit Etherscan v2 explorer requires a real API key", async () => {
     let called = false;
 
-    await expect(
+    const error = await captureError(
       syncTaxTransactions(
         {
           wallet: WALLET,
@@ -413,7 +429,9 @@ describe("tax transaction explorer sync", () => {
           },
         },
       ),
-    ).rejects.toThrow(
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
       "Tax transaction sync requires tax.explorerApiKey when using the Etherscan v2 explorer API",
     );
     expect(called).toBe(false);
@@ -566,13 +584,15 @@ describe("tax transaction explorer sync", () => {
       },
     } as unknown as HypersyncClient;
 
-    await expect(
+    const error = await captureError(
       syncTaxTransactions(config(), {
         hyperSyncClient: errorHyperSyncClient,
         viemClient: makeNoOpViemMock(),
         fetcher: noOpFetcher,
       }),
-    ).rejects.toThrow("HyperSync network error");
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("HyperSync network error");
 
     // Sync state should still reflect the last successful block
     expect(getTaxSyncState(WALLET)).toMatchObject({ last_block_number: 322 });
@@ -751,13 +771,15 @@ describe("tax transaction explorer sync", () => {
       },
     } as unknown as HypersyncClient;
 
-    await expect(
+    const error = await captureError(
       syncTaxTransactions(config(), {
         hyperSyncClient: errorHyperSyncClient,
         viemClient: makeNoOpViemMock(),
         fetcher: noOpFetcher,
       }),
-    ).rejects.toThrow("HyperSync fetch failed: connection refused");
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("HyperSync fetch failed: connection refused");
   });
 
   it("txlistinternal still uses explorer and respects maxPages", async () => {
@@ -1161,14 +1183,13 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
       [],
     );
 
-    await expect(
-      syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-1" }), {
-        hyperSyncClient,
-        viemClient: makeNoOpViemMock(),
-        fetcher: noOpFetcher,
-        source: "resil1",
-      }),
-    ).resolves.toBeDefined();
+    const result = await syncTaxTransactions(configWithPricing({ HYPE: "resilience-cg-id-1" }), {
+      hyperSyncClient,
+      viemClient: makeNoOpViemMock(),
+      fetcher: noOpFetcher,
+      source: "resil1",
+    });
+    expect(result).toBeDefined();
 
     const row = listTaxTransactions().find((r) => r.hash === "0xresil1");
     expect(row).toBeDefined();

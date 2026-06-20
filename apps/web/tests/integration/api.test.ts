@@ -555,7 +555,9 @@ describe("API client", () => {
   it("throws when tax update response lacks a transaction object", async () => {
     mockFetch(() => jsonResponse({}));
 
-    const error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
+    const error = await captureError(
+      updateTaxTransaction(taxTransaction.id, { comment: "Manual" }),
+    );
     expect(error).toMatchObject({
       name: "ApiError",
       message: "API response did not include tax transaction.",
@@ -577,7 +579,9 @@ describe("API client", () => {
   it("throws when tax update response transaction misses id or hash", async () => {
     mockFetch(() => jsonResponse({ transaction: { ...taxTransaction, id: undefined } }));
 
-    const error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
+    const error = await captureError(
+      updateTaxTransaction(taxTransaction.id, { comment: "Manual" }),
+    );
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain("API response included malformed tax transaction.");
   });
@@ -596,7 +600,9 @@ describe("API client", () => {
   it("propagates tax update non-JSON failures with generic status message", async () => {
     mockFetch(() => new Response("service unavailable", { status: 503 }));
 
-    const error = await captureError(updateTaxTransaction(taxTransaction.id, { label: "Transfer" }));
+    const error = await captureError(
+      updateTaxTransaction(taxTransaction.id, { label: "Transfer" }),
+    );
     expect(error).toMatchObject({
       name: "ApiError",
       message: "API request failed with status 503",

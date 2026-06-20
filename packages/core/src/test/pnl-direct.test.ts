@@ -77,7 +77,8 @@ let mockGetPnLView: (
 
   if (filteredPositions.length === 0) {
     const NotFoundError = (await import("../services/errors.js")).NotFoundError;
-    throw new NotFoundError(`Position #${tokenId} not found.`);
+    const tokenIdText = String(tokenId);
+    throw new NotFoundError(`Position #${tokenIdText} not found.`);
   }
 
   // Return mock PnL views for successfully found positions

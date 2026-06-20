@@ -231,7 +231,7 @@ describe("getUsdPrices", () => {
 
     const result = await getUsdPrices({ pricing: { coingeckoIds: { "": "empty_token" } } }, [
       {},
-      { symbol: "", address: "" },
+      { symbol: "" },
     ]);
     expect(result).toEqual({});
     expect(calls).toHaveLength(0);

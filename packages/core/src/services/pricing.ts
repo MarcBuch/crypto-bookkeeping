@@ -6,7 +6,7 @@ export type PricingToken =
   | string
   | {
       symbol?: string;
-      address?: Address | string;
+      address?: Address;
     };
 
 export type UsdPriceMap = Record<string, number | null>;

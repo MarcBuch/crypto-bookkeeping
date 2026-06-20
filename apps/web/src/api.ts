@@ -14,6 +14,9 @@ export interface PositionView {
   inRange: boolean;
   currentAmount0: number;
   currentAmount1: number;
+  hedge?: {
+    coin: string;
+  };
 }
 
 export interface PnLView {

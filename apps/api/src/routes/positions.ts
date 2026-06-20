@@ -27,6 +27,16 @@ let syncState: SyncState = {
 // Per-position sync states, keyed by tokenId string
 const positionSyncStates = new Map<string, SyncState>();
 
+function attachConfiguredHedge(
+  view: Record<string, unknown>,
+  config: FastifyInstance["lpConfig"],
+): Record<string, unknown> {
+  const tokenId = typeof view.tokenId === "string" ? view.tokenId : null;
+  const hedge = tokenId ? config.positions?.[tokenId]?.hedge : undefined;
+
+  return hedge ? { ...view, hedge } : view;
+}
+
 export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /positions/sync — fire-and-forget; returns 202 immediately
   fastify.post("/positions/sync", async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -149,7 +159,9 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /positions — read from cache (no live RPC)
   fastify.get("/positions", async (_request: FastifyRequest, _reply: FastifyReply) => {
-    const positions = listCachedPositionViews();
+    const positions = listCachedPositionViews().map((view) =>
+      attachConfiguredHedge(view, fastify.lpConfig),
+    );
     const syncedAt = getPositionsCacheSyncedAt();
     return { positions, syncedAt };
   });
@@ -164,7 +176,9 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: "tokenId must be a numeric string" });
       }
 
-      const positions = listCachedPositionViews();
+      const positions = listCachedPositionViews().map((view) =>
+        attachConfiguredHedge(view, fastify.lpConfig),
+      );
       const position = positions.find(
         (view) => typeof view.tokenId === "string" && view.tokenId === tokenId,
       );

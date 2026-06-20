@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 
-import type { DashboardPosition } from "./api";
+import type { DashboardPosition, HedgeView, PnLView } from "./api";
 import { buildNetHedgePnL } from "./hedge-pnl";
 import {
   useDashboardPositions,
   useSyncPositions,
   useSyncPosition,
 } from "./hooks/useDashboardPositions";
-import { useHedge } from "./hooks/useHedge";
+import { useHedge, useHedges } from "./hooks/useHedge";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -162,6 +162,14 @@ export function Dashboard({
   positions: DashboardPosition[];
   isSyncing?: boolean;
 }) {
+  const hedgedTokenIds = positions
+    .filter((position) => position.hedge)
+    .map((position) => position.tokenId);
+  const hedgeQueries = useHedges(hedgedTokenIds, !isSyncing);
+  const hedgesByTokenId = new Map(
+    hedgedTokenIds.map((tokenId, index) => [tokenId, hedgeQueries[index]?.data]),
+  );
+
   if (positions.length === 0) {
     return <EmptyState />;
   }
@@ -169,7 +177,9 @@ export function Dashboard({
   const openPositions = positions.filter((position) => position.status !== "closed");
   const totals = positions.reduce(
     (acc, position) => {
-      acc.pnl += position.pnl?.absolutePnlInToken1 ?? 0;
+      acc.pnl +=
+        buildBlotterPnl(position.pnl, hedgesByTokenId.get(position.tokenId)).displayedPnlInToken1 ??
+        0;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
       if (typeof position.pnl?.feesValueUsd === "number") {
         acc.feesUsd += position.pnl.feesValueUsd;
@@ -745,6 +755,15 @@ function PositionRow({ position }: { position: DashboardPosition }) {
     isPolling: isSyncingPosition,
     error: syncPositionError,
   } = useSyncPosition(position.tokenId);
+  const { data: hedgeData } = useHedge(
+    position.hedge ? position.tokenId : undefined,
+    !isSyncingPosition,
+  );
+  const blotterPnl = buildBlotterPnl(pnl, hedgeData);
+  const hedgeStatusPnlUsd =
+    hedgeData?.status === "active"
+      ? hedgeData.unrealizedPnl + hedgeData.fundingEarned
+      : blotterPnl.closedHedgePnlUsd;
 
   return (
     <tr className="text-neutral-700 transition hover:bg-neutral-50">
@@ -757,6 +776,25 @@ function PositionRow({ position }: { position: DashboardPosition }) {
           <StatusBadge status={position.status} />
           <RangeBadge inRange={position.inRange} />
         </div>
+        {position.hedge ? (
+          <div className="mt-2 flex flex-wrap gap-2 text-[0.65rem] font-semibold tracking-[0.12em] uppercase">
+            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">
+              hedge {position.hedge.coin}
+            </span>
+            {hedgeData ? (
+              <span
+                className={`rounded-full border px-2 py-1 ${
+                  hedgeData.status === "closed"
+                    ? "border-neutral-300 bg-neutral-100 text-neutral-700"
+                    : "border-rose-200 bg-rose-50 text-rose-700"
+                }`}
+              >
+                {hedgeData.status}
+                {hedgeStatusPnlUsd != null ? ` ${formatUsd(hedgeStatusPnlUsd)}` : ""}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </td>
       <td className="px-5 py-4 font-mono whitespace-nowrap">
         {formatPrice(position.currentPrice)}
@@ -765,14 +803,22 @@ function PositionRow({ position }: { position: DashboardPosition }) {
         {formatPrice(position.priceLower)} - {formatPrice(position.priceUpper)}
       </td>
       <td
-        className={`px-5 py-4 font-mono font-bold whitespace-nowrap ${toneClass(pnl?.absolutePnlInToken1)}`}
+        className={`px-5 py-4 font-mono font-bold whitespace-nowrap ${toneClass(blotterPnl.displayedPnlInToken1 ?? undefined)}`}
       >
-        {pnl ? `${formatNumber(pnl.absolutePnlInToken1)} ${pnl.token1Symbol}` : "n/a"}
-        {pnl && pnl.token1UsdPrice != null && (
+        {pnl ? `${formatNumber(blotterPnl.displayedPnlInToken1 ?? 0)} ${pnl.token1Symbol}` : "n/a"}
+        {blotterPnl.displayedPnlUsd != null && (
           <div className="mt-0.5 text-xs font-normal text-neutral-400">
-            {formatUsd(pnl.absolutePnlInToken1 * pnl.token1UsdPrice)}
+            {formatUsd(blotterPnl.displayedPnlUsd)}
           </div>
         )}
+        {pnl && blotterPnl.closedHedgePnlUsd != null ? (
+          <div className="mt-1 text-xs font-normal text-neutral-500">
+            LP {formatNumber(pnl.absolutePnlInToken1)} {pnl.token1Symbol}, hedge{" "}
+            {blotterPnl.closedHedgePnlInToken1 != null
+              ? `${formatNumber(blotterPnl.closedHedgePnlInToken1)} ${pnl.token1Symbol}`
+              : formatUsd(blotterPnl.closedHedgePnlUsd)}
+          </div>
+        ) : null}
       </td>
       <td className="px-5 py-4 font-mono whitespace-nowrap text-neutral-600">
         {pnl ? (
@@ -882,6 +928,47 @@ export function formatUsd(value: number): string {
     currency: "USD",
     maximumFractionDigits: Math.abs(value) < 1 && value !== 0 ? 6 : 2,
   }).format(value);
+}
+
+export interface BlotterPnlView {
+  lpPnlInToken1: number | null;
+  displayedPnlInToken1: number | null;
+  displayedPnlUsd: number | null;
+  closedHedgePnlUsd: number | null;
+  closedHedgePnlInToken1: number | null;
+  includesClosedHedge: boolean;
+}
+
+export function buildBlotterPnl(
+  pnl: PnLView | undefined,
+  hedge: HedgeView | undefined,
+): BlotterPnlView {
+  const closedHedgePnlUsd =
+    hedge?.status === "closed" && hedge.realizedPnl != null
+      ? hedge.realizedPnl + hedge.fundingEarned
+      : null;
+
+  const closedHedgePnlInToken1 =
+    closedHedgePnlUsd != null && pnl?.token1UsdPrice != null && pnl.token1UsdPrice > 0
+      ? closedHedgePnlUsd / pnl.token1UsdPrice
+      : null;
+
+  const lpPnlInToken1 = pnl?.absolutePnlInToken1 ?? null;
+  const displayedPnlInToken1 =
+    lpPnlInToken1 != null ? lpPnlInToken1 + (closedHedgePnlInToken1 ?? 0) : null;
+  const displayedPnlUsd =
+    displayedPnlInToken1 != null && pnl?.token1UsdPrice != null
+      ? displayedPnlInToken1 * pnl.token1UsdPrice
+      : null;
+
+  return {
+    lpPnlInToken1,
+    displayedPnlInToken1,
+    displayedPnlUsd,
+    closedHedgePnlUsd,
+    closedHedgePnlInToken1,
+    includesClosedHedge: lpPnlInToken1 != null && closedHedgePnlInToken1 != null,
+  };
 }
 
 function formatPrice(value: number): string {

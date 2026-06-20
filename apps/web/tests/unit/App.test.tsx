@@ -72,6 +72,13 @@ const closedPosition: DashboardPosition = {
   },
 };
 
+const closedPositionWithClosedHedge: DashboardPosition = {
+  ...closedPosition,
+  hedge: {
+    coin: "HYPE",
+  },
+};
+
 function withoutUsdFee(
   position: DashboardPosition,
   tokenId: string,
@@ -256,5 +263,12 @@ describe("dashboard rendering", () => {
     const html = renderDashboard([positionWithZeroUsdFees]);
 
     expect(html).toContain("$0.00");
+  });
+
+  it("includes closed hedge P&L in Total MTM P&L when the LP row has hedge metadata", () => {
+    const html = renderDashboard([activePosition, closedPositionWithClosedHedge]);
+
+    expect(html).toContain("Total MTM P&amp;L");
+    expect(html).toContain("15.5 USDC");
   });
 });

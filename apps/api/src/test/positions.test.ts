@@ -15,6 +15,17 @@ const fakeConfig = {
     quoter: "0x0000000000000000000000000000000000000003",
     swapRouter: "0x0000000000000000000000000000000000000004",
   },
+  positions: {
+    "123": {
+      openTx: "0x123abc",
+      hedge: {
+        coin: "HYPE",
+      },
+    },
+    "456": {
+      openTx: "0x456def",
+    },
+  },
 } satisfies Config;
 
 // --- Minimal fake PositionView objects ---
@@ -140,6 +151,19 @@ describe("GET /positions", () => {
     expect(body.positions[1].tokenId).toBe("456");
   });
 
+  it("attaches configured hedge metadata to matching positions only", async () => {
+    mockListCachedPositionViews = () => [fakePosition, fakePosition2];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.positions[0]).toMatchObject({
+      tokenId: "123",
+      hedge: { coin: "HYPE" },
+    });
+    expect(body.positions[1].hedge).toBeUndefined();
+  });
+
   it("includes syncedAt field in response", async () => {
     mockListCachedPositionViews = () => [];
 
@@ -200,6 +224,19 @@ describe("GET /positions/:tokenId", () => {
     const res = await server.inject({ method: "GET", url: "/positions/123" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ position: { tokenId: "123" } });
+  });
+
+  it("returns configured hedge metadata on single-position reads", async () => {
+    mockListCachedPositionViews = () => [fakePosition, fakePosition2];
+
+    const res = await server.inject({ method: "GET", url: "/positions/123" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      position: {
+        tokenId: "123",
+        hedge: { coin: "HYPE" },
+      },
+    });
   });
 
   it("accepts very large numeric string tokenId → 404 since no match", async () => {

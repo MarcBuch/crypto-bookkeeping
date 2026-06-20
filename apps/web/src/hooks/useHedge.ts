@@ -1,9 +1,11 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+
+import type { HedgeView } from "../api";
 
 import { getHedge } from "../api";
 
 export function useHedge(tokenId: string | undefined, enabled = true) {
-  return useQuery({
+  return useQuery<HedgeView>({
     queryKey: ["hedge", tokenId],
     queryFn: () => getHedge(tokenId!),
     enabled: !!tokenId && enabled,
@@ -11,5 +13,18 @@ export function useHedge(tokenId: string | undefined, enabled = true) {
     staleTime: 30_000,
     refetchInterval: enabled ? 60_000 : false,
     retry: 2,
+  });
+}
+
+export function useHedges(tokenIds: string[], enabled = true) {
+  return useQueries({
+    queries: tokenIds.map((tokenId) => ({
+      queryKey: ["hedge", tokenId] as const,
+      queryFn: () => getHedge(tokenId),
+      enabled,
+      staleTime: 30_000,
+      refetchInterval: enabled ? 60_000 : false,
+      retry: 2,
+    })),
   });
 }

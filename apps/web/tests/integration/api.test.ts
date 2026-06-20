@@ -237,6 +237,26 @@ describe("API client", () => {
     expect(dashboardPositions[0]?.pnl?.usdPriceSource).toBe("coingecko");
   });
 
+  it("preserves hedge metadata from positions when merging dashboard rows", async () => {
+    const positionWithHedge: PositionView = {
+      ...position,
+      hedge: {
+        coin: "HYPE",
+      },
+    };
+
+    mockFetch((url) => {
+      if (url.endsWith("/positions")) {
+        return jsonResponse({ positions: [positionWithHedge] });
+      }
+
+      return jsonResponse({ positions: [pnl] });
+    });
+
+    const { positions: dashboardPositions } = await getDashboardPositions();
+    expect(dashboardPositions[0]).toEqual({ ...positionWithHedge, pnl });
+  });
+
   it("preserves complete USD fee fields through dashboard merge", async () => {
     mockFetch((url) => {
       if (url.endsWith("/positions")) {

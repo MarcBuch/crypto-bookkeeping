@@ -66,7 +66,7 @@ let mockGetPnLView: (
   rawPositions?: unknown,
 ) => Promise<unknown> = async (_config: unknown, tokenId?: unknown, rawPositions?: unknown) => {
   // Mimic real getPnLView behavior
-  const positions = rawPositions as any[] | undefined;
+  const positions = Array.isArray(rawPositions) ? rawPositions : undefined;
   if (!positions || positions.length === 0) {
     return [];
   }

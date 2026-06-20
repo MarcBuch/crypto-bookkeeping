@@ -151,6 +151,20 @@ const fakePnLView = {
   priceUpper: 2.0,
 };
 
+function expectErrorMessage(error: unknown, matcher: string | RegExp): void {
+  expect(error).toBeInstanceOf(Error);
+  if (!(error instanceof Error)) {
+    return;
+  }
+
+  if (typeof matcher === "string") {
+    expect(error.message).toContain(matcher);
+    return;
+  }
+
+  expect(error.message).toMatch(matcher);
+}
+
 // ---------------------------------------------------------------------------
 // Test setup/teardown
 // ---------------------------------------------------------------------------
@@ -177,8 +191,7 @@ describe("syncSinglePosition — validation", () => {
       await syncSinglePosition(fakeConfig, "");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toMatch(/Invalid tokenId/);
+      expectErrorMessage(error, /Invalid tokenId/);
     }
   });
 
@@ -187,8 +200,7 @@ describe("syncSinglePosition — validation", () => {
       await syncSinglePosition(fakeConfig, "abc");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toMatch(/Invalid tokenId/);
+      expectErrorMessage(error, /Invalid tokenId/);
     }
   });
 
@@ -197,8 +209,7 @@ describe("syncSinglePosition — validation", () => {
       await syncSinglePosition(fakeConfig, "1.5");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toMatch(/Invalid tokenId/);
+      expectErrorMessage(error, /Invalid tokenId/);
     }
   });
 
@@ -207,8 +218,7 @@ describe("syncSinglePosition — validation", () => {
       await syncSinglePosition(fakeConfig, "-1");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toMatch(/Invalid tokenId/);
+      expectErrorMessage(error, /Invalid tokenId/);
     }
   });
 });
@@ -227,8 +237,7 @@ describe("syncSinglePosition — RPC error propagation", () => {
       await syncSinglePosition(fakeConfig, "12345");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("RPC timeout");
+      expectErrorMessage(error, "RPC timeout");
     }
 
     // Verify cache is empty (no partial write)
@@ -250,8 +259,7 @@ describe("syncSinglePosition — RPC error propagation", () => {
       await syncSinglePosition(fakeConfig, "12345");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("PnL calculation failed");
+      expectErrorMessage(error, "PnL calculation failed");
     }
 
     // Cache should be empty (no partial write)
@@ -288,8 +296,7 @@ describe("syncSinglePosition — partial failure and idempotency", () => {
       await syncSinglePosition(fakeConfig, "42");
       throw new Error("Expected syncSinglePosition to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("RPC error during fetch");
+      expectErrorMessage(error, "RPC error during fetch");
     }
 
     // Verify the original cache row is still there (was NOT overwritten)

@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
-
-import type { Client } from "../chain/client.js";
 import {
   getTaxSyncState,
   getTaxTransaction,
@@ -18,6 +15,9 @@ import {
   syncTaxTransactions,
 } from "../services/tax-transactions.js";
 import { useTestDb } from "./helpers/db.js";
+import { captureError, expectError } from "./helpers/errors.js";
+import { getRequestUrl, jsonResponse, setFetchMock, textResponse } from "./helpers/http.js";
+import { makeHypersyncClient } from "./helpers/hypersync.js";
 
 const WALLET = "0x00000000000000000000000000000000000000aa" as `0x${string}`;
 const BASE_URL = "https://explorer.test/api";
@@ -33,21 +33,9 @@ type RequestRecord = {
   params: URLSearchParams;
 };
 
-function getRequestUrl(url: string | URL | Request): string {
-  if (typeof url === "string") return url;
-  if (url instanceof URL) return url.href;
-  return url.url;
-}
-
-async function captureError<T>(promise: Promise<T>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-
-  throw new Error("Expected promise to reject");
-}
+type SyncTaxTransactionsOptions = NonNullable<Parameters<typeof syncTaxTransactions>[1]>;
+type SyncViemClient = NonNullable<SyncTaxTransactionsOptions["viemClient"]>;
+type SyncHypersyncClient = NonNullable<SyncTaxTransactionsOptions["hyperSyncClient"]>;
 
 const STUB_CONTRACTS = {
   factory: "0x0000000000000000000000000000000000000001" as `0x${string}`,
@@ -89,7 +77,7 @@ function makeFetcher(
     const parsed = new URL(url);
     requests.push({ url, params: parsed.searchParams });
     const response = route(parsed.searchParams, url);
-    if ("ok" in response && response.ok === false) {
+    if ("ok" in response && !response.ok) {
       return {
         ok: false,
         status: response.status,
@@ -138,23 +126,40 @@ interface MockLog {
   topics: (string | null | undefined)[];
 }
 
-function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): HypersyncClient {
-  return {
-    get: async (_query: unknown) => ({
-      archiveHeight: 10000,
-      nextBlock: 10000,
-      totalExecutionTime: 1,
-      data: {
-        blocks: [
-          ...txs.map((t) => ({ number: t.blockNumber, timestamp: t.blockTimestamp ?? 1770000000 })),
-          ...logs.map((l) => ({ number: l.blockNumber, timestamp: 1770000000 })),
-        ],
-        transactions: txs,
-        logs,
-        traces: [],
-      },
-    }),
-  } as unknown as HypersyncClient;
+function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): SyncHypersyncClient {
+  return makeHypersyncClient(async (_query) => ({
+    archiveHeight: 10000,
+    nextBlock: 10000,
+    totalExecutionTime: 1,
+    data: {
+      blocks: [
+        ...txs.map((t) => ({ number: t.blockNumber, timestamp: t.blockTimestamp ?? 1770000000 })),
+        ...logs.map((l) => ({ number: l.blockNumber, timestamp: 1770000000 })),
+      ],
+      transactions: txs.map((tx) => ({
+        hash: tx.hash,
+        blockNumber: tx.blockNumber,
+        from: tx.from,
+        to: tx.to ?? undefined,
+        value: tx.value,
+        gasUsed: tx.gasUsed,
+        gasPrice: tx.gasPrice,
+        effectiveGasPrice: tx.effectiveGasPrice ?? tx.gasPrice,
+        input: tx.input,
+        status: tx.status,
+        sighash: tx.sighash ?? undefined,
+      })),
+      logs: logs.map((log) => ({
+        transactionHash: log.transactionHash,
+        blockNumber: log.blockNumber,
+        logIndex: log.logIndex,
+        address: log.address,
+        data: log.data,
+        topics: log.topics.map((topic) => topic ?? ""),
+      })),
+      traces: [],
+    },
+  }));
 }
 
 const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -200,12 +205,13 @@ const noOpFetcher = async (_url: string) => ({
 });
 
 /** A viem mock that throws for all readContract calls (no token metadata needed) */
-function makeNoOpViemMock(): Client {
+function makeNoOpViemMock(): SyncViemClient {
   return {
-    readContract: async ({ functionName }: { address: string; functionName: string }) => {
+    readContract: async (args) => {
+      const functionName = args.functionName;
       throw new Error(`no metadata for ${functionName}`);
     },
-  } as unknown as Client;
+  };
 }
 
 /** A viem mock that returns metadata for given contract addresses */
@@ -214,9 +220,11 @@ function makeViemMock(
     string,
     { symbol?: string | null; name?: string | null; decimals?: number | null }
   >,
-): Client {
+): SyncViemClient {
   return {
-    readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+    readContract: async (args) => {
+      const address = String(args.address);
+      const functionName = args.functionName;
       const m = metadata[address.toLowerCase()];
       if (functionName === "symbol") {
         if (!m || m.symbol === null || m.symbol === undefined) throw new Error("no symbol");
@@ -232,7 +240,7 @@ function makeViemMock(
       }
       throw new Error(`Unknown: ${functionName}`);
     },
-  } as unknown as Client;
+  };
 }
 
 describe("tax transaction explorer sync", () => {
@@ -368,7 +376,7 @@ describe("tax transaction explorer sync", () => {
       ),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("tax.hyperSyncApiToken");
+    expect(expectError(error).message).toContain("tax.hyperSyncApiToken");
 
     error = await captureError(
       syncTaxTransactions(
@@ -383,7 +391,7 @@ describe("tax transaction explorer sync", () => {
       ),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("tax.hyperSyncApiToken");
+    expect(expectError(error).message).toContain("tax.hyperSyncApiToken");
 
     error = await captureError(
       syncTaxTransactions(
@@ -398,7 +406,7 @@ describe("tax transaction explorer sync", () => {
       ),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("tax.hyperSyncApiToken");
+    expect(expectError(error).message).toContain("tax.hyperSyncApiToken");
   });
 
   it("fails before fetch when an explicit Etherscan v2 explorer requires a real API key", async () => {
@@ -431,7 +439,7 @@ describe("tax transaction explorer sync", () => {
       ),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain(
+    expect(expectError(error).message).toContain(
       "Tax transaction sync requires tax.explorerApiKey when using the Etherscan v2 explorer API",
     );
     expect(called).toBe(false);
@@ -578,11 +586,9 @@ describe("tax transaction explorer sync", () => {
     });
 
     // Second sync: HyperSync throws
-    const errorHyperSyncClient = {
-      get: async (_query: unknown) => {
-        throw new Error("HyperSync network error");
-      },
-    } as unknown as HypersyncClient;
+    const errorHyperSyncClient = makeHypersyncClient(async (_query: unknown) => {
+      throw new Error("HyperSync network error");
+    });
 
     const error = await captureError(
       syncTaxTransactions(config(), {
@@ -592,7 +598,7 @@ describe("tax transaction explorer sync", () => {
       }),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("HyperSync network error");
+    expect(expectError(error).message).toContain("HyperSync network error");
 
     // Sync state should still reflect the last successful block
     expect(getTaxSyncState(WALLET)).toMatchObject({ last_block_number: 322 });
@@ -765,11 +771,9 @@ describe("tax transaction explorer sync", () => {
   });
 
   it("HyperSync error propagates and does not silently swallow failures", async () => {
-    const errorHyperSyncClient = {
-      get: async (_query: unknown) => {
-        throw new Error("HyperSync fetch failed: connection refused");
-      },
-    } as unknown as HypersyncClient;
+    const errorHyperSyncClient = makeHypersyncClient(async (_query: unknown) => {
+      throw new Error("HyperSync fetch failed: connection refused");
+    });
 
     const error = await captureError(
       syncTaxTransactions(config(), {
@@ -779,7 +783,7 @@ describe("tax transaction explorer sync", () => {
       }),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("HyperSync fetch failed: connection refused");
+    expect(expectError(error).message).toContain("HyperSync fetch failed: connection refused");
   });
 
   it("txlistinternal still uses explorer and respects maxPages", async () => {
@@ -851,42 +855,38 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   it("null time_stamp → EUR fields stay null", async () => {
     let cgCallCount = 0;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       if (getRequestUrl(url).includes("coingecko.com")) {
         cgCallCount++;
       }
-      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
-        status: 200,
-      });
-    }) as unknown as typeof globalThis.fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 10.0 } } });
+    });
 
     // Override the mock to return no timestamp in blocks
-    const noTimestampClient = {
-      get: async (_query: unknown) => ({
-        archiveHeight: 10000,
-        nextBlock: 10000,
-        totalExecutionTime: 1,
-        data: {
-          blocks: [], // no blocks → no timestamp lookup
-          transactions: [
-            {
-              hash: "0xnullts1",
-              blockNumber: 100,
-              from: "0xsender",
-              to: WALLET.toLowerCase(),
-              value: 1000000000000000000n,
-              gasUsed: 21000n,
-              gasPrice: 1000000000n,
-              input: "0x",
-              status: 1,
-              sighash: null,
-            },
-          ],
-          logs: [],
-          traces: [],
-        },
-      }),
-    } as unknown as HypersyncClient;
+    const noTimestampClient = makeHypersyncClient(async (_query: unknown) => ({
+      archiveHeight: 10000,
+      nextBlock: 10000,
+      totalExecutionTime: 1,
+      data: {
+        blocks: [], // no blocks → no timestamp lookup
+        transactions: [
+          {
+            hash: "0xnullts1",
+            blockNumber: 100,
+            from: "0xsender",
+            to: WALLET.toLowerCase(),
+            value: 1000000000000000000n,
+            gasUsed: 21000n,
+            gasPrice: 1000000000n,
+            input: "0x",
+            status: 1,
+            sighash: null,
+          },
+        ],
+        logs: [],
+        traces: [],
+      },
+    }));
 
     await syncTaxTransactions(configWithPricing(), {
       hyperSyncClient: noTimestampClient,
@@ -905,14 +905,12 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   it("null incoming_asset AND null outgoing_asset → EUR fields stay null", async () => {
     let cgCallCount = 0;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       if (getRequestUrl(url).includes("coingecko.com")) {
         cgCallCount++;
       }
-      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
-        status: 200,
-      });
-    }) as unknown as typeof globalThis.fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 10.0 } } });
+    });
 
     // txlistinternal where neither from nor to matches the wallet
     const fetcher = makeFetcher((params) => {
@@ -953,15 +951,13 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   });
 
   it("incoming-only transfer (received HYPE) → proceeds_eur set, cost_eur null, gain_eur = proceeds", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), {
-          status: 200,
-        });
+        return jsonResponse({ market_data: { current_price: { eur: 20.0 } } });
       }
-      return new Response(JSON.stringify({}), { status: 404 });
-    }) as unknown as typeof globalThis.fetch;
+      return jsonResponse({}, { status: 404 });
+    });
 
     const hyperSyncClient = makeHyperSyncMock(
       [
@@ -999,15 +995,13 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   });
 
   it("outgoing-only transfer (sent HYPE) → cost_eur set, proceeds_eur null, gain_eur = -cost", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), {
-          status: 200,
-        });
+        return jsonResponse({ market_data: { current_price: { eur: 20.0 } } });
       }
-      return new Response(JSON.stringify({}), { status: 404 });
-    }) as unknown as typeof globalThis.fetch;
+      return jsonResponse({}, { status: 404 });
+    });
 
     const hyperSyncClient = makeHyperSyncMock(
       [
@@ -1046,14 +1040,12 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   it("asset without coingeckoId mapping → EUR fields stay null", async () => {
     let cgCallCount = 0;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       if (getRequestUrl(url).includes("coingecko.com")) {
         cgCallCount++;
       }
-      return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
-        status: 200,
-      });
-    }) as unknown as typeof globalThis.fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 10.0 } } });
+    });
 
     const contractAddress = "0x1234567890123456789012345678901234567890";
     const hyperSyncClient = makeHyperSyncMock(
@@ -1096,15 +1088,13 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   });
 
   it("USDC token transfer out → correct decimal handling", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("usd-coin")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 0.92 } } }), {
-          status: 200,
-        });
+        return jsonResponse({ market_data: { current_price: { eur: 0.92 } } });
       }
-      return new Response(JSON.stringify({}), { status: 404 });
-    }) as unknown as typeof globalThis.fetch;
+      return jsonResponse({}, { status: 404 });
+    });
 
     const contractAddress = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
     const hyperSyncClient = makeHyperSyncMock(
@@ -1156,13 +1146,13 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
   });
 
   it("CoinGecko unavailable → sync completes, EUR fields all null", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         throw new Error("network down");
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     const hyperSyncClient = makeHyperSyncMock(
       [
@@ -1199,19 +1189,16 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
   });
 
   it("API failure for asset A, success for asset B → partial enrichment", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         if (urlStr.includes("resilience-hype")) throw new Error("network down");
         if (urlStr.includes("resilience-usdc")) {
-          return {
-            ok: true,
-            json: async () => ({ market_data: { current_price: { eur: 0.9 } } }),
-          } as Response;
+          return jsonResponse({ market_data: { current_price: { eur: 0.9 } } });
         }
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     const contractAddress = "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e";
     const hyperSyncClient = makeHyperSyncMock(
@@ -1270,16 +1257,13 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
 
   it("re-sync preserves existing cost_eur (upsert does NOT overwrite EUR values)", async () => {
     // First sync: CoinGecko returns price 10.0
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
-        return {
-          ok: true,
-          json: async () => ({ market_data: { current_price: { eur: 10.0 } } }),
-        } as Response;
+        return jsonResponse({ market_data: { current_price: { eur: 10.0 } } });
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     const firstHyperSyncClient = makeHyperSyncMock(
       [
@@ -1313,16 +1297,13 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
     expect(originalProceedsEur).not.toBeNull();
 
     // Second sync: CoinGecko would return 99.0 but upsert should NOT overwrite
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
-        return {
-          ok: true,
-          json: async () => ({ market_data: { current_price: { eur: 99.0 } } }),
-        } as Response;
+        return jsonResponse({ market_data: { current_price: { eur: 99.0 } } });
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     const secondHyperSyncClient = makeHyperSyncMock(
       [
@@ -1357,17 +1338,14 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
 
   it("deduplicates CoinGecko calls: 5 transactions with same asset and date → 1 API call", async () => {
     const cgCalls: string[] = [];
-    globalThis.fetch = (async (url: string) => {
-      const urlStr = String(url);
+    setFetchMock(async (url) => {
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         cgCalls.push(urlStr);
-        return {
-          ok: true,
-          json: async () => ({ market_data: { current_price: { eur: 5.0 } } }),
-        } as Response;
+        return jsonResponse({ market_data: { current_price: { eur: 5.0 } } });
       }
       throw new Error(`unexpected globalThis.fetch call: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     const contractAddress = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     const hyperSyncClient = makeHyperSyncMock(
@@ -1648,9 +1626,9 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
 
   // Test 1 — already-enriched rows are not in the enrichment queue
   it("already-enriched rows are not re-processed (DB query filters them out)", async () => {
-    globalThis.fetch = (async () => {
+    setFetchMock(async () => {
       throw new Error("should not call fetch for already-enriched rows");
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     upsertSyncedTaxTransaction(
       makeBackfillRow("backfill-t1-row1", {
@@ -1681,9 +1659,9 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
 
   // Test 2 — rows with null asset are skipped
   it("rows with null asset_in and null asset_out are skipped", async () => {
-    globalThis.fetch = (async () => {
+    setFetchMock(async () => {
       throw new Error("should not call fetch for null-asset rows");
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     upsertSyncedTaxTransaction(
       makeBackfillRow("backfill-t2-row1", {
@@ -1701,9 +1679,9 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
 
   // Test 3 — rows with null timestamp are skipped
   it("rows with null timestamp are skipped", async () => {
-    globalThis.fetch = (async () => {
+    setFetchMock(async () => {
       throw new Error("should not call fetch for null-timestamp rows");
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     upsertSyncedTaxTransaction(
       makeBackfillRow("backfill-t3-row1", {
@@ -1723,13 +1701,13 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
 
   // Test 4 — CoinGecko returns HTTP 500 → row is skipped, EUR fields remain null
   it("CoinGecko HTTP 500 → row is skipped, EUR fields remain null", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
-        return new Response("{}", { status: 500 });
+        return textResponse("{}", { status: 500 });
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     upsertSyncedTaxTransaction(
       makeBackfillRow("backfill-t4-row1", {
@@ -1754,15 +1732,13 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
 
   // Test 5 — successful enrichment: incoming-only (BACKFILL_TOK transfer)
   it("incoming-only row is enriched: proceeds_eur = qty * price, cost_eur null, gain_eur = proceeds_eur", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
-          status: 200,
-        });
+        return jsonResponse({ market_data: { current_price: { eur: 10.0 } } });
       }
-      return new Response("{}", { status: 404 });
-    }) as unknown as typeof globalThis.fetch;
+      return textResponse("{}", { status: 404 });
+    });
 
     upsertSyncedTaxTransaction(
       makeBackfillRow("backfill-t5-row1", {
@@ -1789,18 +1765,16 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
 
   // Test 6 — partial failure: one row succeeds, one fails CoinGecko lookup
   it("partial failure: enriched === 1, skipped === 1 when one CoinGecko lookup fails", async () => {
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    setFetchMock(async (url) => {
       const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
-        return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
-          status: 200,
-        });
+        return jsonResponse({ market_data: { current_price: { eur: 10.0 } } });
       }
       if (urlStr.includes("coingecko.com")) {
-        return new Response("{}", { status: 404 });
+        return textResponse("{}", { status: 404 });
       }
       throw new Error(`unexpected fetch: ${urlStr}`);
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     upsertSyncedTaxTransaction(
       makeBackfillRow("backfill-t6-known", {

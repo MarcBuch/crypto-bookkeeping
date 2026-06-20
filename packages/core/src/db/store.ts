@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { isRecord } from "../utils/guards.js";
 import { getDb } from "./schema";
 
 export interface StoredPosition {
@@ -196,6 +197,25 @@ export interface StoredTaxSyncState {
   source: string;
 }
 
+type CacheRow = { data: string };
+type SyncedAtRow = { synced_at: string };
+type TaxEnrichmentRow = {
+  id: string;
+  asset_in: string | null;
+  qty_in: string | null;
+  asset_out: string | null;
+  qty_out: string | null;
+  timestamp: string | null;
+};
+
+function parseCachedView(data: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(data);
+  if (!isRecord(parsed)) {
+    throw new Error("Cached LP view data must be a JSON object");
+  }
+  return parsed;
+}
+
 function assertValidTaxTransactionLabel(label: TaxTransactionLabel | undefined): void {
   if (
     label !== undefined &&
@@ -274,13 +294,13 @@ export function upsertPosition(position: Omit<StoredPosition, "created_at">): vo
 export function getPosition(tokenId: string): StoredPosition | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM positions WHERE token_id = ?")
-    .get(tokenId) as StoredPosition | null;
+    .query<StoredPosition, [string]>("SELECT * FROM positions WHERE token_id = ?")
+    .get(tokenId);
 }
 
 export function getAllPositions(): StoredPosition[] {
   const db = getDb();
-  return db.query("SELECT * FROM positions").all() as StoredPosition[];
+  return db.query<StoredPosition, []>("SELECT * FROM positions").all();
 }
 
 export function insertSnapshot(snapshot: Omit<StoredSnapshot, "id">): void {
@@ -315,29 +335,33 @@ export function insertSnapshot(snapshot: Omit<StoredSnapshot, "id">): void {
 export function getSnapshots(tokenId: string, limit = 50): StoredSnapshot[] {
   const db = getDb();
   return db
-    .query("SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT ?")
-    .all(tokenId, limit) as StoredSnapshot[];
+    .query<StoredSnapshot, [string, number]>(
+      "SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT ?",
+    )
+    .all(tokenId, limit);
 }
 
 export function getLatestSnapshot(tokenId: string): StoredSnapshot | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT 1")
-    .get(tokenId) as StoredSnapshot | null;
+    .query<StoredSnapshot, [string]>(
+      "SELECT * FROM snapshots WHERE token_id = ? ORDER BY timestamp DESC LIMIT 1",
+    )
+    .get(tokenId);
 }
 
 export function getAllLatestSnapshots(): StoredSnapshot[] {
   const db = getDb();
   return db
-    .query(
+    .query<StoredSnapshot, []>(
       `SELECT s.* FROM snapshots s
        INNER JOIN (
-         SELECT token_id, MAX(timestamp) as max_ts
+          SELECT token_id, MAX(timestamp) as max_ts
          FROM snapshots GROUP BY token_id
        ) latest ON s.token_id = latest.token_id AND s.timestamp = latest.max_ts
        ORDER BY s.token_id`,
     )
-    .all() as StoredSnapshot[];
+    .all();
 }
 
 export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): void {
@@ -511,8 +535,8 @@ function manualTaxTransactionHash(transaction: ManualTaxTransactionInput): strin
 export function getTaxTransaction(id: string): StoredTaxTransaction | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM tax_transactions WHERE id = ?")
-    .get(id) as StoredTaxTransaction | null;
+    .query<StoredTaxTransaction, [string]>("SELECT * FROM tax_transactions WHERE id = ?")
+    .get(id);
 }
 
 export function listTaxTransactions(
@@ -523,45 +547,45 @@ export function listTaxTransactions(
   const db = getDb();
   if (label === "unlabeled") {
     return db
-      .query(
+      .query<StoredTaxTransaction, [number, number]>(
         `SELECT * FROM tax_transactions
          WHERE label IS NULL
          ORDER BY time_stamp DESC, block_number DESC
-         LIMIT ? OFFSET ?`,
+          LIMIT ? OFFSET ?`,
       )
-      .all(limit, offset) as StoredTaxTransaction[];
+      .all(limit, offset);
   }
 
   if (label !== undefined) {
     return db
-      .query(
+      .query<StoredTaxTransaction, [TaxTransactionLabelFilter, number, number]>(
         `SELECT * FROM tax_transactions
          WHERE label = ?
          ORDER BY time_stamp DESC, block_number DESC
-         LIMIT ? OFFSET ?`,
+          LIMIT ? OFFSET ?`,
       )
-      .all(label, limit, offset) as StoredTaxTransaction[];
+      .all(label, limit, offset);
   }
 
   return db
-    .query(
+    .query<StoredTaxTransaction, [number, number]>(
       `SELECT * FROM tax_transactions
        ORDER BY time_stamp DESC, block_number DESC
-       LIMIT ? OFFSET ?`,
+        LIMIT ? OFFSET ?`,
     )
-    .all(limit, offset) as StoredTaxTransaction[];
+    .all(limit, offset);
 }
 
 export function listGermanTaxableTransactions(limit = 100, offset = 0): StoredTaxTransaction[] {
   const db = getDb();
   return db
-    .query(
+    .query<StoredTaxTransaction, [number, number]>(
       `SELECT * FROM tax_transactions
        WHERE label IS NULL OR label != 'Approval'
        ORDER BY time_stamp DESC, block_number DESC
-       LIMIT ? OFFSET ?`,
+        LIMIT ? OFFSET ?`,
     )
-    .all(limit, offset) as StoredTaxTransaction[];
+    .all(limit, offset);
 }
 
 export function getTaxTransactionsNeedingGermanTaxReview(
@@ -570,13 +594,13 @@ export function getTaxTransactionsNeedingGermanTaxReview(
 ): StoredTaxTransaction[] {
   const db = getDb();
   return db
-    .query(
+    .query<StoredTaxTransaction, [number, number]>(
       `SELECT * FROM tax_transactions
        WHERE label IS NULL
        ORDER BY time_stamp DESC, block_number DESC
-       LIMIT ? OFFSET ?`,
+        LIMIT ? OFFSET ?`,
     )
-    .all(limit, offset) as StoredTaxTransaction[];
+    .all(limit, offset);
 }
 
 export function updateTaxTransaction(
@@ -644,7 +668,7 @@ export function getTaxTransactionsNeedingEurEnrichment(): Array<{
 }> {
   const db = getDb();
   return db
-    .query(
+    .query<TaxEnrichmentRow, []>(
       `SELECT id,
               incoming_asset  AS asset_in,
               incoming_quantity AS qty_in,
@@ -652,17 +676,10 @@ export function getTaxTransactionsNeedingEurEnrichment(): Array<{
               outgoing_quantity AS qty_out,
               time_stamp      AS timestamp
        FROM tax_transactions
-       WHERE cost_eur IS NULL AND proceeds_eur IS NULL
-       ORDER BY time_stamp ASC NULLS LAST, id ASC`,
+        WHERE cost_eur IS NULL AND proceeds_eur IS NULL
+        ORDER BY time_stamp ASC NULLS LAST, id ASC`,
     )
-    .all() as Array<{
-    id: string;
-    asset_in: string | null;
-    qty_in: string | null;
-    asset_out: string | null;
-    qty_out: string | null;
-    timestamp: string | null;
-  }>;
+    .all();
 }
 
 export function updateTaxTransactionEurValues(
@@ -679,8 +696,8 @@ export function updateTaxTransactionEurValues(
 export function getTaxSyncState(wallet: string): StoredTaxSyncState | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM tax_sync_state WHERE wallet = ?")
-    .get(wallet) as StoredTaxSyncState | null;
+    .query<StoredTaxSyncState, [string]>("SELECT * FROM tax_sync_state WHERE wallet = ?")
+    .get(wallet);
 }
 
 export interface StoredLpSyncState {
@@ -690,30 +707,30 @@ export interface StoredLpSyncState {
 
 export function listCachedPositionViews(): Record<string, unknown>[] {
   const db = getDb();
-  const rows = db.query("SELECT data FROM positions_view_cache ORDER BY token_id").all() as {
-    data: string;
-  }[];
-  return rows.map((r) => JSON.parse(r.data) as Record<string, unknown>);
+  const rows = db
+    .query<CacheRow, []>("SELECT data FROM positions_view_cache ORDER BY token_id")
+    .all();
+  return rows.map((r) => parseCachedView(r.data));
 }
 
 export function listCachedPnLViews(): Record<string, unknown>[] {
   const db = getDb();
-  const rows = db.query("SELECT data FROM pnl_view_cache ORDER BY token_id").all() as {
-    data: string;
-  }[];
-  return rows.map((r) => JSON.parse(r.data) as Record<string, unknown>);
+  const rows = db.query<CacheRow, []>("SELECT data FROM pnl_view_cache ORDER BY token_id").all();
+  return rows.map((r) => parseCachedView(r.data));
 }
 
 export function getPositionsCacheSyncedAt(): string | null {
   const db = getDb();
   const row = db
-    .query("SELECT synced_at FROM positions_view_cache ORDER BY synced_at DESC LIMIT 1")
-    .get() as { synced_at: string } | null;
+    .query<SyncedAtRow, []>(
+      "SELECT synced_at FROM positions_view_cache ORDER BY synced_at DESC LIMIT 1",
+    )
+    .get();
   return row?.synced_at ?? null;
 }
 
 export function replaceCachedPositionViews(
-  rows: Record<string, unknown>[],
+  rows: Array<{ tokenId: unknown }>,
   syncedAt: string,
 ): void {
   const db = getDb();
@@ -730,7 +747,7 @@ export function replaceCachedPositionViews(
   })();
 }
 
-export function replaceCachedPnLViews(rows: Record<string, unknown>[], syncedAt: string): void {
+export function replaceCachedPnLViews(rows: Array<{ tokenId: unknown }>, syncedAt: string): void {
   const db = getDb();
   db.transaction(() => {
     db.run("DELETE FROM pnl_view_cache");
@@ -746,8 +763,8 @@ export function replaceCachedPnLViews(rows: Record<string, unknown>[], syncedAt:
 }
 
 export function replaceLpCaches(
-  positionRows: Record<string, unknown>[],
-  pnlRows: Record<string, unknown>[],
+  positionRows: Array<{ tokenId: unknown }>,
+  pnlRows: Array<{ tokenId: unknown }>,
   syncedAt: string,
 ): void {
   const db = getDb();
@@ -774,8 +791,8 @@ export function replaceLpCaches(
 export function getLpSyncState(wallet: string): StoredLpSyncState | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM lp_sync_state WHERE wallet = ?")
-    .get(wallet) as StoredLpSyncState | null;
+    .query<StoredLpSyncState, [string]>("SELECT * FROM lp_sync_state WHERE wallet = ?")
+    .get(wallet);
 }
 
 export function upsertLpSyncState(state: StoredLpSyncState): void {
@@ -789,8 +806,8 @@ export function upsertLpSyncState(state: StoredLpSyncState): void {
 }
 
 export function upsertPositionViewCache(
-  tokenId: string,
-  data: Record<string, unknown>,
+  tokenId: string | null,
+  data: unknown,
   syncedAt: string,
 ): void {
   const db = getDb();
@@ -800,11 +817,7 @@ export function upsertPositionViewCache(
   );
 }
 
-export function upsertPnLViewCache(
-  tokenId: string,
-  data: Record<string, unknown>,
-  syncedAt: string,
-): void {
+export function upsertPnLViewCache(tokenId: string | null, data: unknown, syncedAt: string): void {
   const db = getDb();
   db.run("INSERT OR REPLACE INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
     tokenId,
@@ -845,10 +858,10 @@ export function insertHedgeSnapshot(
 export function listHedgeSnapshots(tokenId: string): StoredHedgeSnapshot[] {
   const db = getDb();
   return db
-    .query(
+    .query<StoredHedgeSnapshot, [string]>(
       "SELECT id, token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px, snapshot_at FROM hedge_snapshots WHERE token_id = ? ORDER BY snapshot_at DESC",
     )
-    .all(tokenId) as StoredHedgeSnapshot[];
+    .all(tokenId);
 }
 
 export function getEarliestHedgeSnapshot(
@@ -857,10 +870,10 @@ export function getEarliestHedgeSnapshot(
 ): StoredHedgeSnapshot | null {
   const db = getDb();
   return db
-    .query(
+    .query<StoredHedgeSnapshot, [string, string]>(
       "SELECT id, token_id, coin, szi, entry_px, mark_px, unrealized_pnl, funding_earned, liquidation_px, snapshot_at FROM hedge_snapshots WHERE token_id = ? AND coin = ? ORDER BY snapshot_at ASC LIMIT 1",
     )
-    .get(token_id, coin) as StoredHedgeSnapshot | null;
+    .get(token_id, coin);
 }
 
 export function insertHedgeEvent(event: Omit<StoredHedgeEvent, "id">): StoredHedgeEvent {
@@ -886,8 +899,11 @@ export function insertHedgeEvent(event: Omit<StoredHedgeEvent, "id">): StoredHed
   );
 
   const inserted = db
-    .query("SELECT * FROM hedge_events WHERE id = last_insert_rowid()")
-    .get() as StoredHedgeEvent;
+    .query<StoredHedgeEvent, []>("SELECT * FROM hedge_events WHERE id = last_insert_rowid()")
+    .get();
+  if (!inserted) {
+    throw new Error("Inserted hedge event could not be reloaded");
+  }
   return inserted;
 }
 
@@ -905,8 +921,8 @@ export function closeHedgeEvent(params: {
 
   // Check if this hl_fill_hash already exists (idempotency)
   const existing = db
-    .query("SELECT * FROM hedge_events WHERE hl_fill_hash = ?")
-    .get(params.hl_fill_hash) as StoredHedgeEvent | null;
+    .query<StoredHedgeEvent, [string]>("SELECT * FROM hedge_events WHERE hl_fill_hash = ?")
+    .get(params.hl_fill_hash);
 
   if (existing) {
     return existing;
@@ -914,8 +930,10 @@ export function closeHedgeEvent(params: {
 
   // Find the open event for this token_id and coin
   const openEvent = db
-    .query("SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'")
-    .get(params.token_id, params.coin) as StoredHedgeEvent | null;
+    .query<StoredHedgeEvent, [string, string]>(
+      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
+    )
+    .get(params.token_id, params.coin);
 
   if (!openEvent) {
     return null;
@@ -938,32 +956,39 @@ export function closeHedgeEvent(params: {
   );
 
   const updated = db
-    .query("SELECT * FROM hedge_events WHERE id = ?")
-    .get(openEvent.id) as StoredHedgeEvent;
+    .query<StoredHedgeEvent, [number]>("SELECT * FROM hedge_events WHERE id = ?")
+    .get(openEvent.id);
+  if (!updated) {
+    throw new Error(`Closed hedge event could not be reloaded: ${openEvent.id}`);
+  }
   return updated;
 }
 
 export function getOpenHedgeEvent(token_id: string, coin: string): StoredHedgeEvent | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'")
-    .get(token_id, coin) as StoredHedgeEvent | null;
+    .query<StoredHedgeEvent, [string, string]>(
+      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
+    )
+    .get(token_id, coin);
 }
 
 export function getHedgeEvents(token_id: string): StoredHedgeEvent[] {
   const db = getDb();
   return db
-    .query("SELECT * FROM hedge_events WHERE token_id = ? ORDER BY opened_at DESC")
-    .all(token_id) as StoredHedgeEvent[];
+    .query<StoredHedgeEvent, [string]>(
+      "SELECT * FROM hedge_events WHERE token_id = ? ORDER BY opened_at DESC",
+    )
+    .all(token_id);
 }
 
 export function getAllClosedHedgeEvents(): StoredHedgeEvent[] {
   const db = getDb();
   return db
-    .query(
+    .query<StoredHedgeEvent, []>(
       `SELECT * FROM hedge_events WHERE status = 'closed' ORDER BY closed_at ASC NULLS LAST, id ASC`,
     )
-    .all() as StoredHedgeEvent[];
+    .all();
 }
 
 export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {
@@ -979,6 +1004,6 @@ export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {
 export function getTokenMetadata(contractAddress: string): StoredTokenMetadata | null {
   const db = getDb();
   return db
-    .query("SELECT * FROM token_metadata WHERE contract_address = ?")
-    .get(contractAddress.toLowerCase()) as StoredTokenMetadata | null;
+    .query<StoredTokenMetadata, [string]>("SELECT * FROM token_metadata WHERE contract_address = ?")
+    .get(contractAddress.toLowerCase());
 }

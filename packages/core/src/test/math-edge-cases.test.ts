@@ -15,6 +15,7 @@ import {
   calculateUnclaimedFees,
   tickToSqrtPrice,
   tickToPrice,
+  type FullPnLResult,
 } from "../math/divergence-loss.js";
 
 // Useful constants
@@ -32,6 +33,10 @@ const TICK_UPPER = 100;
 
 // A realistic liquidity value
 const LIQUIDITY = 1_000_000_000n;
+
+type FullPnlNumericField = {
+  [K in keyof FullPnLResult]: FullPnLResult[K] extends number ? K : never;
+}[keyof FullPnLResult];
 
 // ───────────────────────────────────────────────────────────────────────────
 // 1. calculateDivergenceLoss — holdValue = 0 → divergenceLoss = 0, not NaN
@@ -382,7 +387,7 @@ describe("calculateFullPnL — all-zero raw amounts", () => {
       decimals1: 18,
     });
 
-    const numericFields: (keyof typeof result)[] = [
+    const numericFields: FullPnlNumericField[] = [
       "entryAmount0",
       "entryAmount1",
       "exitAmount0",
@@ -405,7 +410,7 @@ describe("calculateFullPnL — all-zero raw amounts", () => {
     ];
 
     for (const field of numericFields) {
-      const v = result[field] as number;
+      const v = result[field];
       expect(typeof v).toBe("number");
       expect(isNaN(v)).toBe(false);
     }

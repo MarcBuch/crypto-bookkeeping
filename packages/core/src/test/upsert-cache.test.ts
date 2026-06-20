@@ -11,6 +11,14 @@ import { useTestDb } from "./helpers/db.js";
 const validSyncedAt = "2026-06-01T20:00:00.000Z";
 const validData = { foo: 1, bar: "test" };
 
+function getRowId(row: Record<string, unknown>): string {
+  expect(typeof row.id).toBe("string");
+  if (typeof row.id !== "string") {
+    throw new Error(`Expected cached row id to be a string, got ${String(row.id)}`);
+  }
+  return row.id;
+}
+
 describe("upsertPositionViewCache — invalid tokenId", () => {
   useTestDb();
 
@@ -41,7 +49,7 @@ describe("upsertPositionViewCache — invalid tokenId", () => {
   it("accepts null as tokenId and stores it", () => {
     // In Bun's sqlite3, null PRIMARY KEY is accepted (SQLite parameterized queries)
     // The null value is bound and stored as-is, not rejected
-    upsertPositionViewCache(null as unknown as string, { foo: 1 }, validSyncedAt);
+    upsertPositionViewCache(null, { foo: 1 }, validSyncedAt);
     const results = listCachedPositionViews();
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({ foo: 1 });
@@ -78,7 +86,7 @@ describe("upsertPnLViewCache — invalid tokenId", () => {
   it("accepts null as tokenId and stores it", () => {
     // In Bun's sqlite3, null PRIMARY KEY is accepted (SQLite parameterized queries)
     // The null value is bound and stored as-is, not rejected
-    upsertPnLViewCache(null as unknown as string, { foo: 1 }, validSyncedAt);
+    upsertPnLViewCache(null, { foo: 1 }, validSyncedAt);
     const results = listCachedPnLViews();
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({ foo: 1 });
@@ -145,7 +153,7 @@ describe("upsertPositionViewCache — row isolation and idempotency", () => {
     expect(results).toHaveLength(3);
 
     const resultsByValue = results.reduce((acc: Record<string, Record<string, unknown>>, row) => {
-      acc[row.id as string] = row;
+      acc[getRowId(row)] = row;
       return acc;
     }, {});
 
@@ -221,7 +229,7 @@ describe("upsertPnLViewCache — row isolation and idempotency", () => {
     expect(results).toHaveLength(3);
 
     const resultsByValue = results.reduce((acc: Record<string, Record<string, unknown>>, row) => {
-      acc[row.id as string] = row;
+      acc[getRowId(row)] = row;
       return acc;
     }, {});
 

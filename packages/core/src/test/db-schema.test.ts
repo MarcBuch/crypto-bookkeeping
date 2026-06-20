@@ -61,8 +61,10 @@ describe("getDb — auto-creates data directory", () => {
     process.env.LP_TRACKER_DATA_DIR = join(TMP, "schema-test");
     const db = getDb();
     const tables = db
-      .query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[];
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+      )
+      .all();
     const names = tables.map((t) => t.name);
     expect(names).toContain("positions");
     expect(names).toContain("snapshots");
@@ -71,9 +73,7 @@ describe("getDb — auto-creates data directory", () => {
   it("includes entry_liquidity column after migration", () => {
     process.env.LP_TRACKER_DATA_DIR = join(TMP, "migration-test");
     const db = getDb();
-    const cols = db.prepare("PRAGMA table_info(positions)").all() as {
-      name: string;
-    }[];
+    const cols = db.prepare<{ name: string }, []>("PRAGMA table_info(positions)").all();
     const colNames = cols.map((c) => c.name);
     expect(colNames).toContain("entry_liquidity");
   });

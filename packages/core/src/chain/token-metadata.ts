@@ -1,7 +1,22 @@
-import { isAddress } from "viem";
+import {
+  isAddress,
+  type Abi,
+  type ContractFunctionArgs,
+  type ContractFunctionName,
+  type ReadContractParameters,
+} from "viem";
 
 import { getTokenMetadata, upsertTokenMetadata, type StoredTokenMetadata } from "../db/store.js";
-import type { Client } from "./client.js";
+
+export interface TokenMetadataClient {
+  readContract<
+    const abi extends Abi | readonly unknown[],
+    functionName extends ContractFunctionName<abi, "pure" | "view">,
+    const args extends ContractFunctionArgs<abi, "pure" | "view", functionName>,
+  >(
+    args: ReadContractParameters<abi, functionName, args>,
+  ): Promise<unknown>;
+}
 
 const ERC20_SYMBOL_ABI = [
   {
@@ -37,7 +52,7 @@ const ERC20_DECIMALS_ABI = [
 const inFlight = new Map<string, Promise<StoredTokenMetadata>>();
 
 export async function resolveTokenMetadata(
-  client: Client,
+  client: TokenMetadataClient,
   contractAddress: string,
 ): Promise<StoredTokenMetadata> {
   const address = contractAddress.toLowerCase();
@@ -64,11 +79,14 @@ export async function resolveTokenMetadata(
   }
 }
 
-async function fetchAndCache(client: Client, address: string): Promise<StoredTokenMetadata> {
+async function fetchAndCache(
+  client: TokenMetadataClient,
+  address: string,
+): Promise<StoredTokenMetadata> {
   if (!isAddress(address)) {
     throw new Error(`resolveTokenMetadata: invalid contract address: ${address}`);
   }
-  const addr = address as `0x${string}`;
+  const addr = address;
 
   // Fetch all three in parallel — each failure stores null for that field
   const [symResult, nameResult, decResult] = await Promise.allSettled([
@@ -77,9 +95,18 @@ async function fetchAndCache(client: Client, address: string): Promise<StoredTok
     client.readContract({ address: addr, abi: ERC20_DECIMALS_ABI, functionName: "decimals" }),
   ]);
 
-  const symbol = symResult.status === "fulfilled" ? (symResult.value as string) : null;
-  const name = nameResult.status === "fulfilled" ? (nameResult.value as string) : null;
-  const decimals = decResult.status === "fulfilled" ? (decResult.value as number) : null;
+  const symbol =
+    symResult.status === "fulfilled" && typeof symResult.value === "string"
+      ? symResult.value
+      : null;
+  const name =
+    nameResult.status === "fulfilled" && typeof nameResult.value === "string"
+      ? nameResult.value
+      : null;
+  const decimals =
+    decResult.status === "fulfilled" && typeof decResult.value === "number"
+      ? decResult.value
+      : null;
 
   const metadata: StoredTokenMetadata = {
     contract_address: address,

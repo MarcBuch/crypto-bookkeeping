@@ -133,6 +133,38 @@ const fakePnLView = {
   priceUpper: 2.0,
 };
 
+function expectErrorMessage(error: unknown, matcher: string | RegExp): void {
+  expect(error).toBeInstanceOf(Error);
+  if (!(error instanceof Error)) {
+    return;
+  }
+
+  if (typeof matcher === "string") {
+    expect(error.message).toContain(matcher);
+    return;
+  }
+
+  expect(error.message).toMatch(matcher);
+}
+
+function hasStringTokenId(value: unknown): value is { tokenId: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tokenId" in value &&
+    typeof value.tokenId === "string"
+  );
+}
+
+function expectStringTokenId(value: unknown, tokenId: string): void {
+  expect(hasStringTokenId(value)).toBe(true);
+  if (!hasStringTokenId(value)) {
+    return;
+  }
+
+  expect(value.tokenId).toBe(tokenId);
+}
+
 // ---------------------------------------------------------------------------
 // Test setup/teardown
 // ---------------------------------------------------------------------------
@@ -164,8 +196,7 @@ describe("syncLpData — getPnLView throws", () => {
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("pnl fetch failed");
+      expectErrorMessage(error, "pnl fetch failed");
     }
   });
 
@@ -188,7 +219,7 @@ describe("syncLpData — getPnLView throws", () => {
     // Cache must be unchanged
     const positions = listCachedPositionViews();
     expect(positions).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
   });
 
   it("leaves pnl cache unchanged when getPnLView throws", async () => {
@@ -207,7 +238,7 @@ describe("syncLpData — getPnLView throws", () => {
 
     const pnl = listCachedPnLViews();
     expect(pnl).toHaveLength(1);
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 });
 
@@ -226,8 +257,7 @@ describe("syncLpData — getPositionsView throws", () => {
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("chain RPC failed");
+      expectErrorMessage(error, "chain RPC failed");
     }
   });
 
@@ -248,7 +278,7 @@ describe("syncLpData — getPositionsView throws", () => {
 
     const positions = listCachedPositionViews();
     expect(positions).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
   });
 
   it("leaves pnl cache unchanged when getAllPositions throws", async () => {
@@ -268,7 +298,7 @@ describe("syncLpData — getPositionsView throws", () => {
 
     const pnl = listCachedPnLViews();
     expect(pnl).toHaveLength(1);
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 });
 

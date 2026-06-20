@@ -17,6 +17,8 @@ import {
 } from "../db/store.js";
 import { useTestDb } from "./helpers/db.js";
 
+type TableSqlRow = { sql: string };
+
 function makeSyncedTaxTransaction(
   overrides: Partial<SyncedTaxTransaction> = {},
 ): SyncedTaxTransaction {
@@ -232,7 +234,10 @@ describe("tax transaction persistence", () => {
 
   it("rejects invalid labels during manual creation", () => {
     expect(() =>
-      createManualTaxTransaction(makeManualTaxTransaction({ label: "Income" as never })),
+      createManualTaxTransaction(
+        // @ts-expect-error Intentionally invalid label to verify runtime validation.
+        makeManualTaxTransaction({ label: "Income" }),
+      ),
     ).toThrow("Tax transaction label");
 
     expect(listTaxTransactions()).toHaveLength(0);
@@ -292,9 +297,10 @@ describe("tax transaction persistence", () => {
   it("rejects invalid labels through store update and the database constraint", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
 
-    expect(() => updateTaxTransaction("tx-1:external", { label: "Income" as never })).toThrow(
-      "Tax transaction label",
-    );
+    expect(() =>
+      // @ts-expect-error Intentionally invalid label to verify runtime validation.
+      updateTaxTransaction("tx-1:external", { label: "Income" }),
+    ).toThrow("Tax transaction label");
 
     const db = getDb();
     expect(() =>
@@ -359,8 +365,10 @@ describe("tax transaction persistence", () => {
 
     const migratedDb = getDb();
     const tableSql = migratedDb
-      .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'")
-      .get() as { sql: string } | null;
+      .query<TableSqlRow, []>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'",
+      )
+      .get();
 
     expect(tableSql?.sql).toContain("Approval");
     expect(updateTaxTransaction("legacy-row", { label: "Approval" })?.label).toBe("Approval");

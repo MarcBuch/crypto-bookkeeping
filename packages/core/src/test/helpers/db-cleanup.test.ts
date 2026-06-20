@@ -4,12 +4,20 @@ import { existsSync } from "fs";
 import { getDb } from "../../db/schema.js";
 import { useTestDb } from "./db.js";
 
+function countPositions(db: ReturnType<typeof getDb>): number {
+  const row = db.prepare<{ cnt: number }, []>(`SELECT COUNT(*) as cnt FROM positions`).get();
+  if (!row) {
+    throw new Error("Expected COUNT(*) query to return a row");
+  }
+  return row.cnt;
+}
+
 describe("cleanup contracts", () => {
   useTestDb();
 
   let dirFromTest1 = "";
   let dirFromTest2 = "";
-  let dbFromTest1: any = null;
+  let dbFromTest1: ReturnType<typeof getDb> | null = null;
 
   it("test 1: env var is set, dir exists, db is created", () => {
     // Capture the env var and directory
@@ -31,10 +39,7 @@ describe("cleanup contracts", () => {
     ).run("test-pos-1", "0xaaa", "0xbbb", 3000, -100, 100);
 
     // Verify the data is in the DB
-    const result = db.prepare(`SELECT COUNT(*) as cnt FROM positions`).get() as {
-      cnt: number;
-    };
-    expect(result.cnt).toBe(1);
+    expect(countPositions(db)).toBe(1);
   });
 
   it("test 2: after test 1, old dir is gone, env var is different, db is fresh", () => {
@@ -59,10 +64,7 @@ describe("cleanup contracts", () => {
     expect(db).not.toBe(dbFromTest1);
 
     // New DB should be empty (no positions from test 1)
-    const result = db.prepare(`SELECT COUNT(*) as cnt FROM positions`).get() as {
-      cnt: number;
-    };
-    expect(result.cnt).toBe(0);
+    expect(countPositions(db)).toBe(0);
   });
 
   it("test 3: singleton is reset for another cycle", () => {
@@ -79,9 +81,6 @@ describe("cleanup contracts", () => {
 
     // DB should be empty again
     const db = getDb();
-    const result = db.prepare(`SELECT COUNT(*) as cnt FROM positions`).get() as {
-      cnt: number;
-    };
-    expect(result.cnt).toBe(0);
+    expect(countPositions(db)).toBe(0);
   });
 });

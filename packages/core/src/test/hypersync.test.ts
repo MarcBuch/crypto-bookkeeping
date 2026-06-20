@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
 
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
-
 import {
   fetchLogsByAddressAndTopics,
   fetchTokenTransfersByAddress,
   fetchTransactionsByAddress,
   padAddress,
 } from "../chain/hypersync.js";
+import { captureError, expectError } from "./helpers/errors.js";
+import { makeHypersyncClient } from "./helpers/hypersync.js";
 
 // ---------------------------------------------------------------------------
 // Types mirroring the SDK shapes we need for mocking
@@ -58,15 +58,13 @@ interface MockQueryResponse {
 // Mock client factory
 // ---------------------------------------------------------------------------
 
-function mockClient(responses: MockQueryResponse[]): HypersyncClient {
+function mockClient(responses: MockQueryResponse[]) {
   let callCount = 0;
-  return {
-    get: async (_query: unknown) => {
-      const resp = responses[callCount++];
-      if (!resp) throw new Error("Unexpected extra call to client.get()");
-      return resp;
-    },
-  } as unknown as HypersyncClient;
+  return makeHypersyncClient(async (_query) => {
+    const resp = responses[callCount++];
+    if (!resp) throw new Error("Unexpected extra call to client.get()");
+    return resp;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -210,14 +208,12 @@ describe("fetchTransactionsByAddress — pagination", () => {
     };
 
     let callCount = 0;
-    const client = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) return page1;
-        if (callCount === 2) return page2;
-        throw new Error("Unexpected third call to client.get()");
-      },
-    } as unknown as HypersyncClient;
+    const client = makeHypersyncClient(async (_query) => {
+      callCount++;
+      if (callCount === 1) return page1;
+      if (callCount === 2) return page2;
+      throw new Error("Unexpected third call to client.get()");
+    });
 
     const results = await fetchTransactionsByAddress(client, WALLET, 0);
     expect(callCount).toBe(2); // exactly two pages fetched
@@ -242,21 +238,14 @@ describe("fetchTransactionsByAddress — pagination", () => {
       data: { blocks: [], transactions: [tx1], logs: [], traces: [] },
     };
     let callCount = 0;
-    const client = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) return page1;
-        throw new Error("network error");
-      },
-    } as unknown as HypersyncClient;
+    const client = makeHypersyncClient(async (_query) => {
+      callCount++;
+      if (callCount === 1) return page1;
+      throw new Error("network error");
+    });
 
-    try {
-      await fetchTransactionsByAddress(client, WALLET, 0);
-      throw new Error("Expected fetchTransactionsByAddress to reject");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("network error");
-    }
+    const error = await captureError(fetchTransactionsByAddress(client, WALLET, 0));
+    expect(expectError(error).message).toContain("network error");
   });
 
   it("toBlock respected: loop terminates when nextBlock >= toBlock", async () => {
@@ -399,14 +388,12 @@ describe("fetchTokenTransfersByAddress — pagination", () => {
     };
 
     let callCount = 0;
-    const client = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) return page1;
-        if (callCount === 2) return page2;
-        throw new Error("Unexpected third call to client.get()");
-      },
-    } as unknown as HypersyncClient;
+    const client = makeHypersyncClient(async (_query) => {
+      callCount++;
+      if (callCount === 1) return page1;
+      if (callCount === 2) return page2;
+      throw new Error("Unexpected third call to client.get()");
+    });
 
     const results = await fetchTokenTransfersByAddress(client, WALLET, 0);
     expect(callCount).toBe(2); // exactly two pages fetched
@@ -428,21 +415,14 @@ describe("fetchTokenTransfersByAddress — pagination", () => {
       data: { blocks: [], transactions: [], logs: [log1], traces: [] },
     };
     let callCount = 0;
-    const client = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) return page1;
-        throw new Error("network error");
-      },
-    } as unknown as HypersyncClient;
+    const client = makeHypersyncClient(async (_query) => {
+      callCount++;
+      if (callCount === 1) return page1;
+      throw new Error("network error");
+    });
 
-    try {
-      await fetchTokenTransfersByAddress(client, WALLET, 0);
-      throw new Error("Expected fetchTokenTransfersByAddress to reject");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("network error");
-    }
+    const error = await captureError(fetchTokenTransfersByAddress(client, WALLET, 0));
+    expect(expectError(error).message).toContain("network error");
   });
 
   it("toBlock respected: loop terminates when nextBlock >= toBlock", async () => {
@@ -613,14 +593,12 @@ describe("fetchLogsByAddressAndTopics — pagination and termination", () => {
     };
 
     let callCount = 0;
-    const client = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) return page1;
-        if (callCount === 2) return page2;
-        throw new Error("Unexpected third call to client.get()");
-      },
-    } as unknown as HypersyncClient;
+    const client = makeHypersyncClient(async (_query) => {
+      callCount++;
+      if (callCount === 1) return page1;
+      if (callCount === 2) return page2;
+      throw new Error("Unexpected third call to client.get()");
+    });
 
     const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0, 1000);
     expect(callCount).toBe(2);
@@ -652,14 +630,12 @@ describe("fetchLogsByAddressAndTopics — pagination and termination", () => {
     };
 
     let callCount = 0;
-    const client = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) return page1;
-        if (callCount === 2) return page2;
-        throw new Error("Unexpected third call to client.get()");
-      },
-    } as unknown as HypersyncClient;
+    const client = makeHypersyncClient(async (_query) => {
+      callCount++;
+      if (callCount === 1) return page1;
+      if (callCount === 2) return page2;
+      throw new Error("Unexpected third call to client.get()");
+    });
 
     const results = await fetchLogsByAddressAndTopics(client, WALLET, [], 0, 1000);
     expect(callCount).toBe(2);

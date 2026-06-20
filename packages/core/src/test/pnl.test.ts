@@ -32,6 +32,7 @@ await mock.module("../chain/client.js", () => ({
   createClient: () => ({
     getBlockNumber: async () => 100000n,
     getBlock: (args: { blockNumber: bigint }) => mockGetBlock(args),
+    getLogs: async () => [],
   }),
 }));
 
@@ -105,7 +106,7 @@ await mock.module("../math/divergence-loss.js", () => ({
 // Import module under test + DB helpers (after mocks)
 // ---------------------------------------------------------------------------
 
-import { getPosition, upsertPosition } from "../db/store.js";
+import { getPosition, upsertPosition, type StoredPosition } from "../db/store.js";
 import { getPnLView } from "../services/pnl.js";
 import { useTestDb } from "./helpers/db.js";
 
@@ -154,7 +155,7 @@ const baseConfig = {
 };
 
 // Base stored position with open_tx (needed for DB fast-path in open-event section)
-const storedBase = {
+const storedBase: Omit<StoredPosition, "created_at"> = {
   token_id: TOKEN_ID,
   token0: TOKEN0_ADDR,
   token1: TOKEN1_ADDR,
@@ -174,7 +175,7 @@ const storedBase = {
 };
 
 // Stored position that has full close data
-const storedWithClose = {
+const storedWithClose: Omit<StoredPosition, "created_at"> = {
   ...storedBase,
   close_tx: "0xCLOSE",
   exit_amount0: "100",
@@ -475,7 +476,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
     // Explicitly verify that when close_block is null/missing, active branch is taken
     upsertPosition({
       ...storedWithClose,
-      close_block: null as any, // Explicitly null, not 0
+      close_block: null, // Explicitly null, not 0
     });
 
     let liveCallCount = 0;

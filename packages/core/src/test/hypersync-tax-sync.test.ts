@@ -9,9 +9,8 @@
 
 import { describe, expect, it } from "bun:test";
 
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
-
-import type { Client } from "../chain/client.js";
+import type { HypersyncClient as LocalHypersyncClient } from "../chain/hypersync.js";
+import type { TokenMetadataClient } from "../chain/token-metadata.js";
 import {
   getTaxSyncState,
   getTaxTransaction,
@@ -19,7 +18,9 @@ import {
   updateTaxTransactionEurValues,
 } from "../db/store.js";
 import { syncTaxTransactions } from "../services/tax-transactions.js";
+import type { SyncTaxTransactionsOptions } from "../services/tax-transactions.js";
 import { useTestDb } from "./helpers/db.js";
+import { makeHypersyncClient } from "./helpers/hypersync.js";
 
 const WALLET = "0xabcdef1234567890abcdef1234567890abcdef12" as `0x${string}`;
 
@@ -98,44 +99,40 @@ interface MockLog {
  * We return both in every response with archiveHeight = nextBlock so pagination
  * terminates after a single page.
  */
-function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): HypersyncClient {
-  return {
-    get: async (_query: unknown) => {
-      return {
-        archiveHeight: 10_000,
-        nextBlock: 10_000,
-        totalExecutionTime: 1,
-        data: {
-          blocks: [
-            ...txs.map((tx) => ({ number: tx.blockNumber, timestamp: tx.blockTimestamp })),
-            ...logs.map((l) => ({ number: l.blockNumber, timestamp: l.blockTimestamp })),
-          ],
-          transactions: txs.map((tx) => ({
-            hash: tx.hash,
-            blockNumber: tx.blockNumber,
-            from: tx.from,
-            to: tx.to,
-            value: tx.value,
-            gasUsed: tx.gasUsed,
-            gasPrice: tx.gasPrice,
-            effectiveGasPrice: tx.gasPrice,
-            input: tx.input,
-            status: tx.status,
-            sighash: tx.sighash,
-          })),
-          logs: logs.map((l) => ({
-            transactionHash: l.transactionHash,
-            blockNumber: l.blockNumber,
-            logIndex: l.logIndex,
-            address: l.address,
-            data: l.data,
-            topics: l.topics,
-          })),
-          traces: [],
-        },
-      };
+function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): LocalHypersyncClient {
+  return makeHypersyncClient(async (_query) => ({
+    archiveHeight: 10_000,
+    nextBlock: 10_000,
+    totalExecutionTime: 1,
+    data: {
+      blocks: [
+        ...txs.map((tx) => ({ number: tx.blockNumber, timestamp: tx.blockTimestamp })),
+        ...logs.map((l) => ({ number: l.blockNumber, timestamp: l.blockTimestamp })),
+      ],
+      transactions: txs.map((tx) => ({
+        hash: tx.hash,
+        blockNumber: tx.blockNumber,
+        from: tx.from,
+        to: tx.to,
+        value: tx.value,
+        gasUsed: tx.gasUsed,
+        gasPrice: tx.gasPrice,
+        effectiveGasPrice: tx.gasPrice,
+        input: tx.input,
+        status: tx.status,
+        sighash: tx.sighash,
+      })),
+      logs: logs.map((l) => ({
+        transactionHash: l.transactionHash,
+        blockNumber: l.blockNumber,
+        logIndex: l.logIndex,
+        address: l.address,
+        data: l.data,
+        topics: l.topics,
+      })),
+      traces: [],
     },
-  } as unknown as HypersyncClient;
+  }));
 }
 
 /**
@@ -144,10 +141,12 @@ function makeHyperSyncMock(txs: MockTx[], logs: MockLog[]): HypersyncClient {
  */
 function makeViemMock(
   metadata: Record<string, { symbol: string | null; name: string | null; decimals: number | null }>,
-): Client {
+): NonNullable<SyncTaxTransactionsOptions["viemClient"]> {
   return {
-    readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
-      const m = metadata[address.toLowerCase()];
+    readContract: async (args) => {
+      const address = String(args.address).toLowerCase();
+      const functionName = args.functionName;
+      const m = metadata[address];
       if (!m) throw new Error(`No metadata for ${address}`);
       if (functionName === "symbol") {
         if (m.symbol === null) throw new Error("no symbol");
@@ -163,7 +162,7 @@ function makeViemMock(
       }
       throw new Error(`Unknown function ${functionName}`);
     },
-  } as unknown as Client;
+  } satisfies TokenMetadataClient;
 }
 
 /** Pad a 20-byte address to 32-byte topic format */

@@ -9,9 +9,56 @@
 
 import { describe, it, expect } from "bun:test";
 
-import type { Address } from "viem";
+import type {
+  Abi,
+  Address,
+  ContractFunctionArgs,
+  ContractFunctionName,
+  ReadContractParameters,
+  ReadContractReturnType,
+} from "viem";
 
 import { computeUnclaimedFees } from "../chain/pools.js";
+
+type ComputeFeesClient = Parameters<typeof computeUnclaimedFees>[0];
+type TickReadResult = readonly [bigint, bigint, bigint, bigint, bigint, bigint, number, boolean];
+
+function makeTickReadResult(data: {
+  liquidityGross: bigint;
+  liquidityNet: bigint;
+  feeGrowthOutside0X128: bigint;
+  feeGrowthOutside1X128: bigint;
+}): TickReadResult {
+  return [
+    data.liquidityGross,
+    data.liquidityNet,
+    data.feeGrowthOutside0X128,
+    data.feeGrowthOutside1X128,
+    0n,
+    0n,
+    0,
+    false,
+  ];
+}
+
+function makeReadContract(impl: () => Promise<TickReadResult>): ComputeFeesClient["readContract"] {
+  function readContract<
+    const abi extends Abi | readonly unknown[],
+    functionName extends ContractFunctionName<abi, "pure" | "view">,
+    const args extends ContractFunctionArgs<abi, "pure" | "view", functionName>,
+  >(
+    _args: ReadContractParameters<abi, functionName, args>,
+  ): Promise<ReadContractReturnType<abi, functionName, args>>;
+  async function readContract(_args: unknown): Promise<unknown> {
+    return impl();
+  }
+
+  return readContract;
+}
+
+function makeClient(impl: () => Promise<TickReadResult>): ComputeFeesClient {
+  return { readContract: makeReadContract(impl) };
+}
 
 describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
   // Test data
@@ -50,68 +97,45 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
   };
 
   // Mock client that returns valid tick data
-  const successClient = {
-    readContract: async () => {
-      return [
-        tickLowerData.liquidityGross,
-        tickLowerData.liquidityNet,
-        tickLowerData.feeGrowthOutside0X128,
-        tickLowerData.feeGrowthOutside1X128,
-      ];
-    },
-  };
+  const successClient = makeClient(async () => makeTickReadResult(tickLowerData));
 
   // Mock client that always throws
-  const failingClient = {
-    readContract: async () => {
-      throw new Error("RPC error");
-    },
-  };
+  const failingClient = makeClient(async () => {
+    throw new Error("RPC error");
+  });
 
   // Mock client that throws on first call, succeeds on second
-  const failOnFirstClient = {
-    callCount: 0,
-    readContract: async function () {
-      this.callCount++;
-      if (this.callCount === 1) {
+  const failOnFirstClient = (() => {
+    let callCount = 0;
+    return makeClient(async () => {
+      callCount += 1;
+      if (callCount === 1) {
         throw new Error("RPC failed: lower tick data");
       }
-      return [
-        tickUpperData.liquidityGross,
-        tickUpperData.liquidityNet,
-        tickUpperData.feeGrowthOutside0X128,
-        tickUpperData.feeGrowthOutside1X128,
-      ];
-    },
-  };
+      return makeTickReadResult(tickUpperData);
+    });
+  })();
 
   // Mock client that throws on second call, succeeds on first
-  const failOnSecondClient = {
-    callCount: 0,
-    readContract: async function () {
-      this.callCount++;
-      if (this.callCount === 2) {
+  const failOnSecondClient = (() => {
+    let callCount = 0;
+    return makeClient(async () => {
+      callCount += 1;
+      if (callCount === 2) {
         throw new Error("RPC failed: upper tick data");
       }
-      return [
-        tickLowerData.liquidityGross,
-        tickLowerData.liquidityNet,
-        tickLowerData.feeGrowthOutside0X128,
-        tickLowerData.feeGrowthOutside1X128,
-      ];
-    },
-  };
+      return makeTickReadResult(tickLowerData);
+    });
+  })();
 
   // Mock client that throws non-Error string
-  const failWithStringClient = {
-    readContract: async () => {
-      throw "timeout"; // Non-Error value
-    },
-  };
+  const failWithStringClient = makeClient(async () => {
+    throw "timeout"; // Non-Error value
+  });
 
   it("happy path: both readContract calls succeed → fees computed correctly", async () => {
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       position,
       poolState,
@@ -129,7 +153,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
 
   it("lower tick readContract fails → Promise.all rejects → returns { fees0: 0, fees1: 0 }", async () => {
     const result = await computeUnclaimedFees(
-      failOnFirstClient as any,
+      failOnFirstClient,
       poolAddress,
       position,
       poolState,
@@ -142,7 +166,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
 
   it("upper tick readContract fails → Promise.all rejects → returns { fees0: 0, fees1: 0 }", async () => {
     const result = await computeUnclaimedFees(
-      failOnSecondClient as any,
+      failOnSecondClient,
       poolAddress,
       position,
       poolState,
@@ -155,7 +179,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
 
   it("both readContract calls fail → Promise.all rejects → returns { fees0: 0, fees1: 0 }", async () => {
     const result = await computeUnclaimedFees(
-      failingClient as any,
+      failingClient,
       poolAddress,
       position,
       poolState,
@@ -168,7 +192,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
 
   it("readContract throws non-Error value (string) → caught by catch block → returns { fees0: 0, fees1: 0 }", async () => {
     const result = await computeUnclaimedFees(
-      failWithStringClient as any,
+      failWithStringClient,
       poolAddress,
       position,
       poolState,
@@ -181,7 +205,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
 
   it("returns exactly { fees0: 0, fees1: 0 } on error, not partial results", async () => {
     const result = await computeUnclaimedFees(
-      failingClient as any,
+      failingClient,
       poolAddress,
       position,
       poolState,
@@ -200,28 +224,23 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
     let lowerCalled = false;
     let upperCalled = false;
 
-    const concurrentClient = {
-      callCount: 0,
-      readContract: async function () {
-        this.callCount++;
-        if (this.callCount === 1) {
+    const concurrentClient = (() => {
+      let callCount = 0;
+      return makeClient(async () => {
+        callCount += 1;
+        if (callCount === 1) {
           lowerCalled = true;
           // Delay to ensure upper call is initiated before this throws
           await new Promise((resolve) => setTimeout(resolve, 10));
           throw new Error("Lower tick failed");
         }
         upperCalled = true;
-        return [
-          tickUpperData.liquidityGross,
-          tickUpperData.liquidityNet,
-          tickUpperData.feeGrowthOutside0X128,
-          tickUpperData.feeGrowthOutside1X128,
-        ];
-      },
-    };
+        return makeTickReadResult(tickUpperData);
+      });
+    })();
 
     const result = await computeUnclaimedFees(
-      concurrentClient as any,
+      concurrentClient,
       poolAddress,
       position,
       poolState,
@@ -238,7 +257,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
 
   it("error does not propagate — function returns { fees0: 0, fees1: 0 }", async () => {
     const result = await computeUnclaimedFees(
-      failingClient as any,
+      failingClient,
       poolAddress,
       position,
       poolState,
@@ -257,7 +276,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
     };
 
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       zeroLiquidityPosition,
       poolState,
@@ -278,7 +297,7 @@ describe("computeUnclaimedFees — RPC failures and error swallowing", () => {
     };
 
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       largeLiquidityPosition,
       poolState,
@@ -314,16 +333,7 @@ describe("computeUnclaimedFees — boundary values", () => {
   };
 
   // Mock client that returns valid tick data
-  const successClient = {
-    readContract: async () => {
-      return [
-        tickLowerData.liquidityGross,
-        tickLowerData.liquidityNet,
-        tickLowerData.feeGrowthOutside0X128,
-        tickLowerData.feeGrowthOutside1X128,
-      ];
-    },
-  };
+  const successClient = makeClient(async () => makeTickReadResult(tickLowerData));
 
   it("liquidity = 0n with tokensOwed = 0 → returns { fees0: 0, fees1: 0 }", async () => {
     const zeroLiquidityPosition = {
@@ -337,7 +347,7 @@ describe("computeUnclaimedFees — boundary values", () => {
     };
 
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       zeroLiquidityPosition,
       poolState,
@@ -362,7 +372,7 @@ describe("computeUnclaimedFees — boundary values", () => {
     };
 
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       zeroLiquidityWithTokensOwedPosition,
       poolState,
@@ -394,16 +404,7 @@ describe("computeUnclaimedFees — boundary values", () => {
     };
 
     // Mock client that returns small current fee growth (triggers wrap-around path)
-    const wrapAroundClient = {
-      readContract: async () => {
-        return [
-          tickLowerData.liquidityGross,
-          tickLowerData.liquidityNet,
-          tickLowerData.feeGrowthOutside0X128,
-          tickLowerData.feeGrowthOutside1X128,
-        ];
-      },
-    };
+    const wrapAroundClient = makeClient(async () => makeTickReadResult(tickLowerData));
 
     // Override poolState to have small feeGrowthGlobal values
     const wrapAroundPoolState = {
@@ -415,7 +416,7 @@ describe("computeUnclaimedFees — boundary values", () => {
     };
 
     const result = await computeUnclaimedFees(
-      wrapAroundClient as any,
+      wrapAroundClient,
       poolAddress,
       wrapAroundPosition,
       wrapAroundPoolState,
@@ -455,7 +456,7 @@ describe("computeUnclaimedFees — boundary values", () => {
     };
 
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       position,
       boundaryPoolState,
@@ -494,7 +495,7 @@ describe("computeUnclaimedFees — boundary values", () => {
     };
 
     const result = await computeUnclaimedFees(
-      successClient as any,
+      successClient,
       poolAddress,
       position,
       boundaryPoolState,
@@ -517,16 +518,14 @@ describe("computeUnclaimedFees — output contract", () => {
   const poolAddress = "0x0000000000000000000000000000000000000001" as Address;
 
   // Mock client that returns zero fee growth (so only tokensOwed contributes)
-  const zeroFeeGrowthClient = {
-    readContract: async () => {
-      return [
-        0n, // liquidityGross
-        0n, // liquidityNet
-        0n, // feeGrowthOutside0X128
-        0n, // feeGrowthOutside1X128
-      ];
-    },
-  };
+  const zeroFeeGrowthClient = makeClient(async () =>
+    makeTickReadResult({
+      liquidityGross: 0n,
+      liquidityNet: 0n,
+      feeGrowthOutside0X128: 0n,
+      feeGrowthOutside1X128: 0n,
+    }),
+  );
 
   it("return type is { fees0: number; fees1: number } (floats, not bigints)", async () => {
     const position = {
@@ -548,7 +547,7 @@ describe("computeUnclaimedFees — output contract", () => {
     };
 
     const result = await computeUnclaimedFees(
-      zeroFeeGrowthClient as any,
+      zeroFeeGrowthClient,
       poolAddress,
       position,
       poolState,
@@ -582,7 +581,7 @@ describe("computeUnclaimedFees — output contract", () => {
     };
 
     const result = await computeUnclaimedFees(
-      zeroFeeGrowthClient as any,
+      zeroFeeGrowthClient,
       poolAddress,
       position,
       poolState,
@@ -616,7 +615,7 @@ describe("computeUnclaimedFees — output contract", () => {
     };
 
     const result = await computeUnclaimedFees(
-      zeroFeeGrowthClient as any,
+      zeroFeeGrowthClient,
       poolAddress,
       position,
       poolState,
@@ -655,7 +654,7 @@ describe("computeUnclaimedFees — output contract", () => {
     };
 
     const result = await computeUnclaimedFees(
-      zeroFeeGrowthClient as any,
+      zeroFeeGrowthClient,
       poolAddress,
       position,
       poolState,
@@ -687,7 +686,7 @@ describe("computeUnclaimedFees — output contract", () => {
     };
 
     const result = await computeUnclaimedFees(
-      zeroFeeGrowthClient as any,
+      zeroFeeGrowthClient,
       poolAddress,
       position,
       poolState,

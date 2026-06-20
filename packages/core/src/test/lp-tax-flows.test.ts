@@ -11,12 +11,13 @@
 
 import { describe, expect, it } from "bun:test";
 
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
+import { createPublicClient, custom, toHex } from "viem";
+import type { RpcBlock } from "viem";
 
-import type { Client } from "../chain/client.js";
 import { getTaxTransaction, updateTaxTransactionEurValues, upsertPosition } from "../db/store.js";
 import { syncLpTaxFlows, syncTaxTransactions } from "../services/tax-transactions.js";
 import { useTestDb } from "./helpers/db.js";
+import { makeHypersyncClient } from "./helpers/hypersync.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -29,6 +30,16 @@ const POSITION_MANAGER = "0xead19ae861c29bbb2101e834922b2feee69b9091";
 
 const OPEN_TX = "0x1111111111111111111111111111111111111111111111111111111111111111";
 const CLOSE_TX = "0x2222222222222222222222222222222222222222222222222222222222222222";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const ZERO_HASH = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const ZERO_NONCE = "0x0000000000000000";
+
+type SyncLpTaxFlowsOptions = NonNullable<Parameters<typeof syncLpTaxFlows>[1]>;
+type SyncLpTaxFlowsClient = NonNullable<SyncLpTaxFlowsOptions["viemClient"]>;
+type SyncTaxTransactionsOptions = NonNullable<Parameters<typeof syncTaxTransactions>[1]>;
+type SyncTaxTransactionsClient = NonNullable<SyncTaxTransactionsOptions["viemClient"]>;
+type TestViemClient = SyncLpTaxFlowsClient & SyncTaxTransactionsClient;
+type TaxTransactionRow = NonNullable<ReturnType<typeof getTaxTransaction>>;
 
 // ---------------------------------------------------------------------------
 // Config helpers
@@ -56,23 +67,78 @@ function makeConfig() {
 /**
  * Viem client mock.
  * blockTimestamps: blockNumber → timestamp bigint; if not in map, throws (simulates RPC error).
- * Pass null value to simulate block with timestamp = 0n (falsy BigInt).
+ * Pass 0n to simulate block with timestamp = 0n (falsy BigInt).
  */
+function makeMockBlock(timestamp: bigint, blockNumber: bigint): RpcBlock {
+  return {
+    baseFeePerGas: null,
+    blobGasUsed: toHex(0),
+    difficulty: toHex(0),
+    excessBlobGas: toHex(0),
+    extraData: "0x",
+    gasLimit: toHex(0),
+    gasUsed: toHex(0),
+    hash: ZERO_HASH,
+    logsBloom: ZERO_HASH,
+    miner: ZERO_ADDRESS,
+    mixHash: ZERO_HASH,
+    nonce: ZERO_NONCE,
+    number: toHex(blockNumber),
+    parentHash: ZERO_HASH,
+    receiptsRoot: ZERO_HASH,
+    sealFields: [],
+    sha3Uncles: ZERO_HASH,
+    size: toHex(0),
+    stateRoot: ZERO_HASH,
+    timestamp: toHex(timestamp),
+    totalDifficulty: null,
+    transactions: [],
+    transactionsRoot: ZERO_HASH,
+    uncles: [],
+  };
+}
+
+function requireTaxTransaction(id: string): TaxTransactionRow {
+  const row = getTaxTransaction(id);
+  if (row === null) {
+    throw new Error(`Expected tax transaction ${id}`);
+  }
+  return row;
+}
+
 function makeViemMock(
   blockTimestamps: Record<number, bigint | "throw"> = {},
   getBlockCalls?: number[],
-): Client {
-  return {
-    getBlock: async ({ blockNumber }: { blockNumber: bigint }) => {
-      const num = Number(blockNumber);
-      if (getBlockCalls) getBlockCalls.push(num);
-      const ts = blockTimestamps[num];
-      if (ts === "throw" || ts === undefined) {
-        throw new Error(`Mock RPC failure for block ${num}`);
-      }
-      return { timestamp: ts };
-    },
-  } as unknown as Client;
+): TestViemClient {
+  const client: TestViemClient = createPublicClient({
+    transport: custom(
+      {
+        async request({ method, params }: { method: string; params?: unknown }) {
+          if (method !== "eth_getBlockByNumber") {
+            throw new Error(`Unsupported mock RPC method: ${method}`);
+          }
+
+          if (!Array.isArray(params) || typeof params[0] !== "string") {
+            throw new Error("Mock getBlock expected a block number param");
+          }
+
+          const blockRef = params[0];
+          const blockNumber = blockRef.startsWith("0x") ? Number(BigInt(blockRef)) : 0;
+          if (getBlockCalls) getBlockCalls.push(blockNumber);
+
+          const timestamp = blockTimestamps[blockNumber];
+          if (timestamp === "throw" || timestamp === undefined) {
+            throw new Error(`Mock RPC failure for block ${blockNumber}`);
+          }
+
+          return makeMockBlock(timestamp, BigInt(blockNumber));
+        },
+      },
+      { retryCount: 0 },
+    ),
+  });
+
+  return client;
 }
 
 /** A minimal closed position with both tokens and all optional fields. */
@@ -124,19 +190,17 @@ function makePosition(
 }
 
 /** Full default viem mock for blocks 1000 and 2000 */
-function makeDefaultViemMock(getBlockCalls?: number[]): Client {
+function makeDefaultViemMock(getBlockCalls?: number[]): TestViemClient {
   return makeViemMock({ 1000: 1700000000n, 2000: 1700100000n }, getBlockCalls);
 }
 
 // HyperSync no-op mock (returns nothing, terminates pagination)
-const noOpHyperSyncClient = {
-  get: async (_query: unknown) => ({
-    archiveHeight: 99999,
-    nextBlock: 99999,
-    totalExecutionTime: 1,
-    data: { blocks: [], transactions: [], logs: [], traces: [] },
-  }),
-} as unknown as HypersyncClient;
+const noOpHyperSyncClient = makeHypersyncClient(async (_query) => ({
+  archiveHeight: 99999,
+  nextBlock: 99999,
+  totalExecutionTime: 1,
+  data: { blocks: [], transactions: [], logs: [], traces: [] },
+}));
 
 // Explorer fetcher that returns no results
 const noOpFetcher = async (_url: string) => ({
@@ -291,16 +355,16 @@ describe("m1t3 — idempotency and EUR preservation on re-run", () => {
       gain_eur: "-1234.00",
     });
 
-    const rowBefore = getTaxTransaction(depositId);
-    expect(rowBefore!.cost_eur).toBe("1234.00");
+    const rowBefore = requireTaxTransaction(depositId);
+    expect(rowBefore.cost_eur).toBe("1234.00");
 
     // Re-sync
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const rowAfter = getTaxTransaction(depositId);
+    const rowAfter = requireTaxTransaction(depositId);
     // EUR values must be preserved by the ON CONFLICT ... SET which excludes EUR columns
-    expect(rowAfter!.cost_eur).toBe("1234.00");
-    expect(rowAfter!.gain_eur).toBe("-1234.00");
+    expect(rowAfter.cost_eur).toBe("1234.00");
+    expect(rowAfter.gain_eur).toBe("-1234.00");
   });
 
   it("adding a new position on second run creates its entries while preserving existing ones", async () => {
@@ -356,9 +420,8 @@ describe("m1t4 — block timestamp resolution", () => {
       viemClient: makeViemMock({ 1000: "throw" }),
     });
     expect(result.synced).toBeGreaterThanOrEqual(1);
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
-    expect(row!.time_stamp).toBeNull();
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(row.time_stamp).toBeNull();
   });
 
   it("RPC failure for close block: withdrawal and fee entries still created with time_stamp=null", async () => {
@@ -367,9 +430,8 @@ describe("m1t4 — block timestamp resolution", () => {
       viemClient: makeViemMock({ 1000: 1700000000n, 2000: "throw" }),
     });
     expect(result.synced).toBeGreaterThanOrEqual(1);
-    const row = getTaxTransaction(`lp:withdrawal:${CLOSE_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
-    expect(row!.time_stamp).toBeNull();
+    const row = requireTaxTransaction(`lp:withdrawal:${CLOSE_TX}:${TOKEN0}:0`);
+    expect(row.time_stamp).toBeNull();
   });
 
   it("same block number shared by two positions: getBlock called exactly once for that block", async () => {
@@ -419,10 +481,9 @@ describe("m1t4 — block timestamp resolution", () => {
     await syncLpTaxFlows(makeConfig(), {
       viemClient: makeViemMock({ 1000: 0n }),
     });
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
     // 0n is falsy, so the implementation treats it as null
-    expect(row!.time_stamp).toBeNull();
+    expect(row.time_stamp).toBeNull();
   });
 
   it("valid block timestamp: entry has correct ISO 8601 time_stamp", async () => {
@@ -438,9 +499,8 @@ describe("m1t4 — block timestamp resolution", () => {
     await syncLpTaxFlows(makeConfig(), {
       viemClient: makeViemMock({ 1000: BigInt(unixTs) }),
     });
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
-    expect(row!.time_stamp).toBe(new Date(unixTs * 1000).toISOString());
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(row.time_stamp).toBe(new Date(unixTs * 1000).toISOString());
   });
 });
 
@@ -462,29 +522,27 @@ describe("m1t5 — LP entry construction", () => {
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
-    expect(row!.from_address).toBe(WALLET.toLowerCase());
-    expect(row!.to_address?.toLowerCase()).toBe(POSITION_MANAGER.toLowerCase());
-    expect(row!.outgoing_quantity).not.toBeNull();
-    expect(row!.outgoing_asset).toBe("WHYPE");
-    expect(row!.incoming_quantity).toBeNull();
-    expect(row!.incoming_asset).toBeNull();
-    expect(row!.transaction_type).toBe("lp-deposit");
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(row.from_address).toBe(WALLET.toLowerCase());
+    expect(row.to_address?.toLowerCase()).toBe(POSITION_MANAGER.toLowerCase());
+    expect(row.outgoing_quantity).not.toBeNull();
+    expect(row.outgoing_asset).toBe("WHYPE");
+    expect(row.incoming_quantity).toBeNull();
+    expect(row.incoming_asset).toBeNull();
+    expect(row.transaction_type).toBe("lp-deposit");
   });
 
   it("withdrawal entry: from_address=null, incoming set, outgoing null", async () => {
     makePosition({ entry_amount0: null, entry_amount1: null }); // skip deposits
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:withdrawal:${CLOSE_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
-    expect(row!.from_address).toBeNull();
-    expect(row!.incoming_quantity).not.toBeNull();
-    expect(row!.incoming_asset).toBe("WHYPE");
-    expect(row!.outgoing_quantity).toBeNull();
-    expect(row!.outgoing_asset).toBeNull();
-    expect(row!.transaction_type).toBe("lp-withdrawal");
+    const row = requireTaxTransaction(`lp:withdrawal:${CLOSE_TX}:${TOKEN0}:0`);
+    expect(row.from_address).toBeNull();
+    expect(row.incoming_quantity).not.toBeNull();
+    expect(row.incoming_asset).toBe("WHYPE");
+    expect(row.outgoing_quantity).toBeNull();
+    expect(row.outgoing_asset).toBeNull();
+    expect(row.transaction_type).toBe("lp-withdrawal");
   });
 
   it("fee entry: incoming set, outgoing null, transaction_type=lp-fees", async () => {
@@ -496,12 +554,11 @@ describe("m1t5 — LP entry construction", () => {
     }); // only fees
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:fees:${CLOSE_TX}:${TOKEN0}:0`);
-    expect(row).not.toBeNull();
-    expect(row!.incoming_quantity).not.toBeNull();
-    expect(row!.incoming_asset).toBe("WHYPE");
-    expect(row!.outgoing_quantity).toBeNull();
-    expect(row!.transaction_type).toBe("lp-fees");
+    const row = requireTaxTransaction(`lp:fees:${CLOSE_TX}:${TOKEN0}:0`);
+    expect(row.incoming_quantity).not.toBeNull();
+    expect(row.incoming_asset).toBe("WHYPE");
+    expect(row.outgoing_quantity).toBeNull();
+    expect(row.transaction_type).toBe("lp-fees");
   });
 
   it("ID contract: lp:{type}:{hash}:{tokenAddress}:{tokenIndex}", async () => {
@@ -530,8 +587,8 @@ describe("m1t5 — LP entry construction", () => {
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(row!.outgoing_quantity).toBe("1");
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(row.outgoing_quantity).toBe("1");
   });
 
   it("WHYPE 18-decimal formatting: 1.5e18 wei → outgoing_quantity='1.5'", async () => {
@@ -547,8 +604,8 @@ describe("m1t5 — LP entry construction", () => {
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(row!.outgoing_quantity).toBe("1.5");
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(row.outgoing_quantity).toBe("1.5");
   });
 
   it("USDC 6-decimal formatting: 1_000_000 raw → outgoing_quantity='1'", async () => {
@@ -564,8 +621,8 @@ describe("m1t5 — LP entry construction", () => {
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
-    expect(row!.outgoing_quantity).toBe("1");
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
+    expect(row.outgoing_quantity).toBe("1");
   });
 
   it("USDC 6-decimal formatting: 9_538_000 raw → outgoing_quantity='9.538'", async () => {
@@ -582,8 +639,8 @@ describe("m1t5 — LP entry construction", () => {
     });
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const row = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
-    expect(row!.outgoing_quantity).toBe("9.538");
+    const row = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
+    expect(row.outgoing_quantity).toBe("9.538");
   });
 
   it("source field is 'lp-events' for all entry types", async () => {
@@ -599,9 +656,8 @@ describe("m1t5 — LP entry construction", () => {
       `lp:fees:${CLOSE_TX}:${TOKEN1}:1`,
     ];
     for (const id of ids) {
-      const row = getTaxTransaction(id);
-      expect(row).not.toBeNull();
-      expect(row!.source).toBe("lp-events");
+      const row = requireTaxTransaction(id);
+      expect(row.source).toBe("lp-events");
     }
   });
 
@@ -615,7 +671,7 @@ describe("m1t5 — LP entry construction", () => {
       `lp:fees:${CLOSE_TX}:${TOKEN0}:0`,
     ];
     for (const id of ids) {
-      expect(getTaxTransaction(id)!.is_error).toBe(0);
+      expect(requireTaxTransaction(id).is_error).toBe(0);
     }
   });
 
@@ -623,33 +679,33 @@ describe("m1t5 — LP entry construction", () => {
     makePosition({});
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    expect(getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`)!.block_number).toBe(1000);
-    expect(getTaxTransaction(`lp:withdrawal:${CLOSE_TX}:${TOKEN0}:0`)!.block_number).toBe(2000);
-    expect(getTaxTransaction(`lp:fees:${CLOSE_TX}:${TOKEN0}:0`)!.block_number).toBe(2000);
+    expect(requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`).block_number).toBe(1000);
+    expect(requireTaxTransaction(`lp:withdrawal:${CLOSE_TX}:${TOKEN0}:0`).block_number).toBe(2000);
+    expect(requireTaxTransaction(`lp:fees:${CLOSE_TX}:${TOKEN0}:0`).block_number).toBe(2000);
   });
 
   it("contract_address matches token address for each entry", async () => {
     makePosition({});
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const deposit0 = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(deposit0!.contract_address).toBe(TOKEN0);
+    const deposit0 = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(deposit0.contract_address).toBe(TOKEN0);
 
-    const deposit1 = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
-    expect(deposit1!.contract_address).toBe(TOKEN1);
+    const deposit1 = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
+    expect(deposit1.contract_address).toBe(TOKEN1);
   });
 
   it("token_symbol and token_decimal stored from position metadata", async () => {
     makePosition({});
     await syncLpTaxFlows(makeConfig(), { viemClient: makeDefaultViemMock() });
 
-    const deposit0 = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
-    expect(deposit0!.token_symbol).toBe("WHYPE");
-    expect(deposit0!.token_decimal).toBe(18);
+    const deposit0 = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN0}:0`);
+    expect(deposit0.token_symbol).toBe("WHYPE");
+    expect(deposit0.token_decimal).toBe(18);
 
-    const deposit1 = getTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
-    expect(deposit1!.token_symbol).toBe("USDC");
-    expect(deposit1!.token_decimal).toBe(6);
+    const deposit1 = requireTaxTransaction(`lp:deposit:${OPEN_TX}:${TOKEN1}:1`);
+    expect(deposit1.token_symbol).toBe("USDC");
+    expect(deposit1.token_decimal).toBe(6);
   });
 
   it("two positions in same pool with different open_tx produce distinct IDs", async () => {
@@ -726,14 +782,12 @@ describe("m1t6 — syncTaxTransactions integration", () => {
     makePosition({});
 
     // HyperSync mock that returns zero transactions
-    const emptyHyperSyncClient = {
-      get: async (_query: unknown) => ({
-        archiveHeight: 99999,
-        nextBlock: 99999,
-        totalExecutionTime: 1,
-        data: { blocks: [], transactions: [], logs: [], traces: [] },
-      }),
-    } as unknown as HypersyncClient;
+    const emptyHyperSyncClient = makeHypersyncClient(async (_query) => ({
+      archiveHeight: 99999,
+      nextBlock: 99999,
+      totalExecutionTime: 1,
+      data: { blocks: [], transactions: [], logs: [], traces: [] },
+    }));
 
     const summary = await syncTaxTransactions(
       { ...makeConfig(), tax: { hyperSyncUrl: "x", hyperSyncApiToken: "tok" }, logsRpc: undefined },

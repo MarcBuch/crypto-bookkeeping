@@ -1,6 +1,7 @@
 import { createPublicClient, defineChain, custom } from "viem";
 
 import type { Config } from "../config";
+import { isRecord } from "../utils/guards.js";
 
 // Both the Hyperliquid public RPC and Envio HyperRPC use certificates that
 // Bun's bundled CA store does not recognise. Disable verification only for
@@ -35,6 +36,28 @@ const TRANSPORT_TIMEOUT = 30_000;
 // to a full node. See https://docs.envio.dev/docs/HyperRPC/overview-hyperrpc
 const HYPER_RPC_METHODS = new Set(["eth_getLogs", "eth_getTransactionReceipt"]);
 
+type RpcResponse = {
+  result?: unknown;
+  error?: { code: number; message: string };
+};
+
+function parseRpcResponse(value: unknown): RpcResponse {
+  if (!isRecord(value)) return {};
+
+  const error = isRecord(value.error)
+    ? {
+        code: typeof value.error.code === "number" ? value.error.code : 0,
+        message:
+          typeof value.error.message === "string" ? value.error.message : "Unknown RPC error",
+      }
+    : undefined;
+
+  return {
+    result: value.result,
+    error,
+  };
+}
+
 async function fetchRpc(url: string, method: string, params: unknown): Promise<unknown> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TRANSPORT_TIMEOUT);
@@ -47,28 +70,28 @@ async function fetchRpc(url: string, method: string, params: unknown): Promise<u
       signal: controller.signal,
     });
 
-    const data = (await response.json()) as {
-      result?: unknown;
-      error?: { code: number; message: string };
-    };
+    const data = parseRpcResponse(await response.json());
 
     if (data.error) {
-      const err = new Error(data.error.message) as Error & { code: number; details: string };
+      const err = Object.assign(new Error(data.error.message), {
+        code: data.error.code,
+        details: data.error.message,
+      });
       err.code = data.error.code;
       err.details = data.error.message;
       throw err;
     }
 
     return data.result;
-  } catch (err: any) {
-    if (err.name === "AbortError") {
-      const timeout = new Error(`RPC request timed out after ${TRANSPORT_TIMEOUT}ms`) as Error & {
-        code: number;
-      };
-      timeout.code = -32099;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "AbortError") {
+      const timeout = Object.assign(
+        new Error(`RPC request timed out after ${TRANSPORT_TIMEOUT}ms`),
+        { code: -32099 },
+      );
       throw timeout;
     }
-    throw err;
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -80,7 +103,7 @@ async function fetchRpc(url: string, method: string, params: unknown): Promise<u
  * other methods (eth_call, etc.) to the standard full-node RPC (config.rpc).
  * Falls back to config.rpc for both if config.logsRpc is not set.
  */
-function createRoutedTransport(config: Config) {
+function createRoutedTransport(config: Pick<Config, "rpc" | "logsRpc">) {
   const logsUrl = config.logsRpc ?? config.rpc;
   const callUrl = config.rpc;
 
@@ -95,7 +118,7 @@ function createRoutedTransport(config: Config) {
   );
 }
 
-export function createClient(config: Config) {
+export function createClient(config: Pick<Config, "rpc" | "logsRpc">) {
   return createPublicClient({
     chain: hyperEvm,
     transport: createRoutedTransport(config),

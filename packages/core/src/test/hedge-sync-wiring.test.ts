@@ -21,10 +21,10 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 // Mocks must be set up BEFORE importing the module under test
 // ---------------------------------------------------------------------------
 
-let mockGetPositionData: (...args: unknown[]) => unknown = async () => ({});
-let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
-let mockGetHedgeView: (...args: unknown[]) => unknown = async () => ({});
-let mockSnapshotHedge: (...args: unknown[]) => unknown = () => {};
+let mockGetPositionData: (...args: unknown[]) => Promise<unknown> = async () => ({});
+let mockGetPnLView: (...args: unknown[]) => Promise<unknown> = async () => [];
+let mockGetHedgeView: (config: unknown, tokenId: string) => Promise<unknown> = async () => ({});
+let mockSnapshotHedge: (view: unknown) => void = () => {};
 
 await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
@@ -79,8 +79,8 @@ await mock.module("../services/pnl.js", () => ({
 }));
 
 await mock.module("../services/hedge.js", () => ({
-  getHedgeView: (...args: unknown[]) => mockGetHedgeView(...args),
-  snapshotHedge: (...args: unknown[]) => mockSnapshotHedge(...args),
+  getHedgeView: (config: unknown, tokenId: string) => mockGetHedgeView(config, tokenId),
+  snapshotHedge: (view: unknown) => mockSnapshotHedge(view),
 }));
 
 // ---------------------------------------------------------------------------
@@ -418,9 +418,9 @@ describe("hedge sync wiring — happy path", () => {
     // Track getHedgeView calls
     let getHedgeViewCalled = false;
     let getHedgeViewCalledWithTokenId = "";
-    mockGetHedgeView = (...args: unknown[]) => {
+    mockGetHedgeView = (_config, tokenId) => {
       getHedgeViewCalled = true;
-      getHedgeViewCalledWithTokenId = args[1] as string;
+      getHedgeViewCalledWithTokenId = tokenId;
       return Promise.resolve(fakeHedgeView);
     };
 

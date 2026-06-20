@@ -1,11 +1,19 @@
 import { describe, expect, it } from "bun:test";
 
-import { encodeAbiParameters, type TransactionReceipt } from "viem";
+import { encodeAbiParameters } from "viem";
 
 import { findCloseEvent, findCloseEventFromTx, findOpenEvent } from "../chain/events.js";
 
 type Hex = `0x${string}`;
 type CloseClient = Parameters<typeof findCloseEventFromTx>[0];
+type OpenClient = Parameters<typeof findOpenEvent>[0];
+type Receipt = Awaited<ReturnType<CloseClient["getTransactionReceipt"]>>;
+type GetLogs = OpenClient["getLogs"];
+type SimpleEventLog = {
+  args: Record<string, bigint>;
+  blockNumber: bigint;
+  transactionHash: Hex;
+};
 
 const TX_HASH = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 const RECIPIENT = "0x2222222222222222222222222222222222222222" as Hex;
@@ -15,7 +23,7 @@ const DECREASE_LIQUIDITY_TOPIC =
 const COLLECT_TOPIC = "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01" as Hex;
 
 function tokenTopic(tokenId: bigint): Hex {
-  return `0x${tokenId.toString(16).padStart(64, "0")}` as Hex;
+  return `0x${tokenId.toString(16).padStart(64, "0")}`;
 }
 
 function decreaseLog(tokenId: bigint, amount0: bigint, amount1: bigint, liquidity = 999n) {
@@ -38,18 +46,30 @@ function collectLog(tokenId: bigint, amount0: bigint, amount1: bigint) {
   };
 }
 
+function makeEventLog(
+  args: Record<string, bigint>,
+  blockNumber: bigint,
+  transactionHash: Hex,
+): SimpleEventLog {
+  return {
+    args,
+    blockNumber,
+    transactionHash,
+  };
+}
+
 function clientForLogs(
   logs: Array<ReturnType<typeof decreaseLog> | ReturnType<typeof collectLog>>,
 ) {
-  const receipt = {
+  const receipt: Receipt = {
     blockNumber: 458834n,
     transactionHash: TX_HASH,
     logs,
-  } as unknown as TransactionReceipt;
+  };
 
   return {
     getTransactionReceipt: async () => receipt,
-  } as unknown as CloseClient;
+  };
 }
 
 describe("findCloseEventFromTx", () => {
@@ -134,7 +154,12 @@ describe("findCloseEventFromTx", () => {
 const POSITION_MANAGER = "0x3333333333333333333333333333333333333333" as Hex;
 const WALLET = "0x4444444444444444444444444444444444444444" as Hex;
 
-type OpenClient = Parameters<typeof findOpenEvent>[0];
+function makeOpenClient(getLogs: GetLogs, latestBlock: bigint): OpenClient {
+  return {
+    getBlockNumber: async () => latestBlock,
+    getLogs,
+  };
+}
 
 /**
  * Mock client that exposes a controllable latestBlock and captures every
@@ -143,13 +168,14 @@ type OpenClient = Parameters<typeof findOpenEvent>[0];
  */
 function windowProbeClient(latestBlock: bigint) {
   const calls: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
-  const client = {
-    getBlockNumber: async () => latestBlock,
-    getLogs: async (args: { fromBlock: bigint; toBlock: bigint }) => {
-      calls.push({ fromBlock: args.fromBlock, toBlock: args.toBlock });
-      return [];
-    },
-  } as unknown as OpenClient;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  const getLogs = (async (args: { fromBlock?: bigint; toBlock?: bigint } | undefined) => {
+    const fromBlock = typeof args?.fromBlock === "bigint" ? args.fromBlock : 0n;
+    const toBlock = typeof args?.toBlock === "bigint" ? args.toBlock : 0n;
+    calls.push({ fromBlock, toBlock });
+    return [];
+  }) as unknown as GetLogs;
+  const client = makeOpenClient(getLogs, latestBlock);
   return { client, calls };
 }
 
@@ -276,46 +302,44 @@ describe("findCloseEvent scan window computation", () => {
 
   it("includes Collect logs before the close transaction as fees", async () => {
     let callCount = 0;
-    const client = {
-      getBlockNumber: async () => 1_000n,
-      getLogs: async (args: { event: { name?: string }; fromBlock: bigint; toBlock: bigint }) => {
-        callCount += 1;
-        if (callCount === 1) {
-          expect(args.fromBlock).toBe(100n);
-          return [
-            {
-              args: { tokenId: 1n, liquidity: 50n, amount0: 1_000n, amount1: 2_000n },
-              blockNumber: 300n,
-              transactionHash: TX_HASH,
-            },
-          ];
-        }
-        expect(args.fromBlock).toBe(100n);
-        expect(args.toBlock).toBe(300n);
-        if (callCount === 2) {
-          return [
-            {
-              args: { tokenId: 1n, liquidity: 50n, amount0: 1_000n, amount1: 2_000n },
-              blockNumber: 300n,
-              transactionHash: TX_HASH,
-            },
-          ];
-        }
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const getLogs = (async (args: { fromBlock?: bigint; toBlock?: bigint } | undefined) => {
+      callCount += 1;
+      if (callCount === 1) {
+        expect(args?.fromBlock).toBe(100n);
         return [
-          {
-            args: { tokenId: 1n, amount0Collect: 10n, amount1Collect: 20n },
-            blockNumber: 200n,
-            transactionHash:
-              "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
-          },
-          {
-            args: { tokenId: 1n, amount0Collect: 1_005n, amount1Collect: 2_030n },
-            blockNumber: 300n,
-            transactionHash: TX_HASH,
-          },
+          makeEventLog(
+            { tokenId: 1n, liquidity: 50n, amount0: 1_000n, amount1: 2_000n },
+            300n,
+            TX_HASH,
+          ),
         ];
-      },
-    } as unknown as OpenClient;
+      }
+      expect(args?.fromBlock).toBe(100n);
+      expect(args?.toBlock).toBe(300n);
+      if (callCount === 2) {
+        return [
+          makeEventLog(
+            { tokenId: 1n, liquidity: 50n, amount0: 1_000n, amount1: 2_000n },
+            300n,
+            TX_HASH,
+          ),
+        ];
+      }
+      return [
+        makeEventLog(
+          { tokenId: 1n, amount0Collect: 10n, amount1Collect: 20n },
+          200n,
+          "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+        ),
+        makeEventLog(
+          { tokenId: 1n, amount0Collect: 1_005n, amount1Collect: 2_030n },
+          300n,
+          TX_HASH,
+        ),
+      ];
+    }) as unknown as GetLogs;
+    const client = makeOpenClient(getLogs, 1_000n);
 
     const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 100n);
 
@@ -328,49 +352,42 @@ describe("findCloseEvent scan window computation", () => {
 
   it("subtracts all prior decreased principal when summing lifecycle Collect logs", async () => {
     let callCount = 0;
-    const client = {
-      getBlockNumber: async () => 1_000n,
-      getLogs: async (_args: { event: { name?: string }; fromBlock: bigint; toBlock: bigint }) => {
-        callCount += 1;
-        if (callCount === 1) {
-          return [
-            {
-              args: { tokenId: 1n, liquidity: 20n, amount0: 100n, amount1: 200n },
-              blockNumber: 300n,
-              transactionHash: TX_HASH,
-            },
-          ];
-        }
-        if (callCount === 2) {
-          return [
-            {
-              args: { tokenId: 1n, liquidity: 10n, amount0: 40n, amount1: 80n },
-              blockNumber: 200n,
-              transactionHash:
-                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
-            },
-            {
-              args: { tokenId: 1n, liquidity: 20n, amount0: 100n, amount1: 200n },
-              blockNumber: 300n,
-              transactionHash: TX_HASH,
-            },
-          ];
-        }
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const getLogs = (async (_args: { fromBlock?: bigint; toBlock?: bigint } | undefined) => {
+      callCount += 1;
+      if (callCount === 1) {
         return [
-          {
-            args: { tokenId: 1n, amount0Collect: 45n, amount1Collect: 90n },
-            blockNumber: 200n,
-            transactionHash:
-              "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
-          },
-          {
-            args: { tokenId: 1n, amount0Collect: 105n, amount1Collect: 215n },
-            blockNumber: 300n,
-            transactionHash: TX_HASH,
-          },
+          makeEventLog(
+            { tokenId: 1n, liquidity: 20n, amount0: 100n, amount1: 200n },
+            300n,
+            TX_HASH,
+          ),
         ];
-      },
-    } as unknown as OpenClient;
+      }
+      if (callCount === 2) {
+        return [
+          makeEventLog(
+            { tokenId: 1n, liquidity: 10n, amount0: 40n, amount1: 80n },
+            200n,
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
+          ),
+          makeEventLog(
+            { tokenId: 1n, liquidity: 20n, amount0: 100n, amount1: 200n },
+            300n,
+            TX_HASH,
+          ),
+        ];
+      }
+      return [
+        makeEventLog(
+          { tokenId: 1n, amount0Collect: 45n, amount1Collect: 90n },
+          200n,
+          "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
+        ),
+        makeEventLog({ tokenId: 1n, amount0Collect: 105n, amount1Collect: 215n }, 300n, TX_HASH),
+      ];
+    }) as unknown as GetLogs;
+    const client = makeOpenClient(getLogs, 1_000n);
 
     const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 100n);
 

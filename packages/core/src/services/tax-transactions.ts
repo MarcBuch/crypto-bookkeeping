@@ -1,5 +1,3 @@
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
-
 import { createClient, type Client } from "../chain/client.js";
 import {
   createHyperSyncClient,
@@ -8,8 +6,9 @@ import {
   fetchTokenTransfersByAddress,
   type HyperSyncTransaction,
   type HyperSyncTokenTransfer,
+  type HypersyncClient,
 } from "../chain/hypersync.js";
-import { resolveTokenMetadata } from "../chain/token-metadata.js";
+import { resolveTokenMetadata, type TokenMetadataClient } from "../chain/token-metadata.js";
 import type { Config } from "../config.js";
 import {
   getAllPositions,
@@ -49,9 +48,10 @@ interface ExplorerEnvelope {
 }
 
 type ExplorerTransaction = Record<string, unknown>;
+type BlockClient = Pick<Client, "getBlock">;
 
 export interface SyncLpTaxFlowsOptions {
-  viemClient?: Client;
+  viemClient?: BlockClient;
 }
 
 export interface SyncLpTaxFlowsSummary {
@@ -69,7 +69,7 @@ export interface SyncTaxTransactionsOptions {
   endBlock?: number;
   // Injectable clients for testing
   hyperSyncClient?: HypersyncClient;
-  viemClient?: Client;
+  viemClient?: TokenMetadataClient & Partial<BlockClient>;
 }
 
 export interface SyncTaxTransactionsSummary {
@@ -86,7 +86,7 @@ export async function syncLpTaxFlows(
   config: Pick<Config, "wallet" | "pricing" | "rpc" | "chainId" | "contracts">,
   options: SyncLpTaxFlowsOptions = {},
 ): Promise<SyncLpTaxFlowsSummary> {
-  const viemClient = options.viemClient ?? createClient(config as Config);
+  const viemClient = options.viemClient ?? createClient(config);
   const syncedAt = new Date().toISOString();
   const positions = getAllPositions();
 
@@ -532,7 +532,8 @@ export async function syncTaxTransactions(
   const hyperSyncClient =
     options.hyperSyncClient ??
     createHyperSyncClient({ url: hyperSyncUrl, apiToken: hyperSyncApiToken! });
-  const viemClient = options.viemClient ?? createClient(config as Config);
+  const metadataClient = options.viemClient ?? createClient(config);
+  const lpViemClient = hasGetBlock(options.viemClient) ? options.viemClient : createClient(config);
 
   // Fetch both sets first so we can detect grouped zero-native wrappers and
   // merge gas fields onto the first token row for that hash.
@@ -597,7 +598,7 @@ export async function syncTaxTransactions(
     const baseRow = await hyperSyncTokenTransferToSyncedTaxTransaction(
       transfer,
       wallet,
-      viemClient,
+      metadataClient,
       syncedAt,
     );
     const mergeTarget = wrapperGasByHash.get(transfer.transactionHash);
@@ -639,7 +640,7 @@ export async function syncTaxTransactions(
   }
 
   // ── LP flow sync: deposit/withdrawal/fees from LP event data ──────────────
-  const lpFlowResult = await syncLpTaxFlows(config, { viemClient });
+  const lpFlowResult = await syncLpTaxFlows(config, { viemClient: lpViemClient });
   synced += lpFlowResult.synced;
 
   // ── Hedge tax flows: closed positions from hedge event data ────────────────
@@ -726,7 +727,7 @@ function hyperSyncTxToSyncedTaxTransaction(
 async function hyperSyncTokenTransferToSyncedTaxTransaction(
   transfer: HyperSyncTokenTransfer,
   wallet: string,
-  viemClient: Client,
+  viemClient: TokenMetadataClient,
   syncedAt: string,
 ): Promise<SyncedTaxTransaction> {
   // Resolve token metadata (uses DB cache)
@@ -995,7 +996,7 @@ async function fetchExplorerPage(args: {
     throw new Error(`Tax transaction sync failed for ${args.action}: HTTP ${response.status}`);
   }
 
-  const body = (await response.json()) as ExplorerEnvelope;
+  const body = parseExplorerEnvelope(await response.json());
   const result = body?.result;
   if (Array.isArray(result)) {
     return result.filter(isExplorerTransaction);
@@ -1253,6 +1254,22 @@ function requiresExplorerApiKey(baseUrl: string): boolean {
 
 function isExplorerTransaction(value: unknown): value is ExplorerTransaction {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasGetBlock(
+  client: SyncTaxTransactionsOptions["viemClient"],
+): client is TokenMetadataClient & BlockClient {
+  return client !== undefined && typeof client.getBlock === "function";
+}
+
+function parseExplorerEnvelope(value: unknown): ExplorerEnvelope {
+  if (!isExplorerTransaction(value)) return {};
+
+  return {
+    status: typeof value.status === "string" ? value.status : undefined,
+    message: typeof value.message === "string" ? value.message : undefined,
+    result: value.result,
+  };
 }
 
 function isExplorerEmptyOrUnsupported(body: ExplorerEnvelope, action: TaxExplorerAction): boolean {

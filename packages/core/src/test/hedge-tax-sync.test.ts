@@ -84,13 +84,13 @@ afterEach(() => {
 describe("syncHedgeTaxFlows — Cluster A (no events)", () => {
   it("should return {synced: 0} when no closed events", async () => {
     mockClosedEvents = [];
-    const result = await syncHedgeTaxFlows({ pricing: {} as any });
+    const result = await syncHedgeTaxFlows({ pricing: {} });
     expect(result.synced).toBe(0);
   });
 
   it("should not call upsertSyncedTaxTransaction when no events", async () => {
     mockClosedEvents = [];
-    await syncHedgeTaxFlows({ pricing: {} as any });
+    await syncHedgeTaxFlows({ pricing: {} });
     expect(upsertCalls.length).toBe(0);
   });
 });

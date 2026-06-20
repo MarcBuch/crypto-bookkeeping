@@ -9,6 +9,7 @@ import {
   getLpSyncState,
   upsertLpSyncState,
 } from "../db/store.js";
+import { isRecord } from "../utils/guards.js";
 import { useTestDb } from "./helpers/db.js";
 
 const fakeSyncedAt = "2026-06-01T20:00:00.000Z";
@@ -65,6 +66,29 @@ const fakePnLView = {
   priceUpper: 2.0,
 };
 
+function readStringField(row: Record<string, unknown>, key: string): string {
+  const value = row[key];
+  if (typeof value !== "string") {
+    throw new Error(`Expected ${key} to be a string`);
+  }
+  return value;
+}
+
+function readNullableField(row: Record<string, unknown>, key: string): unknown {
+  if (!(key in row)) {
+    throw new Error(`Missing field ${key}`);
+  }
+  return row[key];
+}
+
+function requireCachedRow(row: unknown): Record<string, unknown> {
+  if (!isRecord(row)) {
+    throw new Error("Expected cached row to be an object");
+  }
+  readStringField(row, "tokenId");
+  return row;
+}
+
 describe("lp cache store", () => {
   useTestDb();
 
@@ -117,10 +141,11 @@ describe("lp cache store", () => {
       const results = listCachedPnLViews();
       expect(results).toHaveLength(1);
       expect(results[0]).toEqual(fakePnLView);
+      const row = requireCachedRow(results[0]);
       // explicitly assert null fields stayed null
-      expect((results[0] as typeof fakePnLView).feesCollected0Usd).toBeNull();
-      expect((results[0] as typeof fakePnLView).feesValueUsd).toBeNull();
-      expect((results[0] as typeof fakePnLView).usdPriceSource).toBeNull();
+      expect(readNullableField(row, "feesCollected0Usd")).toBeNull();
+      expect(readNullableField(row, "feesValueUsd")).toBeNull();
+      expect(readNullableField(row, "usdPriceSource")).toBeNull();
     });
 
     it("getPositionsCacheSyncedAt returns the syncedAt timestamp after replace", () => {
@@ -140,7 +165,7 @@ describe("lp cache store", () => {
       replaceCachedPositionViews([row2], fakeSyncedAt);
       const results = listCachedPositionViews();
       expect(results).toHaveLength(1);
-      expect((results[0] as typeof row2).tokenId).toBe("22222");
+      expect(readStringField(requireCachedRow(results[0]), "tokenId")).toBe("22222");
     });
 
     it("second replaceCachedPnLViews call replaces all rows from first call", () => {
@@ -152,7 +177,7 @@ describe("lp cache store", () => {
 
       const results = listCachedPnLViews();
       expect(results).toHaveLength(1);
-      expect((results[0] as typeof row2).tokenId).toBe("22222");
+      expect(readStringField(requireCachedRow(results[0]), "tokenId")).toBe("22222");
     });
   });
 
@@ -171,7 +196,7 @@ describe("lp cache store", () => {
 
       const after = listCachedPositionViews();
       expect(after).toHaveLength(1);
-      expect((after[0] as typeof original).tokenId).toBe("original");
+      expect(readStringField(requireCachedRow(after[0]), "tokenId")).toBe("original");
     });
 
     it("replaceCachedPnLViews rolls back on PRIMARY KEY conflict — cache retains previous state", () => {
@@ -188,7 +213,7 @@ describe("lp cache store", () => {
 
       const after = listCachedPnLViews();
       expect(after).toHaveLength(1);
-      expect((after[0] as typeof original).tokenId).toBe("original");
+      expect(readStringField(requireCachedRow(after[0]), "tokenId")).toBe("original");
     });
   });
 

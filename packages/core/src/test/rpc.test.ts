@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 
 import { withRetry } from "../chain/rpc.js";
 import { RpcError } from "../services/errors.js";
+import { captureError, expectError } from "./helpers/errors.js";
 
 // Helper: simulate a viem LimitExceededRpcError-style object
 function makeRateLimitError() {
@@ -10,6 +11,14 @@ function makeRateLimitError() {
 
 const immediateSuccessFn = async () => 42;
 const callBFn = async () => "callB done";
+
+function expectRpcError(error: unknown): RpcError {
+  expect(error).toBeInstanceOf(RpcError);
+  if (!(error instanceof RpcError)) {
+    throw new Error(`Expected RpcError, got ${String(error)}`);
+  }
+  return error;
+}
 
 describe("withRetry — retry exhaustion and passthrough", () => {
   it("resolves immediately when fn succeeds on first attempt", async () => {
@@ -22,10 +31,9 @@ describe("withRetry — retry exhaustion and passthrough", () => {
       throw makeRateLimitError();
     };
     const start = Date.now();
-    const err = await withRetry(fn, 0).catch((e) => e);
+    const err = expectRpcError(await captureError(withRetry(fn, 0)));
     const elapsed = Date.now() - start;
-    expect(err).toBeInstanceOf(RpcError);
-    expect((err as RpcError).code).toBe(-32005);
+    expect(err.code).toBe(-32005);
     // Should not have slept for any backoff
     expect(elapsed).toBeLessThan(500);
   });
@@ -36,9 +44,8 @@ describe("withRetry — retry exhaustion and passthrough", () => {
       calls++;
       throw makeRateLimitError();
     };
-    const err = await withRetry(fn, 2, 10).catch((e) => e);
-    expect(err).toBeInstanceOf(RpcError);
-    expect((err as RpcError).code).toBe(-32005);
+    const err = expectRpcError(await captureError(withRetry(fn, 2, 10)));
+    expect(err.code).toBe(-32005);
     expect(calls).toBe(3); // 1 initial + 2 retries
   });
 
@@ -60,8 +67,8 @@ describe("withRetry — retry exhaustion and passthrough", () => {
       calls++;
       throw new Error("unexpected blockchain failure");
     };
-    const err = await withRetry(fn, 3, 10).catch((e) => e);
-    expect((err as Error).message).toBe("unexpected blockchain failure");
+    const err = expectError(await captureError(withRetry(fn, 3, 10)));
+    expect(err.message).toBe("unexpected blockchain failure");
     expect(calls).toBe(1); // no retries
   });
 
@@ -70,7 +77,7 @@ describe("withRetry — retry exhaustion and passthrough", () => {
     const fn = async () => {
       throw original;
     };
-    const err = await withRetry(fn, 3, 10).catch((e) => e);
+    const err = await captureError(withRetry(fn, 3, 10));
     expect(err).toBe(original); // same reference, not wrapped
     expect(err).not.toBeInstanceOf(RpcError);
   });

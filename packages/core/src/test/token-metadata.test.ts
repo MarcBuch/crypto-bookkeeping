@@ -4,6 +4,15 @@ import { getDb } from "../db/schema.js";
 import { upsertTokenMetadata, getTokenMetadata, type StoredTokenMetadata } from "../db/store.js";
 import { useTestDb } from "./helpers/db.js";
 
+type TableInfoRow = {
+  name: string;
+  pk: number;
+};
+
+function getTokenMetadataTableInfo(): TableInfoRow[] {
+  return getDb().query<TableInfoRow, []>("PRAGMA table_info(token_metadata)").all();
+}
+
 function makeTokenMetadata(overrides: Partial<StoredTokenMetadata> = {}): StoredTokenMetadata {
   return {
     contract_address: "0xabc123",
@@ -139,20 +148,12 @@ describe("schema migration — token_metadata table exists in fresh DB", () => {
   useTestDb();
 
   it("the token_metadata table exists after calling getDb() on a fresh DB", () => {
-    const db = getDb();
-    const rows = db.query("PRAGMA table_info(token_metadata)").all() as Array<{
-      name: string;
-      pk: number;
-    }>;
+    const rows = getTokenMetadataTableInfo();
     expect(rows.length).toBeGreaterThan(0);
   });
 
   it("the table has the correct columns", () => {
-    const db = getDb();
-    const rows = db.query("PRAGMA table_info(token_metadata)").all() as Array<{
-      name: string;
-      pk: number;
-    }>;
+    const rows = getTokenMetadataTableInfo();
     const columnNames = rows.map((r) => r.name);
     expect(columnNames).toContain("contract_address");
     expect(columnNames).toContain("symbol");
@@ -162,11 +163,7 @@ describe("schema migration — token_metadata table exists in fresh DB", () => {
   });
 
   it("contract_address is the PRIMARY KEY", () => {
-    const db = getDb();
-    const rows = db.query("PRAGMA table_info(token_metadata)").all() as Array<{
-      name: string;
-      pk: number;
-    }>;
+    const rows = getTokenMetadataTableInfo();
     const pkCol = rows.find((r) => r.name === "contract_address");
     expect(pkCol).toBeDefined();
     expect(pkCol!.pk).toBe(1);

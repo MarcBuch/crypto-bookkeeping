@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
-import type { Client } from "../chain/client.js";
-import { resolveTokenMetadata } from "../chain/token-metadata.js";
+import { resolveTokenMetadata, type TokenMetadataClient } from "../chain/token-metadata.js";
 import { getTokenMetadata, upsertTokenMetadata } from "../db/store.js";
 import { useTestDb } from "./helpers/db.js";
+import { expectError } from "./helpers/errors.js";
 
 useTestDb();
 
@@ -11,12 +11,16 @@ useTestDb();
 const ADDR_LOWER = "0xabcdef1234567890abcdef1234567890abcdef12";
 const ADDR_CHECKSUM = "0xAbCdEf1234567890AbCdEf1234567890AbCdEf12";
 
+const notImplementedReadContract: TokenMetadataClient["readContract"] = async () => {
+  throw new Error("not implemented");
+};
+
 function mockClient(overrides: {
-  readContract?: (args: { functionName: string }) => Promise<unknown>;
-}): Client {
+  readContract?: TokenMetadataClient["readContract"];
+}): TokenMetadataClient {
   return {
-    readContract: overrides.readContract ?? (() => Promise.reject(new Error("not implemented"))),
-  } as unknown as Client;
+    readContract: overrides.readContract ?? notImplementedReadContract,
+  };
 }
 
 beforeEach(() => {
@@ -232,8 +236,7 @@ describe("resolveTokenMetadata — invalid address", () => {
       await resolveTokenMetadata(client, "not-an-address");
       throw new Error("Expected resolveTokenMetadata to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("invalid contract address");
+      expect(expectError(error).message).toContain("invalid contract address");
     }
   });
 
@@ -244,8 +247,7 @@ describe("resolveTokenMetadata — invalid address", () => {
       await resolveTokenMetadata(client, "");
       throw new Error("Expected resolveTokenMetadata to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("invalid contract address");
+      expect(expectError(error).message).toContain("invalid contract address");
     }
   });
 });

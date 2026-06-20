@@ -126,11 +126,7 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
   const syncedAt = new Date().toISOString();
 
   // Atomically replace both caches in a single transaction
-  replaceLpCaches(
-    positions as unknown as Record<string, unknown>[],
-    pnlViews as unknown as Record<string, unknown>[],
-    syncedAt,
-  );
+  replaceLpCaches(positions, pnlViews, syncedAt);
 
   // Update sync state
   upsertLpSyncState({ wallet: config.wallet, last_synced_at: syncedAt });
@@ -192,9 +188,9 @@ export async function syncSinglePosition(
 
   // 6. Upsert only this position's cache rows (leave all other positions untouched)
   const syncedAt = new Date().toISOString();
-  upsertPositionViewCache(tokenId, positionView as unknown as Record<string, unknown>, syncedAt);
+  upsertPositionViewCache(tokenId, positionView, syncedAt);
   if (pnlView) {
-    upsertPnLViewCache(tokenId, pnlView as unknown as Record<string, unknown>, syncedAt);
+    upsertPnLViewCache(tokenId, pnlView, syncedAt);
   }
 
   // 7. Snapshot hedge if configured (swallow errors — LP sync must complete)

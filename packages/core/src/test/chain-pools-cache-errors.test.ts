@@ -15,6 +15,7 @@ import { describe, it, expect } from "bun:test";
 import type { Address } from "viem";
 
 import { buildPoolCacheKey } from "../chain/pools.js";
+import { captureError, expectError } from "./helpers/errors.js";
 
 /**
  * Reference implementation of getPoolAddress with injectable cache and client.
@@ -48,13 +49,10 @@ describe("poolAddressCache — error cases", () => {
   it("RPC error propagates and does not cache the failed lookup", async () => {
     const cache = new Map<string, Address>();
 
-    try {
-      await getPoolAddressWithCache(alwaysThrowReadContract, T0, T1, 500, cache);
-      expect.unreachable("Expected getPoolAddressWithCache to reject");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("network error");
-    }
+    const error = await captureError(
+      getPoolAddressWithCache(alwaysThrowReadContract, T0, T1, 500, cache),
+    );
+    expect(expectError(error).message).toContain("network error");
 
     // Cache must remain empty — no poisoned entry
     const cacheKey = buildPoolCacheKey(T0, T1, 500);
@@ -72,13 +70,8 @@ describe("poolAddressCache — error cases", () => {
     };
 
     // First call fails
-    try {
-      await getPoolAddressWithCache(readContract, T0, T1, 3000, cache);
-      throw new Error("Expected getPoolAddressWithCache to reject");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("transient error");
-    }
+    const error = await captureError(getPoolAddressWithCache(readContract, T0, T1, 3000, cache));
+    expect(expectError(error).message).toContain("transient error");
 
     // Second call succeeds and hits RPC (not a stale cache entry)
     const result = await getPoolAddressWithCache(readContract, T0, T1, 3000, cache);

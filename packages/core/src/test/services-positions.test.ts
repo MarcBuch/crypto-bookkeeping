@@ -61,6 +61,14 @@ function makeSnapshot(tokenId: string, offsetSec = 0) {
   });
 }
 
+function expectNotFoundError(error: unknown): NotFoundError {
+  expect(error).toBeInstanceOf(NotFoundError);
+  if (!(error instanceof NotFoundError)) {
+    throw new Error(`Expected NotFoundError, got ${String(error)}`);
+  }
+  return error;
+}
+
 // ---------------------------------------------------------------------------
 // SKIPPED: tests that require network mocking
 // ---------------------------------------------------------------------------
@@ -88,7 +96,7 @@ describe("getHistoryView — no stored position", () => {
       await getHistoryView("999999", 10);
       throw new Error("Expected getHistoryView to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(NotFoundError);
+      expectNotFoundError(error);
     }
   });
 
@@ -97,8 +105,8 @@ describe("getHistoryView — no stored position", () => {
       await getHistoryView("999999", 10);
       expect(true).toBe(false); // should not reach here
     } catch (err) {
-      expect(err).toBeInstanceOf(NotFoundError);
-      expect((err as NotFoundError).message).toContain("999999");
+      const error = expectNotFoundError(err);
+      expect(error.message).toContain("999999");
     }
   });
 });
@@ -116,7 +124,7 @@ describe("getHistoryView — position exists but no snapshots", () => {
       await getHistoryView("42", 10);
       throw new Error("Expected getHistoryView to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(NotFoundError);
+      expectNotFoundError(error);
     }
   });
 
@@ -126,8 +134,8 @@ describe("getHistoryView — position exists but no snapshots", () => {
       await getHistoryView("42", 10);
       expect(true).toBe(false);
     } catch (err) {
-      expect(err).toBeInstanceOf(NotFoundError);
-      expect((err as NotFoundError).message.toLowerCase()).toContain("snapshot");
+      const error = expectNotFoundError(err);
+      expect(error.message.toLowerCase()).toContain("snapshot");
     }
   });
 });

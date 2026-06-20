@@ -24,6 +24,8 @@ await mock.module("../db/schema.js", () => ({
 import type { Config } from "../config.js";
 import { insertHedgeSnapshot } from "../db/store.js";
 import { getHedgeView } from "../services/hedge.js";
+import { captureError, expectError } from "./helpers/errors.js";
+import { getRequestType, jsonResponse, setFetchMock } from "./helpers/http.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -65,6 +67,19 @@ function buildClearinghouseState(szi: string) {
   };
 }
 
+function setHedgeViewFetchMock(szi: string, fills?: unknown): void {
+  setFetchMock(async (_url, init) => {
+    const type = getRequestType(init);
+    if (type === "clearinghouseState") {
+      return jsonResponse(buildClearinghouseState(szi));
+    }
+    if (type === "userFillsByTime" && fills !== undefined) {
+      return jsonResponse(fills);
+    }
+    throw new Error(`Unexpected fetch type: ${String(type)}`);
+  });
+}
+
 beforeEach(() => {
   // Create a fresh in-memory database for each test
   testDb = new Database(":memory:");
@@ -74,16 +89,6 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
-
-async function captureError<T>(promise: Promise<T>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-
-  throw new Error("Expected promise to reject");
-}
 
 describe("getHedgeView() — closed position path", () => {
   // =========================================================================
@@ -101,25 +106,17 @@ describe("getHedgeView() — closed position path", () => {
       });
 
       let callCount = 0;
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      setFetchMock(async (_url, init) => {
         callCount++;
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
+        const type = getRequestType(init);
+        if (type === "clearinghouseState") {
+          return jsonResponse(buildClearinghouseState("0"));
         }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => [],
-          } as unknown as Response;
+        if (type === "userFillsByTime") {
+          return jsonResponse([]);
         }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+        throw new Error(`Unexpected fetch type: ${String(type)}`);
+      });
 
       const result = await getHedgeView(config, "456");
       expect(result).toBeDefined();
@@ -143,24 +140,16 @@ describe("getHedgeView() — closed position path", () => {
         },
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
+      setFetchMock(async (_url, init) => {
+        const type = getRequestType(init);
+        if (type === "clearinghouseState") {
+          return jsonResponse(buildClearinghouseState("0"));
         }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => [],
-          } as unknown as Response;
+        if (type === "userFillsByTime") {
+          return jsonResponse([]);
         }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+        throw new Error(`Unexpected fetch type: ${String(type)}`);
+      });
 
       // Should not throw
       const result = await getHedgeView(config, "456");
@@ -195,24 +184,20 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
+      setFetchMock(async (_url, init) => {
+        const type = getRequestType(init);
+        if (type === "clearinghouseState") {
+          return jsonResponse(buildClearinghouseState("0"));
         }
-        if (body.type === "userFillsByTime") {
+        if (type === "userFillsByTime") {
           throw new Error("Network error");
         }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+        throw new Error(`Unexpected fetch type: ${String(type)}`);
+      });
 
       const error = await captureError(getHedgeView(config, "789"));
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("Network error");
+      expect(expectError(error).message).toContain("Network error");
     });
 
     it("szi=0, userFillsByTime returns HTTP 502 → propagates error (not swallowed)", async () => {
@@ -237,30 +222,21 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
+      setFetchMock(async (_url, init) => {
+        const type = getRequestType(init);
+        if (type === "clearinghouseState") {
+          return jsonResponse(buildClearinghouseState("0"));
         }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: false,
-            status: 502,
-            statusText: "Bad Gateway",
-            json: async () => ({}),
-          } as unknown as Response;
+        if (type === "userFillsByTime") {
+          return jsonResponse({}, { status: 502, statusText: "Bad Gateway" });
         }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+        throw new Error(`Unexpected fetch type: ${String(type)}`);
+      });
 
       const promise = getHedgeView(config, "999");
       const error = await captureError(promise);
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("502");
+      expect(expectError(error).message).toContain("502");
     });
   });
 
@@ -290,36 +266,19 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
-        }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => [
-              {
-                coin: "HYPE",
-                px: "61.58",
-                sz: "30.1",
-                side: "A",
-                time: Date.now(),
-                closedPnl: "-63",
-                oid: 12345,
-                tid: 999,
-                dir: "Close Short",
-              },
-            ],
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("0", [
+        {
+          coin: "HYPE",
+          px: "61.58",
+          sz: "30.1",
+          side: "A",
+          time: Date.now(),
+          closedPnl: "-63",
+          oid: 12345,
+          tid: 999,
+          dir: "Close Short",
+        },
+      ]);
 
       const result = await getHedgeView(config, "111");
 
@@ -365,47 +324,30 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
-        }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => [
-              {
-                coin: "HYPE",
-                px: "61.58",
-                sz: "15.0",
-                side: "A",
-                time: Date.now(),
-                closedPnl: "-30",
-                oid: 12345,
-                tid: 1001,
-                dir: "Close Short",
-              },
-              {
-                coin: "HYPE",
-                px: "61.60",
-                sz: "15.1",
-                side: "A",
-                time: Date.now() + 1000,
-                closedPnl: "-33",
-                oid: 12346,
-                tid: 1002,
-                dir: "Close Short",
-              },
-            ],
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("0", [
+        {
+          coin: "HYPE",
+          px: "61.58",
+          sz: "15.0",
+          side: "A",
+          time: Date.now(),
+          closedPnl: "-30",
+          oid: 12345,
+          tid: 1001,
+          dir: "Close Short",
+        },
+        {
+          coin: "HYPE",
+          px: "61.60",
+          sz: "15.1",
+          side: "A",
+          time: Date.now() + 1000,
+          closedPnl: "-33",
+          oid: 12346,
+          tid: 1002,
+          dir: "Close Short",
+        },
+      ]);
 
       const result = await getHedgeView(config, "222");
 
@@ -436,36 +378,19 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
-        }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => [
-              {
-                coin: "HYPE",
-                px: "61.5",
-                sz: "30.1",
-                side: "A",
-                time: Date.now(),
-                closedPnl: "0",
-                oid: 12345,
-                tid: 2001,
-                dir: "Close Short",
-              },
-            ],
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("0", [
+        {
+          coin: "HYPE",
+          px: "61.5",
+          sz: "30.1",
+          side: "A",
+          time: Date.now(),
+          closedPnl: "0",
+          oid: 12345,
+          tid: 2001,
+          dir: "Close Short",
+        },
+      ]);
 
       const result = await getHedgeView(config, "333");
 
@@ -495,36 +420,19 @@ describe("getHedgeView() — closed position path", () => {
         liquidation_px: 50.0,
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("0"),
-          } as unknown as Response;
-        }
-        if (body.type === "userFillsByTime") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => [
-              {
-                coin: "HYPE",
-                px: "60.0",
-                sz: "30.1",
-                side: "A",
-                time: Date.now(),
-                closedPnl: "45.15",
-                oid: 12345,
-                tid: 3001,
-                dir: "Close Short",
-              },
-            ],
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("0", [
+        {
+          coin: "HYPE",
+          px: "60.0",
+          sz: "30.1",
+          side: "A",
+          time: Date.now(),
+          closedPnl: "45.15",
+          oid: 12345,
+          tid: 3001,
+          dir: "Close Short",
+        },
+      ]);
 
       const result = await getHedgeView(config, "444");
 
@@ -547,17 +455,7 @@ describe("getHedgeView() — closed position path", () => {
         },
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("-30.1"),
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("-30.1");
 
       const result = await getHedgeView(config, "555");
 
@@ -584,17 +482,7 @@ describe("getHedgeView() — closed position path", () => {
         },
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("-0.001"),
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("-0.001");
 
       const result = await getHedgeView(config, "666");
 
@@ -612,17 +500,7 @@ describe("getHedgeView() — closed position path", () => {
         },
       });
 
-      globalThis.fetch = (async (url: string, init?: RequestInit) => {
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        if (body.type === "clearinghouseState") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => buildClearinghouseState("1.5"),
-          } as unknown as Response;
-        }
-        throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
-      }) as unknown as typeof fetch;
+      setHedgeViewFetchMock("1.5");
 
       const result = await getHedgeView(config, "777");
 

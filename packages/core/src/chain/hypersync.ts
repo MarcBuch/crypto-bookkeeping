@@ -1,6 +1,7 @@
 import {
-  HypersyncClient,
+  HypersyncClient as HypersyncSdkClient,
   JoinMode,
+  type Query,
   type BlockField,
   type ClientConfig,
   type FieldSelection,
@@ -9,6 +10,41 @@ import {
   type TransactionField,
   type TransactionSelection,
 } from "@envio-dev/hypersync-client";
+
+export interface HypersyncQueryResponse {
+  archiveHeight?: number;
+  nextBlock: number;
+  totalExecutionTime: number;
+  data: {
+    blocks: Array<{ number?: number; timestamp?: number }>;
+    transactions: Array<{
+      hash?: string;
+      blockNumber?: number;
+      from?: string;
+      to?: string | null;
+      value?: bigint;
+      gasUsed?: bigint;
+      gasPrice?: bigint;
+      effectiveGasPrice?: bigint;
+      input?: string;
+      status?: number;
+      sighash?: string | null;
+    }>;
+    logs: Array<{
+      transactionHash?: string;
+      blockNumber?: number;
+      logIndex?: number;
+      address?: string;
+      data?: string;
+      topics: Array<string | null | undefined>;
+    }>;
+    traces: unknown[];
+  };
+}
+
+export interface HypersyncClient {
+  get(query: Query): Promise<HypersyncQueryResponse>;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -38,7 +74,7 @@ export function createHyperSyncClient(config: HyperSyncConfig): HypersyncClient 
     httpReqTimeoutMillis: 30_000,
     maxNumRetries: 3,
   };
-  return new HypersyncClient(cfg);
+  return new HypersyncSdkClient(cfg);
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +119,7 @@ export interface HyperSyncTokenTransfer {
 /** Pads a 20-byte address to 32-byte topic format */
 export function padAddress(address: string): string {
   const hex = address.toLowerCase().replace(/^0x/, "");
-  return "0x" + "0".repeat(24) + hex;
+  return `0x${"0".repeat(24)}${hex}`;
 }
 
 const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -302,7 +338,7 @@ export async function fetchTokenTransfersByAddress(
 /** Pads a uint256 value to a 32-byte (64 hex char) topic format */
 export function padUint256(n: bigint): string {
   const hex = n.toString(16);
-  return "0x" + hex.padStart(64, "0");
+  return `0x${hex.padStart(64, "0")}`;
 }
 
 /** Generic raw log from HyperSync with optional block join */
@@ -325,7 +361,7 @@ export interface HyperSyncRawLog {
 export async function fetchLogsByAddressAndTopics(
   client: HypersyncClient,
   address: string,
-  topicFilters: (string | null)[][],
+  topicFilters: string[][],
   fromBlock: number,
   toBlock?: number,
 ): Promise<HyperSyncRawLog[]> {
@@ -335,7 +371,7 @@ export async function fetchLogsByAddressAndTopics(
     {
       include: {
         address: [addressLower],
-        topics: topicFilters as string[][],
+        topics: topicFilters,
       },
     },
   ];

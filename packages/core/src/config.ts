@@ -3,6 +3,8 @@ import { join, resolve } from "path";
 
 import type { Address } from "viem";
 
+import { isRecord } from "./utils/guards.js";
+
 export interface PositionConfig {
   openTx: string;
   closeTx?: string;
@@ -114,14 +116,14 @@ export function loadConfig(configPath?: string): Config {
   }
 
   validateConfig(parsed, path);
-  return parsed as Config;
+  return parsed;
 }
 
-function validateConfig(raw: unknown, path: string): void {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+function validateConfig(raw: unknown, path: string): asserts raw is Config {
+  if (!isRecord(raw)) {
     throw new Error(`Config at ${path} must be a JSON object`);
   }
-  const cfg = raw as Record<string, unknown>;
+  const cfg = raw;
 
   const required = ["rpc", "chainId", "wallet", "contracts"] as const;
   for (const key of required) {
@@ -130,10 +132,10 @@ function validateConfig(raw: unknown, path: string): void {
     }
   }
 
-  if (typeof cfg.contracts !== "object" || cfg.contracts === null) {
+  if (!isRecord(cfg.contracts)) {
     throw new Error(`Config at ${path}: "contracts" must be an object`);
   }
-  const contracts = cfg.contracts as Record<string, unknown>;
+  const contracts = cfg.contracts;
   const requiredContracts = ["factory", "positionManager", "quoter", "swapRouter"] as const;
   for (const key of requiredContracts) {
     if (!contracts[key]) {
@@ -152,13 +154,16 @@ function validateConfig(raw: unknown, path: string): void {
 
   // Validate tax config if present
   if (cfg.tax !== undefined && cfg.tax !== null) {
-    const tax = cfg.tax as Record<string, unknown>;
+    if (!isRecord(cfg.tax)) {
+      throw new Error(`Config at ${path}: "tax" must be an object`);
+    }
+    const tax = cfg.tax;
     if (tax.hyperSyncUrl !== undefined && tax.hyperSyncUrl !== null) {
       if (typeof tax.hyperSyncUrl !== "string" || !tax.hyperSyncUrl.trim()) {
         throw new Error(`Config at ${path}: "tax.hyperSyncUrl" must be a non-empty string`);
       }
       // Basic URL validation
-      if (!URL.canParse(tax.hyperSyncUrl as string)) {
+      if (!URL.canParse(tax.hyperSyncUrl)) {
         throw new Error(
           `Config at ${path}: "tax.hyperSyncUrl" must be a valid URL (got ${JSON.stringify(tax.hyperSyncUrl)})`,
         );
@@ -174,13 +179,16 @@ function validateConfig(raw: unknown, path: string): void {
 
   // Validate hyperSync config if present
   if (cfg.hyperSync !== undefined && cfg.hyperSync !== null) {
-    const hyperSync = cfg.hyperSync as Record<string, unknown>;
+    if (!isRecord(cfg.hyperSync)) {
+      throw new Error(`Config at ${path}: "hyperSync" must be an object`);
+    }
+    const hyperSync = cfg.hyperSync;
     if (hyperSync.url !== undefined && hyperSync.url !== null) {
       if (typeof hyperSync.url !== "string" || !hyperSync.url.trim()) {
         throw new Error(`Config at ${path}: "hyperSync.url" must be a non-empty string`);
       }
       // Basic URL validation
-      if (!URL.canParse(hyperSync.url as string)) {
+      if (!URL.canParse(hyperSync.url)) {
         throw new Error(
           `Config at ${path}: "hyperSync.url" must be a valid URL (got ${JSON.stringify(hyperSync.url)})`,
         );

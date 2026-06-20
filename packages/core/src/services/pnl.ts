@@ -226,14 +226,14 @@ export async function getPnLView(
       // DB fast path: open_tx already persisted, entry data is already in the DB
       entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
       entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-      if (hasStoredLiquidity) {
-        entryLiquidity = BigInt(storedPos.entry_liquidity!);
+      if (hasStoredLiquidity && storedPos.entry_liquidity) {
+        entryLiquidity = BigInt(storedPos.entry_liquidity);
       }
-    } else if (hasStoredEntry && (hasStoredLiquidity || isActive)) {
-      entryAmount0 = BigInt(storedPos!.entry_amount0!);
-      entryAmount1 = BigInt(storedPos!.entry_amount1 || "0");
-      if (hasStoredLiquidity) {
-        entryLiquidity = BigInt(storedPos!.entry_liquidity!);
+    } else if (storedPos && hasStoredEntry && (hasStoredLiquidity || isActive)) {
+      entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
+      entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
+      if (hasStoredLiquidity && storedPos.entry_liquidity) {
+        entryLiquidity = BigInt(storedPos.entry_liquidity);
       }
     } else {
       // Slow path: scan chain for open event
@@ -361,15 +361,15 @@ export async function getPnLView(
       const hasCachedExit =
         storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
 
-      if (hasCachedExit) {
-        exitAmount0 = BigInt(storedPos!.exit_amount0!);
-        exitAmount1 = BigInt(storedPos!.exit_amount1 ?? "0");
-        feesCollected0 = BigInt(storedPos!.fees_collected0 ?? "0");
-        feesCollected1 = BigInt(storedPos!.fees_collected1 ?? "0");
+      if (hasCachedExit && storedPos) {
+        exitAmount0 = BigInt(storedPos.exit_amount0 ?? "0");
+        exitAmount1 = BigInt(storedPos.exit_amount1 ?? "0");
+        feesCollected0 = BigInt(storedPos.fees_collected0 ?? "0");
+        feesCollected1 = BigInt(storedPos.fees_collected1 ?? "0");
         // Use stored exit price if available (stable across syncs)
-        if (storedPos!.exit_sqrt_price_x96) {
-          exitSqrtPriceX96 = BigInt(storedPos!.exit_sqrt_price_x96);
-        } else if (storedPos!.close_block) {
+        if (storedPos.exit_sqrt_price_x96) {
+          exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
+        } else if (storedPos.close_block) {
           // Derive from fixed withdrawal amounts. Block-level slot0 can reflect
           // later swaps/reopens in the same transaction, not the burn price.
           exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
@@ -391,11 +391,11 @@ export async function getPnLView(
             fee: pos.fee,
             tick_lower: pos.tickLower,
             tick_upper: pos.tickUpper,
-            entry_sqrt_price_x96: storedPos!.entry_sqrt_price_x96 ?? null,
-            entry_block: storedPos!.entry_block ?? null,
-            entry_amount0: storedPos!.entry_amount0 ?? null,
-            entry_amount1: storedPos!.entry_amount1 ?? null,
-            entry_liquidity: storedPos!.entry_liquidity ?? null,
+            entry_sqrt_price_x96: storedPos.entry_sqrt_price_x96 ?? null,
+            entry_block: storedPos.entry_block ?? null,
+            entry_amount0: storedPos.entry_amount0 ?? null,
+            entry_amount1: storedPos.entry_amount1 ?? null,
+            entry_liquidity: storedPos.entry_liquidity ?? null,
             exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
           });
         }

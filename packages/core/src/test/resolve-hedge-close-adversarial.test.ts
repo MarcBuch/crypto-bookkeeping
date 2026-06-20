@@ -17,6 +17,8 @@ import type { Config } from "../config.js";
 import { insertHedgeSnapshot, getHedgeEvents } from "../db/store.js";
 import type { StoredHedgeSnapshot } from "../db/store.js";
 import { resolveHedgeClose, resolveHedgeOpen } from "../services/hedge.js";
+import { captureError, expectError } from "./helpers/errors.js";
+import { jsonResponse, setFetchMock, textResponse } from "./helpers/http.js";
 
 // Helper to create a minimal hedge snapshot
 function minimalHedgeSnapshot(
@@ -54,15 +56,24 @@ function mockFill(overrides: Record<string, unknown> = {}) {
 }
 
 // Helper to create a minimal config
-function minimalConfig(wallet: string = "0x123abc"): Config {
+function minimalConfig(wallet: `0x${string}` = "0x123abc"): Config {
   return {
+    rpc: "http://test-rpc",
+    chainId: 999,
     wallet,
+    contracts: {
+      factory: "0x0000000000000000000000000000000000000001",
+      positionManager: "0x0000000000000000000000000000000000000002",
+      quoter: "0x0000000000000000000000000000000000000003",
+      swapRouter: "0x0000000000000000000000000000000000000004",
+    },
     positions: {
       "token-123": {
+        openTx: "0xOPEN",
         hedge: { coin: "HYPE" },
       },
     },
-  } as unknown as Config;
+  };
 }
 
 describe("resolveHedgeClose — adversarial tests", () => {
@@ -83,19 +94,14 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to throw network error
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
+      setFetchMock(async () => {
         throw new Error("Network timeout");
-      }) as unknown as typeof fetch;
+      });
 
       try {
         const config = minimalConfig();
-        try {
-          await resolveHedgeClose(config, "token-123", "HYPE");
-          throw new Error("Expected resolveHedgeClose to reject");
-        } catch (error) {
-          expect(error).toBeInstanceOf(Error);
-          expect((error as Error).message).toContain("Network timeout");
-        }
+        const error = await captureError(resolveHedgeClose(config, "token-123", "HYPE"));
+        expect(expectError(error).message).toContain("Network timeout");
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -108,23 +114,14 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return 500
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: false,
-          status: 500,
-          statusText: "Internal Server Error",
-          json: async () => ({}),
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse({}, { status: 500, statusText: "Internal Server Error" }),
+      );
 
       try {
         const config = minimalConfig();
-        try {
-          await resolveHedgeClose(config, "token-123", "HYPE");
-          throw new Error("Expected resolveHedgeClose to reject");
-        } catch (error) {
-          expect(error).toBeInstanceOf(Error);
-          expect((error as Error).message).toContain("Hyperliquid API error (500)");
-        }
+        const error = await captureError(resolveHedgeClose(config, "token-123", "HYPE"));
+        expect(expectError(error).message).toContain("Hyperliquid API error (500)");
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -137,27 +134,12 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return malformed JSON
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => {
-            throw new Error("Unexpected token < in JSON at position 0");
-          },
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => textResponse("<not-json>", { status: 200, statusText: "OK" }));
 
       try {
         const config = minimalConfig();
-        try {
-          await resolveHedgeClose(config, "token-123", "HYPE");
-          expect.unreachable("Expected resolveHedgeClose to reject");
-        } catch (error) {
-          if (error instanceof Error && error.message === "Expected resolveHedgeClose to reject") {
-            throw error;
-          }
-          expect(error).toBeInstanceOf(Error);
-        }
+        const error = await captureError(resolveHedgeClose(config, "token-123", "HYPE"));
+        expect(expectError(error)).toBeInstanceOf(Error);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -175,13 +157,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return empty fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([]));
 
       try {
         const config = minimalConfig();
@@ -199,16 +175,12 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return fills for different coin
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [
-            mockFill({ coin: "ETH", dir: "Close Long" }),
-            mockFill({ coin: "BTC", dir: "Close Short" }),
-          ],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([
+          mockFill({ coin: "ETH", dir: "Close Long" }),
+          mockFill({ coin: "BTC", dir: "Close Short" }),
+        ]),
+      );
 
       try {
         const config = minimalConfig();
@@ -226,16 +198,12 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return only Open fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [
-            mockFill({ coin: "HYPE", dir: "Open Short" }),
-            mockFill({ coin: "HYPE", dir: "Open Short" }),
-          ],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([
+          mockFill({ coin: "HYPE", dir: "Open Short" }),
+          mockFill({ coin: "HYPE", dir: "Open Short" }),
+        ]),
+      );
 
       try {
         const config = minimalConfig();
@@ -258,13 +226,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();
@@ -291,13 +253,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();
@@ -324,13 +280,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();
@@ -359,16 +309,12 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return 2 partial close fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [
-            mockFill({ closedPnl: "-30", sz: "10" }),
-            mockFill({ closedPnl: "-20", sz: "20" }),
-          ],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([
+          mockFill({ closedPnl: "-30", sz: "10" }),
+          mockFill({ closedPnl: "-20", sz: "20" }),
+        ]),
+      );
 
       try {
         const config = minimalConfig();
@@ -389,17 +335,13 @@ describe("resolveHedgeClose — adversarial tests", () => {
       // Mock fetch to return fills with different sizes
       // VWAP = (60.0*10 + 61.58*20 + 62.0*5) / 35 = (600 + 1231.6 + 310) / 35 = 2141.6 / 35 ≈ 61.189
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [
-            mockFill({ closedPnl: "-30", sz: "10", px: "60.0" }),
-            mockFill({ closedPnl: "-20", sz: "20", px: "61.58" }),
-            mockFill({ closedPnl: "-5", sz: "5", px: "62.0" }),
-          ],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([
+          mockFill({ closedPnl: "-30", sz: "10", px: "60.0" }),
+          mockFill({ closedPnl: "-20", sz: "20", px: "61.58" }),
+          mockFill({ closedPnl: "-5", sz: "5", px: "62.0" }),
+        ]),
+      );
 
       try {
         const config = minimalConfig();
@@ -438,13 +380,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();
@@ -464,17 +400,13 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return fills with different tids
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [
-            mockFill({ closedPnl: "-30", sz: "10", tid: 111 }),
-            mockFill({ closedPnl: "-20", sz: "20", tid: 222 }), // Largest
-            mockFill({ closedPnl: "-5", sz: "5", tid: 333 }),
-          ],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([
+          mockFill({ closedPnl: "-30", sz: "10", tid: 111 }),
+          mockFill({ closedPnl: "-20", sz: "20", tid: 222 }), // Largest
+          mockFill({ closedPnl: "-5", sz: "5", tid: 333 }),
+        ]),
+      );
 
       try {
         const config = minimalConfig();
@@ -494,13 +426,9 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return a normal "Close Short" fill (not a liquidation)
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1", dir: "Close Short" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1", dir: "Close Short" })]),
+      );
 
       try {
         const config = minimalConfig();
@@ -520,13 +448,9 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return a liquidation fill
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1", dir: "Liquidated" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () =>
+        jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1", dir: "Liquidated" })]),
+      );
 
       try {
         const config = minimalConfig();
@@ -546,13 +470,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();
@@ -571,13 +489,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();
@@ -597,13 +509,7 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       // Mock fetch to return closing fills
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () =>
-        ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => [mockFill({ closedPnl: "-50", sz: "30.1" })],
-        }) as unknown as Response) as unknown as typeof fetch;
+      setFetchMock(async () => jsonResponse([mockFill({ closedPnl: "-50", sz: "30.1" })]));
 
       try {
         const config = minimalConfig();

@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "fs";
 import { join, resolve } from "path";
 
+import { getErrorMessage } from "../utils/guards.js";
+
 /**
  * Resolve the database file path.
  *
@@ -31,9 +33,9 @@ export function getDb(): Database {
     const dataDir = dbPath.substring(0, dbPath.lastIndexOf("/"));
     try {
       mkdirSync(dataDir, { recursive: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
       throw new Error(
-        `Cannot create data directory at ${dataDir}: ${err.message}\n` +
+        `Cannot create data directory at ${dataDir}: ${getErrorMessage(err)}\n` +
           `Set LP_TRACKER_DATA_DIR to a writable path.`,
         { cause: err },
       );
@@ -209,17 +211,13 @@ export function initSchema(database: Database): void {
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist
-  const cols = database.prepare("PRAGMA table_info(positions)").all() as {
-    name: string;
-  }[];
+  const cols = database.prepare<{ name: string }, []>("PRAGMA table_info(positions)").all();
   if (!cols.some((c) => c.name === "entry_liquidity")) {
     database.exec("ALTER TABLE positions ADD COLUMN entry_liquidity TEXT");
   }
 
   // Migration: add transaction discovery columns (open_tx, close_tx, exit amounts, fees, close_block)
-  const positionCols = database.prepare("PRAGMA table_info(positions)").all() as {
-    name: string;
-  }[];
+  const positionCols = database.prepare<{ name: string }, []>("PRAGMA table_info(positions)").all();
 
   if (!positionCols.some((c) => c.name === "open_tx")) {
     database.exec("ALTER TABLE positions ADD COLUMN open_tx TEXT");
@@ -261,10 +259,9 @@ export function initSchema(database: Database): void {
     database.exec("ALTER TABLE positions ADD COLUMN exit_sqrt_price_x96 TEXT");
   }
 
-  const taxTransactionCols = database.prepare("PRAGMA table_info(tax_transactions)").all() as {
-    name: string;
-    pk: number;
-  }[];
+  const taxTransactionCols = database
+    .prepare<{ name: string; pk: number }, []>("PRAGMA table_info(tax_transactions)")
+    .all();
   const hashCol = taxTransactionCols.find((c) => c.name === "hash");
   if (!taxTransactionCols.some((c) => c.name === "id") || hashCol?.pk) {
     const idExpression = taxTransactionCols.some((c) => c.name === "id")
@@ -337,10 +334,8 @@ export function initSchema(database: Database): void {
     ["holding_duration_days", "INTEGER"],
   ] as const;
   const migratedTaxTransactionCols = database
-    .prepare("PRAGMA table_info(tax_transactions)")
-    .all() as {
-    name: string;
-  }[];
+    .prepare<{ name: string }, []>("PRAGMA table_info(tax_transactions)")
+    .all();
   for (const [name, type] of taxLedgerColumns) {
     if (!migratedTaxTransactionCols.some((c) => c.name === name)) {
       database.exec(`ALTER TABLE tax_transactions ADD COLUMN ${name} ${type}`);
@@ -348,8 +343,10 @@ export function initSchema(database: Database): void {
   }
 
   const createTableSqlRow = database
-    .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'")
-    .get() as { sql: string } | null;
+    .query<{ sql: string }, []>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'",
+    )
+    .get();
   const needsApprovalLabelMigration =
     createTableSqlRow?.sql.includes("label IN ('Trade', 'Transfer')") ?? false;
 

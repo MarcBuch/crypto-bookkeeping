@@ -159,6 +159,56 @@ const fakePnLView = {
   priceUpper: 2.0,
 };
 
+function expectErrorMessage(error: unknown, matcher: string | RegExp): void {
+  expect(error).toBeInstanceOf(Error);
+  if (!(error instanceof Error)) {
+    return;
+  }
+
+  if (typeof matcher === "string") {
+    expect(error.message).toContain(matcher);
+    return;
+  }
+
+  expect(error.message).toMatch(matcher);
+}
+
+function hasStringTokenId(value: unknown): value is { tokenId: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tokenId" in value &&
+    typeof value.tokenId === "string"
+  );
+}
+
+function hasBigIntTokenId(value: unknown): value is { tokenId: bigint } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tokenId" in value &&
+    typeof value.tokenId === "bigint"
+  );
+}
+
+function expectStringTokenId(value: unknown, tokenId: string): void {
+  expect(hasStringTokenId(value)).toBe(true);
+  if (!hasStringTokenId(value)) {
+    return;
+  }
+
+  expect(value.tokenId).toBe(tokenId);
+}
+
+function expectBigIntTokenId(value: unknown, tokenId: bigint): void {
+  expect(hasBigIntTokenId(value)).toBe(true);
+  if (!hasBigIntTokenId(value)) {
+    return;
+  }
+
+  expect(value.tokenId).toBe(tokenId);
+}
+
 // ---------------------------------------------------------------------------
 // Test setup/teardown
 // ---------------------------------------------------------------------------
@@ -205,8 +255,7 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("pool lookup failed");
+      expectErrorMessage(error, "pool lookup failed");
     }
   });
 
@@ -230,7 +279,7 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     // Position cache must be unchanged
     const positions = listCachedPositionViews();
     expect(positions).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
   });
 
   it("leaves pnl cache unchanged when getPoolAddress throws", async () => {
@@ -252,7 +301,7 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     // PnL cache must be unchanged
     const pnl = listCachedPnLViews();
     expect(pnl).toHaveLength(1);
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 
   it("rejects when getSlot0 throws during getPositionsView", async () => {
@@ -266,8 +315,7 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("slot0 fetch failed");
+      expectErrorMessage(error, "slot0 fetch failed");
     }
   });
 
@@ -291,8 +339,8 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     const pnl = listCachedPnLViews();
     expect(positions).toHaveLength(1);
     expect(pnl).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 
   it("rejects when getTokenInfo throws during getPositionsView", async () => {
@@ -306,8 +354,7 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("token info fetch failed");
+      expectErrorMessage(error, "token info fetch failed");
     }
   });
 
@@ -331,8 +378,8 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     const pnl = listCachedPnLViews();
     expect(positions).toHaveLength(1);
     expect(pnl).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 });
 
@@ -351,8 +398,7 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("pnl view exploded");
+      expectErrorMessage(error, "pnl view exploded");
     }
   });
 
@@ -375,8 +421,8 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
     const pnl = listCachedPnLViews();
     expect(positions).toHaveLength(1);
     expect(pnl).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 
   it("rejects when getPnLView throws with non-empty positions list", async () => {
@@ -389,8 +435,7 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
       await syncLpData(fakeConfig);
       throw new Error("Expected syncLpData to reject");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("pnl view exploded");
+      expectErrorMessage(error, "pnl view exploded");
     }
   });
 
@@ -413,8 +458,8 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
     const pnl = listCachedPnLViews();
     expect(positions).toHaveLength(1);
     expect(pnl).toHaveLength(1);
-    expect((positions[0] as typeof fakePositionView).tokenId).toBe("12345");
-    expect((pnl[0] as typeof fakePnLView).tokenId).toBe("12345");
+    expectStringTokenId(positions[0], "12345");
+    expectStringTokenId(pnl[0], "12345");
   });
 
   it("verifies that getPnLView receives the shared rawPositions from getAllPositions", async () => {
@@ -432,7 +477,6 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
 
     // Verify getPnLView received the same position list
     expect(positionsPassedToPnL).toHaveLength(1);
-    const passedPos = positionsPassedToPnL[0] as typeof fakeRawPosition;
-    expect(passedPos.tokenId).toBe(fakeRawPosition.tokenId);
+    expectBigIntTokenId(positionsPassedToPnL[0], fakeRawPosition.tokenId);
   });
 });

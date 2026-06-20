@@ -9,6 +9,7 @@ import {
   getHedgeEvents,
   type StoredHedgeEvent,
 } from "../db/store.js";
+import { isRecord } from "../utils/guards.js";
 import type { PnLView } from "./pnl.js";
 
 export interface HedgeView {
@@ -42,10 +43,6 @@ interface HyperliquidPosition {
     markPx: string;
   };
   type: string;
-}
-
-interface HyperliquidClearinghouseState {
-  assetPositions: HyperliquidPosition[];
 }
 
 interface HyperliquidFill {
@@ -91,10 +88,14 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
     );
   }
 
-  const data = (await response.json()) as HyperliquidClearinghouseState;
+  const data = await response.json();
+  const assetPositions =
+    isRecord(data) && Array.isArray(data.assetPositions)
+      ? data.assetPositions.filter(isHyperliquidPosition)
+      : null;
 
   // Guard against missing assetPositions
-  if (!data.assetPositions) {
+  if (!assetPositions) {
     throw new Error(
       `Hyperliquid API response missing assetPositions for wallet ${config.wallet}. ` +
         `Response structure may have changed.`,
@@ -102,7 +103,7 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
   }
 
   // Find the position matching the configured coin
-  const position = data.assetPositions.find((ap) => ap.position.coin === coin);
+  const position = assetPositions.find((ap) => ap.position.coin === coin);
 
   if (!position) {
     // Position is fully absent from Hyperliquid (settled and removed, not just szi=0).
@@ -112,7 +113,7 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
 
     throw new Error(
       `No open ${coin} position found on Hyperliquid for wallet ${config.wallet}. ` +
-        `Available positions: ${data.assetPositions.map((ap) => ap.position.coin).join(", ") || "none"}`,
+        `Available positions: ${assetPositions.map((ap) => ap.position.coin).join(", ") || "none"}`,
     );
   }
 
@@ -247,7 +248,8 @@ async function resolveAbsentPosition(
     );
   }
 
-  const fills = (await response.json()) as HyperliquidFill[];
+  const fillsJson = await response.json();
+  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
   const coinFills = fills.filter((f) => f.coin === coin);
   if (coinFills.length === 0) return null;
 
@@ -410,7 +412,8 @@ export async function resolveHedgeClose(
     );
   }
 
-  const fills = (await response.json()) as HyperliquidFill[];
+  const fillsJson = await response.json();
+  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
 
   // Step 5: Filter fills to find closing fills for this coin.
   // Include both voluntary closes ("Close Short", "Close Long") and
@@ -519,4 +522,35 @@ export function buildNetHedgePnL(pnl: PnLView, hedge: HedgeView): NetHedgePnL {
       : null;
 
   return { lpPnlUsd, hedgePnlUsd, lpEntryUsd, combinedPnlUsd, combinedRoiPct };
+}
+
+function isHyperliquidPosition(value: unknown): value is HyperliquidPosition {
+  return (
+    isRecord(value) &&
+    isRecord(value.position) &&
+    typeof value.position.coin === "string" &&
+    typeof value.position.szi === "string" &&
+    typeof value.position.entryPx === "string" &&
+    typeof value.position.unrealizedPnl === "string" &&
+    typeof value.position.liquidationPx === "string" &&
+    typeof value.position.markPx === "string" &&
+    isRecord(value.position.leverage) &&
+    typeof value.position.leverage.type === "string" &&
+    typeof value.position.leverage.value === "number"
+  );
+}
+
+function isHyperliquidFill(value: unknown): value is HyperliquidFill {
+  return (
+    isRecord(value) &&
+    typeof value.coin === "string" &&
+    typeof value.px === "string" &&
+    typeof value.sz === "string" &&
+    (value.side === "A" || value.side === "B") &&
+    typeof value.time === "number" &&
+    typeof value.closedPnl === "string" &&
+    typeof value.oid === "number" &&
+    typeof value.tid === "number" &&
+    typeof value.dir === "string"
+  );
 }

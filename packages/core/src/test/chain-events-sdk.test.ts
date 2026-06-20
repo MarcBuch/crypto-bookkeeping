@@ -1,13 +1,17 @@
 import { describe, expect, it } from "bun:test";
 
-import type { HypersyncClient } from "@envio-dev/hypersync-client";
 import { encodeAbiParameters } from "viem";
 
 import { findCloseEvent, findOpenEvent } from "../chain/events.js";
 import { padUint256 } from "../chain/hypersync.js";
+import { makeHypersyncClient } from "./helpers/hypersync.js";
 
 type Hex = `0x${string}`;
 type OpenClient = Parameters<typeof findOpenEvent>[0];
+type CloseClient = Parameters<typeof findCloseEvent>[0];
+type HyperSyncClient = NonNullable<Parameters<typeof findOpenEvent>[8]>;
+type GetLogs = OpenClient["getLogs"];
+type CloseReceipt = Awaited<ReturnType<NonNullable<CloseClient["getTransactionReceipt"]>>>;
 
 // ============================================================================
 // Constants and helpers
@@ -29,7 +33,7 @@ interface MockLog {
   blockNumber?: number;
   address?: string;
   data?: string;
-  topics?: (string | undefined | null)[];
+  topics: (string | undefined | null)[];
 }
 
 /**
@@ -37,10 +41,43 @@ interface MockLog {
  * When hyperSyncClient is not provided, the code falls back to viem's getLogs.
  */
 function mockViemClient(logsToReturn: any[] = []): OpenClient {
+  const getLogs: GetLogs = async () => logsToReturn;
   return {
     getBlockNumber: async () => 10_000n,
-    getLogs: async () => logsToReturn,
-  } as unknown as OpenClient;
+    getLogs,
+  };
+}
+
+function makeHyperSyncMock(get: HyperSyncClient["get"]): HyperSyncClient {
+  return makeHypersyncClient(get);
+}
+
+function makeReceipt(
+  logs: CloseReceipt["logs"],
+  blockNumber: bigint,
+  transactionHash: Hex,
+): CloseReceipt {
+  return {
+    blockNumber,
+    logs,
+    transactionHash,
+  };
+}
+
+function makeCloseClient(
+  receipt: CloseReceipt,
+  getLogs?: GetLogs,
+  latestBlock = 10_000n,
+): CloseClient {
+  return {
+    getBlockNumber: async () => latestBlock,
+    getTransactionReceipt: async () => receipt,
+    getLogs:
+      getLogs ??
+      (async () => {
+        throw new Error("getLogs should not be called");
+      }),
+  };
 }
 
 /**
@@ -52,7 +89,7 @@ function mockIncreaseLiquidityLog(
   amount0: bigint,
   amount1: bigint,
   blockNumber = 12345,
-): MockLog {
+): Required<MockLog> {
   const data = encodeAbiParameters(
     [{ type: "uint128" }, { type: "uint256" }, { type: "uint256" }],
     [liquidity, amount0, amount1],
@@ -76,7 +113,7 @@ function mockDecreaseLiquidityLog(
   amount0: bigint,
   amount1: bigint,
   blockNumber = 12345,
-): MockLog {
+): Required<MockLog> {
   const data = encodeAbiParameters(
     [{ type: "uint128" }, { type: "uint256" }, { type: "uint256" }],
     [liquidity, amount0, amount1],
@@ -101,7 +138,7 @@ function mockCollectLog(
   amount1Collect: bigint,
   blockNumber = 12345,
   logIndex = 1,
-): MockLog {
+): Required<MockLog> {
   const data = encodeAbiParameters(
     [{ type: "address" }, { type: "uint256" }, { type: "uint256" }],
     [recipient, amount0Collect, amount1Collect],
@@ -130,18 +167,17 @@ describe("findOpenEvent SDK path", () => {
     const toBlock = 10_000; // Must match latestBlock passed to findOpenEvent
 
     // For findOpenEvent, the SDK client is called once
-    const hyperSyncClient = {
-      get: async (_query: unknown) => ({
-        data: {
-          logs: [mockIncreaseLiquidityLog(tokenId, liquidity, amount0, amount1, blockNumber)],
-          blocks: [{ number: blockNumber, timestamp: 1700000000 }],
-          transactions: [],
-          traces: [],
-        },
-        nextBlock: toBlock + 1, // >= toBlock to signal end of pagination
-        archiveHeight: toBlock + 1,
-      }),
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => ({
+      data: {
+        logs: [mockIncreaseLiquidityLog(tokenId, liquidity, amount0, amount1, blockNumber)],
+        blocks: [{ number: blockNumber, timestamp: 1700000000 }],
+        transactions: [],
+        traces: [],
+      },
+      nextBlock: toBlock + 1,
+      archiveHeight: toBlock + 1,
+      totalExecutionTime: 1,
+    }));
 
     const viemClient = mockViemClient();
 
@@ -176,18 +212,17 @@ describe("findOpenEvent SDK path", () => {
     const tokenId = 999n;
     const toBlock = 10_000;
 
-    const hyperSyncClient = {
-      get: async (_query: unknown) => ({
-        data: {
-          logs: [],
-          blocks: [],
-          transactions: [],
-          traces: [],
-        },
-        nextBlock: toBlock + 1,
-        archiveHeight: toBlock + 1,
-      }),
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => ({
+      data: {
+        logs: [],
+        blocks: [],
+        transactions: [],
+        traces: [],
+      },
+      nextBlock: toBlock + 1,
+      archiveHeight: toBlock + 1,
+      totalExecutionTime: 1,
+    }));
 
     const viemClient = mockViemClient();
 
@@ -212,11 +247,9 @@ describe("findOpenEvent SDK path", () => {
 
   it("scenario 3: rpc_error — SDK client throws error", async () => {
     const tokenId = 123n;
-    const errorClient = {
-      get: async () => {
-        throw new Error("SDK connection failed");
-      },
-    } as unknown as HypersyncClient;
+    const errorClient = makeHyperSyncMock(async () => {
+      throw new Error("SDK connection failed");
+    });
 
     const viemClient = mockViemClient();
 
@@ -244,13 +277,12 @@ describe("findOpenEvent SDK path", () => {
 
     // Mock viem client with getLogs that returns empty (not found)
     let getLogsCalled = false;
-    const viemClient = {
-      getBlockNumber: async () => 10_000n,
-      getLogs: async () => {
+    const viemClient = mockViemClient(
+      await (async () => {
         getLogsCalled = true;
         return [];
-      },
-    } as unknown as OpenClient;
+      })(),
+    );
 
     const result = await findOpenEvent(
       viemClient,
@@ -288,37 +320,36 @@ describe("findCloseEvent SDK path", () => {
 
     // findCloseEvent makes TWO calls: one for DecreaseLiquidity, one for Collect
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: DecreaseLiquidity fetch
-          return {
-            data: {
-              logs: [mockDecreaseLiquidityLog(tokenId, liquidity, amount0, amount1, blockNumber)],
-              blocks: [{ number: blockNumber, timestamp: 1700001000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          // Second call: Collect fetch (empty result)
-          return {
-            data: {
-              logs: [],
-              blocks: [],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [mockDecreaseLiquidityLog(tokenId, liquidity, amount0, amount1, blockNumber)],
+            blocks: [{ number: blockNumber, timestamp: 1700001000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [],
+            blocks: [],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -355,21 +386,17 @@ describe("findCloseEvent SDK path", () => {
     const tokenId = 789n;
     const toBlock = 10_000;
 
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        // Both DecreaseLiquidity and Collect calls return empty
-        return {
-          data: {
-            logs: [],
-            blocks: [],
-            transactions: [],
-            traces: [],
-          },
-          nextBlock: toBlock + 1,
-          archiveHeight: toBlock + 1,
-        };
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => ({
+      data: {
+        logs: [],
+        blocks: [],
+        transactions: [],
+        traces: [],
       },
-    } as unknown as HypersyncClient;
+      nextBlock: toBlock + 1,
+      archiveHeight: toBlock + 1,
+      totalExecutionTime: 1,
+    }));
 
     const viemClient = mockViemClient();
 
@@ -404,45 +431,44 @@ describe("findCloseEvent SDK path", () => {
     const toBlock = 10_000;
 
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: DecreaseLiquidity fetch
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  blockNumber,
-                ),
-              ],
-              blocks: [{ number: blockNumber, timestamp: 1700002000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          // Second call: Collect fetch
-          return {
-            data: {
-              logs: [mockCollectLog(tokenId, WALLET, collectAmount0, collectAmount1, blockNumber)],
-              blocks: [{ number: blockNumber, timestamp: 1700002000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                blockNumber,
+              ),
+            ],
+            blocks: [{ number: blockNumber, timestamp: 1700002000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [mockCollectLog(tokenId, WALLET, collectAmount0, collectAmount1, blockNumber)],
+            blocks: [{ number: blockNumber, timestamp: 1700002000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -490,49 +516,47 @@ describe("findCloseEvent SDK path", () => {
     const collectLogAfter = mockCollectLog(tokenId, WALLET, 2000n, 3000n, collectBlockAfter);
 
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: DecreaseLiquidity fetch
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  closeBlockNumber,
-                ),
-              ],
-              blocks: [{ number: closeBlockNumber, timestamp: 1700003000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          // Second call: Collect fetch — returns BOTH before and after logs
-          // But the code should only sum the "before" one (blockNumber <= closeBlockNumber)
-          return {
-            data: {
-              logs: [collectLogBefore, collectLogAfter],
-              blocks: [
-                { number: collectBlockBefore, timestamp: 1700002900 },
-                { number: collectBlockAfter, timestamp: 1700003100 },
-              ],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                closeBlockNumber,
+              ),
+            ],
+            blocks: [{ number: closeBlockNumber, timestamp: 1700003000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [collectLogBefore, collectLogAfter],
+            blocks: [
+              { number: collectBlockBefore, timestamp: 1700002900 },
+              { number: collectBlockAfter, timestamp: 1700003100 },
+            ],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -571,54 +595,50 @@ describe("findCloseEvent SDK path", () => {
     const toBlock = 10_000;
 
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: DecreaseLiquidity fetch
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  closeBlockNumber,
-                ),
-              ],
-              blocks: [{ number: closeBlockNumber, timestamp: 1700000500 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          // Second call: Collect fetch — returns TWO Collect logs
-          // Collect log 1 at block 300: amount0Collect=600n, amount1Collect=1200n
-          // Collect log 2 at block 450: amount0Collect=700n, amount1Collect=1100n
-          // Total: 600n + 700n = 1300n for amount0, 1200n + 1100n = 2300n for amount1
-          return {
-            data: {
-              logs: [
-                mockCollectLog(tokenId, WALLET, 600n, 1200n, 300, 1),
-                mockCollectLog(tokenId, WALLET, 700n, 1100n, 450, 2),
-              ],
-              blocks: [
-                { number: 300, timestamp: 1700000300 },
-                { number: 450, timestamp: 1700000450 },
-              ],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                closeBlockNumber,
+              ),
+            ],
+            blocks: [{ number: closeBlockNumber, timestamp: 1700000500 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [
+              mockCollectLog(tokenId, WALLET, 600n, 1200n, 300, 1),
+              mockCollectLog(tokenId, WALLET, 700n, 1100n, 450, 2),
+            ],
+            blocks: [
+              { number: 300, timestamp: 1700000300 },
+              { number: 450, timestamp: 1700000450 },
+            ],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -659,45 +679,44 @@ describe("findCloseEvent SDK path", () => {
     const collectLog = mockCollectLog(tokenId, WALLET, 500n, 1000n, 550);
 
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: DecreaseLiquidity fetch
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  closeBlockNumber,
-                ),
-              ],
-              blocks: [{ number: closeBlockNumber, timestamp: 1700000600 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          // Second call: Collect fetch
-          return {
-            data: {
-              logs: [collectLog],
-              blocks: [{ number: 550, timestamp: 1700000550 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                closeBlockNumber,
+              ),
+            ],
+            blocks: [{ number: closeBlockNumber, timestamp: 1700000600 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [collectLog],
+            blocks: [{ number: 550, timestamp: 1700000550 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -739,46 +758,44 @@ describe("findCloseEvent SDK path", () => {
     const collectLogAfter = mockCollectLog(tokenId, WALLET, 2000n, 4000n, 1001);
 
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: DecreaseLiquidity fetch
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  closeBlockNumber,
-                ),
-              ],
-              blocks: [{ number: closeBlockNumber, timestamp: 1700001000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          // Second call: Collect fetch — returns a log after close block
-          // But the code should exclude it (blockNumber > closeBlockNumber)
-          return {
-            data: {
-              logs: [collectLogAfter],
-              blocks: [{ number: 1001, timestamp: 1700001001 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                closeBlockNumber,
+              ),
+            ],
+            blocks: [{ number: closeBlockNumber, timestamp: 1700001000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [collectLogAfter],
+            blocks: [{ number: 1001, timestamp: 1700001001 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -833,66 +850,77 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
     const CLOSE_TX = "0xcc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00" as Hex;
 
     // Viem client: provides the close tx receipt (DecreaseLiquidity + Collect)
-    const closeReceipt = {
-      blockNumber: BigInt(closeBlock),
-      transactionHash: CLOSE_TX,
-      logs: [
-        mockDecreaseLiquidityLog(tokenId, liquidity, decreaseAmount0, decreaseAmount1, closeBlock),
-        mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+    const closeReceipt = makeReceipt(
+      [
+        {
+          topics: [DECREASE_LIQUIDITY_TOPIC, padUint256(tokenId)],
+          data: encodeAbiParameters(
+            [{ type: "uint128" }, { type: "uint256" }, { type: "uint256" }],
+            [liquidity, decreaseAmount0, decreaseAmount1],
+          ),
+        },
+        {
+          topics: [COLLECT_TOPIC, padUint256(tokenId)],
+          data: encodeAbiParameters(
+            [{ type: "address" }, { type: "uint256" }, { type: "uint256" }],
+            [WALLET, closeTxCollect0, closeTxCollect1],
+          ),
+        },
       ],
-    };
-    type CloseClient = Parameters<typeof findCloseEvent>[0];
-    const viemClient = {
-      getBlockNumber: async () => BigInt(toBlock),
-      getTransactionReceipt: async () => closeReceipt,
-      getLogs: async () => {
+      BigInt(closeBlock),
+      CLOSE_TX,
+    );
+    const viemClient = makeCloseClient(
+      closeReceipt,
+      async () => {
         throw new Error("getLogs should not be called in SDK fast path");
       },
-    } as unknown as CloseClient;
+      BigInt(toBlock),
+    );
 
     // HyperSync: first call returns decreases, second returns both Collect logs.
     let sdkCallCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        sdkCallCount++;
-        if (sdkCallCount === 1) {
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  closeBlock,
-                ),
-              ],
-              blocks: [{ number: closeBlock, timestamp: 1700000100 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      sdkCallCount++;
+      if (sdkCallCount === 1) {
         return {
           data: {
             logs: [
-              mockCollectLog(tokenId, WALLET, priorCollect0, priorCollect1, priorBlock, 0),
-              mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                closeBlock,
+              ),
             ],
-            blocks: [
-              { number: priorBlock, timestamp: 1700000000 },
-              { number: closeBlock, timestamp: 1700000100 },
-            ],
+            blocks: [{ number: closeBlock, timestamp: 1700000100 }],
             transactions: [],
             traces: [],
           },
           nextBlock: toBlock + 1,
           archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
         };
-      },
-    } as unknown as HypersyncClient;
+      }
+      return {
+        data: {
+          logs: [
+            mockCollectLog(tokenId, WALLET, priorCollect0, priorCollect1, priorBlock, 0),
+            mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+          ],
+          blocks: [
+            { number: priorBlock, timestamp: 1700000000 },
+            { number: closeBlock, timestamp: 1700000100 },
+          ],
+          transactions: [],
+          traces: [],
+        },
+        nextBlock: toBlock + 1,
+        archiveHeight: toBlock + 1,
+        totalExecutionTime: 1,
+      };
+    });
 
     const result = await findCloseEvent(
       viemClient,
@@ -930,52 +958,49 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
     const toBlock = 10_000;
     const CLOSE_TX = "0xdd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00dd00" as Hex;
 
-    const closeReceipt = {
-      blockNumber: BigInt(closeBlock),
-      transactionHash: CLOSE_TX,
-      logs: [
-        mockDecreaseLiquidityLog(tokenId, liquidity, decreaseAmount0, decreaseAmount1, closeBlock),
-        mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+    const closeReceipt = makeReceipt(
+      [
+        {
+          topics: [DECREASE_LIQUIDITY_TOPIC, padUint256(tokenId)],
+          data: encodeAbiParameters(
+            [{ type: "uint128" }, { type: "uint256" }, { type: "uint256" }],
+            [liquidity, decreaseAmount0, decreaseAmount1],
+          ),
+        },
+        {
+          topics: [COLLECT_TOPIC, padUint256(tokenId)],
+          data: encodeAbiParameters(
+            [{ type: "address" }, { type: "uint256" }, { type: "uint256" }],
+            [WALLET, closeTxCollect0, closeTxCollect1],
+          ),
+        },
       ],
-    };
-    type CloseClient = Parameters<typeof findCloseEvent>[0];
-    const viemClient = {
-      getBlockNumber: async () => BigInt(toBlock),
-      getTransactionReceipt: async () => closeReceipt,
-      getLogs: async () => {
+      BigInt(closeBlock),
+      CLOSE_TX,
+    );
+    const viemClient = makeCloseClient(
+      closeReceipt,
+      async () => {
         throw new Error("getLogs should not be called");
       },
-    } as unknown as CloseClient;
+      BigInt(toBlock),
+    );
 
     // HyperSync: first call returns decreases, second returns only the close-tx Collect.
     let sdkCallCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        sdkCallCount++;
-        if (sdkCallCount === 1) {
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  closeBlock,
-                ),
-              ],
-              blocks: [{ number: closeBlock, timestamp: 1700000800 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      sdkCallCount++;
+      if (sdkCallCount === 1) {
         return {
           data: {
             logs: [
-              mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1),
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                closeBlock,
+              ),
             ],
             blocks: [{ number: closeBlock, timestamp: 1700000800 }],
             transactions: [],
@@ -983,9 +1008,21 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
           },
           nextBlock: toBlock + 1,
           archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
         };
-      },
-    } as unknown as HypersyncClient;
+      }
+      return {
+        data: {
+          logs: [mockCollectLog(tokenId, WALLET, closeTxCollect0, closeTxCollect1, closeBlock, 1)],
+          blocks: [{ number: closeBlock, timestamp: 1700000800 }],
+          transactions: [],
+          traces: [],
+        },
+        nextBlock: toBlock + 1,
+        archiveHeight: toBlock + 1,
+        totalExecutionTime: 1,
+      };
+    });
 
     const result = await findCloseEvent(
       viemClient,
@@ -1039,43 +1076,44 @@ describe("decodeHyperSyncLog robustness", () => {
     };
 
     let callCount = 0;
-    const hyperSyncClient = {
-      get: async (_query: unknown) => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            data: {
-              logs: [
-                mockDecreaseLiquidityLog(
-                  tokenId,
-                  liquidity,
-                  decreaseAmount0,
-                  decreaseAmount1,
-                  blockNumber,
-                ),
-              ],
-              blocks: [{ number: blockNumber, timestamp: 1700009000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        } else if (callCount === 2) {
-          return {
-            data: {
-              logs: [collectLogWithExtraTopic],
-              blocks: [{ number: blockNumber, timestamp: 1700009000 }],
-              transactions: [],
-              traces: [],
-            },
-            nextBlock: toBlock + 1,
-            archiveHeight: toBlock + 1,
-          };
-        }
-        throw new Error("Unexpected extra SDK call");
-      },
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [
+              mockDecreaseLiquidityLog(
+                tokenId,
+                liquidity,
+                decreaseAmount0,
+                decreaseAmount1,
+                blockNumber,
+              ),
+            ],
+            blocks: [{ number: blockNumber, timestamp: 1700009000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      if (callCount === 2) {
+        return {
+          data: {
+            logs: [collectLogWithExtraTopic],
+            blocks: [{ number: blockNumber, timestamp: 1700009000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: toBlock + 1,
+          archiveHeight: toBlock + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      throw new Error("Unexpected extra SDK call");
+    });
 
     const viemClient = mockViemClient();
 
@@ -1107,11 +1145,9 @@ describe("decodeHyperSyncLog robustness", () => {
 describe("SDK path edge cases", () => {
   it("returns rpc_error when SDK throws during findCloseEvent", async () => {
     const tokenId = 111n;
-    const errorClient = {
-      get: async () => {
-        throw new Error("Network timeout");
-      },
-    } as unknown as HypersyncClient;
+    const errorClient = makeHyperSyncMock(async () => {
+      throw new Error("Network timeout");
+    });
 
     const viemClient = mockViemClient();
 
@@ -1144,18 +1180,17 @@ describe("SDK path edge cases", () => {
       topics: ["", ""], // malformed topics
     };
 
-    const hyperSyncClient = {
-      get: async (_query: unknown) => ({
-        data: {
-          logs: [malformedLog],
-          blocks: [{ number: 5000, timestamp: 1700000000 }],
-          transactions: [],
-          traces: [],
-        },
-        nextBlock: toBlock + 1,
-        archiveHeight: toBlock + 1,
-      }),
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => ({
+      data: {
+        logs: [malformedLog],
+        blocks: [{ number: 5000, timestamp: 1700000000 }],
+        transactions: [],
+        traces: [],
+      },
+      nextBlock: toBlock + 1,
+      archiveHeight: toBlock + 1,
+      totalExecutionTime: 1,
+    }));
 
     const viemClient = mockViemClient();
 
@@ -1181,18 +1216,17 @@ describe("SDK path edge cases", () => {
     const toBlock = 10_000;
 
     // SDK filters by topic1, but we verify the decoded tokenId matches
-    const hyperSyncClient = {
-      get: async (_query: unknown) => ({
-        data: {
-          logs: [mockIncreaseLiquidityLog(returnedTokenId, 1000n, 500n, 200n, 5000)],
-          blocks: [{ number: 5000, timestamp: 1700000000 }],
-          transactions: [],
-          traces: [],
-        },
-        nextBlock: toBlock + 1,
-        archiveHeight: toBlock + 1,
-      }),
-    } as unknown as HypersyncClient;
+    const hyperSyncClient = makeHyperSyncMock(async (_query) => ({
+      data: {
+        logs: [mockIncreaseLiquidityLog(returnedTokenId, 1000n, 500n, 200n, 5000)],
+        blocks: [{ number: 5000, timestamp: 1700000000 }],
+        transactions: [],
+        traces: [],
+      },
+      nextBlock: toBlock + 1,
+      archiveHeight: toBlock + 1,
+      totalExecutionTime: 1,
+    }));
 
     const viemClient = mockViemClient();
 

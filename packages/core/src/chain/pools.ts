@@ -5,6 +5,8 @@ import { factoryAbi, poolAbi, erc20Abi } from "./abis";
 import type { Client } from "./client";
 import { withRetry } from "./rpc";
 
+type ReadContractClient = Pick<Client, "readContract">;
+
 export interface Slot0 {
   address: Address;
   sqrtPriceX96: bigint;
@@ -48,7 +50,7 @@ export function buildPoolCacheKey(token0: Address, token1: Address, fee: number)
 }
 
 export async function getPoolAddress(
-  client: Client,
+  client: ReadContractClient,
   factory: Address,
   token0: Address,
   token1: Address,
@@ -71,7 +73,7 @@ export async function getPoolAddress(
   return address;
 }
 
-export async function getSlot0(client: Client, poolAddress: Address): Promise<Slot0> {
+export async function getSlot0(client: ReadContractClient, poolAddress: Address): Promise<Slot0> {
   const slot0Result = await withRetry(() =>
     client.readContract({
       address: poolAddress,
@@ -82,12 +84,15 @@ export async function getSlot0(client: Client, poolAddress: Address): Promise<Sl
 
   return {
     address: poolAddress,
-    sqrtPriceX96: BigInt(slot0Result[0]),
-    tick: Number(slot0Result[1]),
+    sqrtPriceX96: slot0Result[0],
+    tick: slot0Result[1],
   };
 }
 
-export async function getPoolState(client: Client, poolAddress: Address): Promise<PoolState> {
+export async function getPoolState(
+  client: ReadContractClient,
+  poolAddress: Address,
+): Promise<PoolState> {
   const [slot0Result, feeGrowth0, feeGrowth1] = await Promise.all([
     withRetry(() =>
       client.readContract({
@@ -114,15 +119,15 @@ export async function getPoolState(client: Client, poolAddress: Address): Promis
 
   return {
     address: poolAddress,
-    sqrtPriceX96: BigInt(slot0Result[0]),
-    tick: Number(slot0Result[1]),
-    feeGrowthGlobal0X128: BigInt(feeGrowth0),
-    feeGrowthGlobal1X128: BigInt(feeGrowth1),
+    sqrtPriceX96: slot0Result[0],
+    tick: slot0Result[1],
+    feeGrowthGlobal0X128: feeGrowth0,
+    feeGrowthGlobal1X128: feeGrowth1,
   };
 }
 
 export async function getTickData(
-  client: Client,
+  client: ReadContractClient,
   poolAddress: Address,
   tick: number,
 ): Promise<TickData> {
@@ -136,10 +141,10 @@ export async function getTickData(
   );
 
   return {
-    liquidityGross: BigInt(result[0]),
-    liquidityNet: BigInt(result[1]),
-    feeGrowthOutside0X128: BigInt(result[2]),
-    feeGrowthOutside1X128: BigInt(result[3]),
+    liquidityGross: result[0],
+    liquidityNet: result[1],
+    feeGrowthOutside0X128: result[2],
+    feeGrowthOutside1X128: result[3],
   };
 }
 
@@ -154,7 +159,7 @@ export async function getTickData(
  * { fees0: 0, fees1: 0 } to match the behavior of existing call sites.
  */
 export async function computeUnclaimedFees(
-  client: Client,
+  client: ReadContractClient,
   poolAddress: Address,
   pos: {
     tickLower: number;
@@ -206,7 +211,10 @@ export async function computeUnclaimedFees(
   }
 }
 
-export async function getTokenInfo(client: Client, tokenAddress: Address): Promise<TokenInfo> {
+export async function getTokenInfo(
+  client: ReadContractClient,
+  tokenAddress: Address,
+): Promise<TokenInfo> {
   const cached = tokenCache.get(tokenAddress.toLowerCase());
   if (cached) return cached;
 
@@ -230,7 +238,7 @@ export async function getTokenInfo(client: Client, tokenAddress: Address): Promi
   const info: TokenInfo = {
     address: tokenAddress,
     symbol,
-    decimals: Number(decimals),
+    decimals,
   };
 
   tokenCache.set(tokenAddress.toLowerCase(), info);

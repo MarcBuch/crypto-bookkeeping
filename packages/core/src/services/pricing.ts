@@ -1,6 +1,7 @@
 import type { Address } from "viem";
 
 import type { Config } from "../config.js";
+import { isRecord } from "../utils/guards.js";
 
 export type PricingToken =
   | string
@@ -110,17 +111,14 @@ async function fetchAndCachePrices(coinGeckoIds: string[]): Promise<void> {
     }
 
     const data = await response.json();
-    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    if (!isRecord(data)) {
       cacheUnavailable(coinGeckoIds);
       return;
     }
 
     for (const coinGeckoId of coinGeckoIds) {
-      const responsePrice = (data as Record<string, unknown>)[coinGeckoId];
-      const usd =
-        typeof responsePrice === "object" && responsePrice !== null
-          ? (responsePrice as Record<string, unknown>).usd
-          : undefined;
+      const responsePrice = data[coinGeckoId];
+      const usd = isRecord(responsePrice) ? responsePrice.usd : undefined;
       const price = typeof usd === "number" && Number.isFinite(usd) && usd >= 0 ? usd : null;
       cachePrice(coinGeckoId, price, price === null ? NEGATIVE_CACHE_TTL_MS : PRICE_CACHE_TTL_MS);
     }
@@ -193,10 +191,11 @@ export async function getHistoricalPrice(
     }
 
     const data = await response.json();
-    const marketData = (data as Record<string, unknown>)?.["market_data"] as
-      | Record<string, unknown>
-      | undefined;
-    const currentPrice = marketData?.["current_price"] as Record<string, unknown> | undefined;
+    const marketData = isRecord(data) && isRecord(data.market_data) ? data.market_data : undefined;
+    const currentPrice =
+      marketData !== undefined && isRecord(marketData.current_price)
+        ? marketData.current_price
+        : undefined;
     const price = currentPrice?.[currency];
 
     if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {

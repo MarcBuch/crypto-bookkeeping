@@ -68,18 +68,18 @@ export async function getPositionData(
 
   return {
     tokenId,
-    nonce: BigInt(result[0]),
+    nonce: result[0],
     operator: result[1],
     token0: result[2],
     token1: result[3],
-    fee: Number(result[4]),
-    tickLower: Number(result[5]),
-    tickUpper: Number(result[6]),
-    liquidity: BigInt(result[7]),
-    feeGrowthInside0LastX128: BigInt(result[8]),
-    feeGrowthInside1LastX128: BigInt(result[9]),
-    tokensOwed0: BigInt(result[10]),
-    tokensOwed1: BigInt(result[11]),
+    fee: result[4],
+    tickLower: result[5],
+    tickUpper: result[6],
+    liquidity: result[7],
+    feeGrowthInside0LastX128: result[8],
+    feeGrowthInside1LastX128: result[9],
+    tokensOwed0: result[10],
+    tokensOwed1: result[11],
   };
 }
 

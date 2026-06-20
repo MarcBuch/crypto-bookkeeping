@@ -8,11 +8,26 @@ import { describe, expect, it } from "bun:test";
 import { findCloseEvent, findOpenEvent } from "../chain/events.js";
 
 type OpenClient = Parameters<typeof findOpenEvent>[0];
+type SimpleEventLog = {
+  args: Record<string, bigint>;
+  blockNumber: bigint;
+  transactionHash: `0x${string}`;
+};
 
 const TX_HASH =
   "0x1111111111111111111111111111111111111111111111111111111111111111" as `0x${string}`;
 const POSITION_MANAGER = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`;
 const WALLET = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" as `0x${string}`;
+
+function makeEventClient(logPages: SimpleEventLog[][], latestBlock: bigint): OpenClient {
+  let callCount = 0;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  const getLogs = (async () => logPages[callCount++] ?? []) as unknown as OpenClient["getLogs"];
+  return {
+    getBlockNumber: async () => latestBlock,
+    getLogs,
+  };
+}
 
 describe("EventResult discriminated union", () => {
   const TOKEN_ID = 42n;
@@ -20,15 +35,18 @@ describe("EventResult discriminated union", () => {
   // findOpenEvent
 
   it("findOpenEvent returns { status: 'found' } when IncreaseLiquidity log exists", async () => {
-    const mockLog = {
-      args: { tokenId: TOKEN_ID, liquidity: 100n, amount0: 1000n, amount1: 2000n },
-      blockNumber: 500n,
-      transactionHash: TX_HASH,
-    };
-    const client = {
-      getBlockNumber: async () => 1000n,
-      getLogs: async () => [mockLog],
-    } as unknown as OpenClient;
+    const client = makeEventClient(
+      [
+        [
+          {
+            args: { tokenId: TOKEN_ID, liquidity: 100n, amount0: 1000n, amount1: 2000n },
+            blockNumber: 500n,
+            transactionHash: TX_HASH,
+          },
+        ],
+      ],
+      1000n,
+    );
 
     const result = await findOpenEvent(client, POSITION_MANAGER, TOKEN_ID, WALLET);
 
@@ -44,10 +62,7 @@ describe("EventResult discriminated union", () => {
   });
 
   it("findOpenEvent returns { status: 'not_found' } when no logs found in all chunks", async () => {
-    const client = {
-      getBlockNumber: async () => 100n,
-      getLogs: async () => [],
-    } as unknown as OpenClient;
+    const client = makeEventClient([[]], 100n);
 
     const result = await findOpenEvent(client, POSITION_MANAGER, TOKEN_ID, WALLET);
 
@@ -56,12 +71,11 @@ describe("EventResult discriminated union", () => {
 
   it("findOpenEvent returns { status: 'rpc_error' } when getLogs throws", async () => {
     const rpcErr = new Error("RPC unavailable");
-    const client = {
-      getBlockNumber: async () => 100n,
-      getLogs: async () => {
-        throw rpcErr;
-      },
-    } as unknown as OpenClient;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const getLogs = (async () => {
+      throw rpcErr;
+    }) as unknown as OpenClient["getLogs"];
+    const client: OpenClient = { getBlockNumber: async () => 100n, getLogs };
 
     const result = await findOpenEvent(client, POSITION_MANAGER, TOKEN_ID, WALLET);
 
@@ -74,19 +88,19 @@ describe("EventResult discriminated union", () => {
   // findCloseEvent
 
   it("findCloseEvent returns { status: 'found' } when DecreaseLiquidity log exists", async () => {
-    let callCount = 0;
-    const mockDecreaseLog = {
-      args: { tokenId: TOKEN_ID, liquidity: 50n, amount0: 3000n, amount1: 4000n },
-      blockNumber: 600n,
-      transactionHash: TX_HASH,
-    };
-    const client = {
-      getBlockNumber: async () => 1000n,
-      getLogs: async () => {
-        callCount += 1;
-        return callCount === 1 ? [mockDecreaseLog] : [];
-      },
-    } as unknown as OpenClient;
+    const client = makeEventClient(
+      [
+        [
+          {
+            args: { tokenId: TOKEN_ID, liquidity: 50n, amount0: 3000n, amount1: 4000n },
+            blockNumber: 600n,
+            transactionHash: TX_HASH,
+          },
+        ],
+        [],
+      ],
+      1000n,
+    );
 
     const result = await findCloseEvent(client, POSITION_MANAGER, TOKEN_ID, WALLET);
 
@@ -100,10 +114,7 @@ describe("EventResult discriminated union", () => {
   });
 
   it("findCloseEvent returns { status: 'not_found' } when no logs found in all chunks", async () => {
-    const client = {
-      getBlockNumber: async () => 100n,
-      getLogs: async () => [],
-    } as unknown as OpenClient;
+    const client = makeEventClient([[]], 100n);
 
     const result = await findCloseEvent(client, POSITION_MANAGER, TOKEN_ID, WALLET);
 
@@ -112,12 +123,11 @@ describe("EventResult discriminated union", () => {
 
   it("findCloseEvent returns { status: 'rpc_error' } when getLogs throws", async () => {
     const rpcErr = new Error("RPC connection refused");
-    const client = {
-      getBlockNumber: async () => 100n,
-      getLogs: async () => {
-        throw rpcErr;
-      },
-    } as unknown as OpenClient;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const getLogs = (async () => {
+      throw rpcErr;
+    }) as unknown as OpenClient["getLogs"];
+    const client: OpenClient = { getBlockNumber: async () => 100n, getLogs };
 
     const result = await findCloseEvent(client, POSITION_MANAGER, TOKEN_ID, WALLET);
 

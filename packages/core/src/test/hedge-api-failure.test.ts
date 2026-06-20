@@ -12,6 +12,8 @@ import { Database } from "bun:sqlite";
 import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
 
 import { initSchema } from "../db/schema.js";
+import { captureError, expectError } from "./helpers/errors.js";
+import { getRequestType, jsonResponse, setFetchMock, textResponse } from "./helpers/http.js";
 
 // Mock getDb before importing store functions
 let testDb: Database;
@@ -27,15 +29,15 @@ await mock.module("../db/schema.js", () => ({
 // Mocks — must be declared before importing the module under test
 // ---------------------------------------------------------------------------
 
-let mockFetch: (url: string, options: unknown) => Promise<unknown> = async () => ({
-  ok: true,
-  status: 200,
-  json: async () => ({}),
-});
+type FetchInput = Parameters<typeof globalThis.fetch>[0];
+type FetchInit = Parameters<typeof globalThis.fetch>[1];
+
+let mockFetch: (input: FetchInput, init: FetchInit) => Response | Promise<Response> = async () =>
+  jsonResponse({});
 
 // Mock globalThis.fetch before importing the module under test
 const originalFetch = globalThis.fetch;
-globalThis.fetch = ((url: string, options: unknown) => mockFetch(url, options)) as any;
+setFetchMock((input, init) => mockFetch(input, init));
 
 // ---------------------------------------------------------------------------
 // Import module under test (after mocks)
@@ -98,26 +100,12 @@ beforeEach(() => {
   testDb = new Database(":memory:");
   initSchema(testDb);
 
-  mockFetch = async () => ({
-    ok: true,
-    status: 200,
-    json: async () => validHyperliquidResponse,
-  });
+  mockFetch = async () => jsonResponse(validHyperliquidResponse);
 });
 
 afterAll(() => {
   globalThis.fetch = originalFetch;
 });
-
-async function captureError<T>(promise: Promise<T>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-
-  throw new Error("Expected promise to reject");
-}
 
 // ---------------------------------------------------------------------------
 // Cluster: API failure scenarios
@@ -131,64 +119,45 @@ describe("getHedgeView() — API failure scenarios", () => {
     };
 
     const error = await captureError(getHedgeView(baseConfig, "484645"));
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("network error");
+    expect(expectError(error).message).toContain("network error");
   });
 
   // Test 2: Non-200 response
   it("non-200 response: fetch resolves with ok: false, status 503 → throws with status code", async () => {
-    mockFetch = async () => ({
-      ok: false,
-      status: 503,
-      statusText: "Service Unavailable",
-    });
+    mockFetch = async () => jsonResponse({}, { status: 503, statusText: "Service Unavailable" });
 
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("503");
+    expect(expectError(error).message).toContain("503");
   });
 
   // Test 3: Response not valid JSON
   it("response not valid JSON: fetch resolves with ok: true but .json() throws → propagates rejection", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => {
-        throw new Error("Unexpected token < in JSON at position 0");
-      },
-    });
+    mockFetch = async () => textResponse("<not-json>", { status: 200 });
 
     const error = await captureError(getHedgeView(baseConfig, "484645"));
-    expect(error).toBeInstanceOf(Error);
+    expect(expectError(error)).toBeInstanceOf(Error);
   });
 
   // Test 4: Response is empty object {}
   it("response is empty object {}: HL returns {} → throws structured error", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({}),
-    });
+    mockFetch = async () => jsonResponse({});
 
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("assetPositions");
+    expect(expectError(error).message).toContain("assetPositions");
   });
 
-  // Test 5: Response has assetPositions with missing entryPx
-  it("response has assetPositions with missing entryPx: position.entryPx absent → markPx/entryPx parse as NaN", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+  // Test 5: Response has assetPositions with malformed entryPx
+  it("response has assetPositions with empty entryPx: position.entryPx parses as NaN", async () => {
+    mockFetch = async () =>
+      jsonResponse({
         assetPositions: [
           {
             position: {
               coin: "HYPE",
               szi: "-30.1",
-              // entryPx deliberately missing
+              entryPx: "",
               positionValue: "45.15",
               unrealizedPnl: "2.5",
               cumFunding: {
@@ -201,8 +170,7 @@ describe("getHedgeView() — API failure scenarios", () => {
             type: "perp",
           },
         ],
-      }),
-    });
+      });
 
     const result = await getHedgeView(baseConfig, "484645");
 
@@ -214,69 +182,49 @@ describe("getHedgeView() — API failure scenarios", () => {
 
   // Test 6: Response has assetPositions: null
   it("response has assetPositions: null → throws structured error, not TypeError", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    mockFetch = async () =>
+      jsonResponse({
         assetPositions: null,
-      }),
-    });
+      });
 
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("assetPositions");
+    expect(expectError(error).message).toContain("assetPositions");
   });
 
   // Additional edge case: 404 response
   it("404 response: fetch resolves with ok: false, status 404 → throws with status code", async () => {
-    mockFetch = async () => ({
-      ok: false,
-      status: 404,
-      statusText: "Not Found",
-    });
+    mockFetch = async () => jsonResponse({}, { status: 404, statusText: "Not Found" });
 
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("404");
+    expect(expectError(error).message).toContain("404");
   });
 
   // Additional edge case: 500 response
   it("500 response: fetch resolves with ok: false, status 500 → throws with status code", async () => {
-    mockFetch = async () => ({
-      ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-    });
+    mockFetch = async () => jsonResponse({}, { status: 500, statusText: "Internal Server Error" });
 
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("500");
+    expect(expectError(error).message).toContain("500");
   });
 
   // Additional edge case: assetPositions is empty array
   it("assetPositions is empty array: no matching HYPE position → throws error", async () => {
-    mockFetch = async (_url: string, options: unknown) => {
-      const body = JSON.parse((options as { body?: string })?.body ?? "{}");
-      if (body.type === "userFillsByTime") {
+    mockFetch = async (_input, init) => {
+      if (getRequestType(init) === "userFillsByTime") {
         // No fills found — resolveAbsentPosition returns null → falls through to throw
-        return { ok: true, status: 200, json: async () => [] };
+        return jsonResponse([]);
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          assetPositions: [],
-        }),
-      };
+      return jsonResponse({
+        assetPositions: [],
+      });
     };
 
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("No open");
+    expect(expectError(error).message).toContain("No open");
   });
 
   // Additional edge case: position with szi = 0 (closed)
@@ -286,37 +234,29 @@ describe("getHedgeView() — API failure scenarios", () => {
       callCount++;
       if (callCount === 1) {
         // First call: clearinghouseState with szi=0
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            assetPositions: [
-              {
-                position: {
-                  coin: "HYPE",
-                  szi: "0", // Closed position
-                  entryPx: "1.5",
-                  positionValue: "0",
-                  unrealizedPnl: "0",
-                  cumFunding: {
-                    sinceOpen: "0",
-                  },
-                  leverage: { type: "cross", value: 1 },
-                  liquidationPx: "0",
-                  markPx: "1.6",
+        return jsonResponse({
+          assetPositions: [
+            {
+              position: {
+                coin: "HYPE",
+                szi: "0", // Closed position
+                entryPx: "1.5",
+                positionValue: "0",
+                unrealizedPnl: "0",
+                cumFunding: {
+                  sinceOpen: "0",
                 },
-                type: "perp",
+                leverage: { type: "cross", value: 1 },
+                liquidationPx: "0",
+                markPx: "1.6",
               },
-            ],
-          }),
-        };
+              type: "perp",
+            },
+          ],
+        });
       } else {
         // Second call: userFillsByTime with empty fills
-        return {
-          ok: true,
-          status: 200,
-          json: async () => [],
-        };
+        return jsonResponse([]);
       }
     };
 
@@ -340,17 +280,12 @@ describe("getHedgeView() — API failure scenarios", () => {
 
     const promise = getHedgeView(configWithoutHedge, "484645");
     const error = await captureError(promise);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("hedge");
+    expect(expectError(error).message).toContain("hedge");
   });
 
   // Additional edge case: valid response with all fields
   it("valid response: all fields present and valid → returns HedgeView", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => validHyperliquidResponse,
-    });
+    mockFetch = async () => jsonResponse(validHyperliquidResponse);
 
     const result = await getHedgeView(baseConfig, "484645");
 
@@ -367,10 +302,8 @@ describe("getHedgeView() — API failure scenarios", () => {
 
   // Additional edge case: liquidationPx is NaN (converted to null)
   it("liquidationPx is NaN: converts to null in HedgeView", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    mockFetch = async () =>
+      jsonResponse({
         assetPositions: [
           {
             position: {
@@ -389,8 +322,7 @@ describe("getHedgeView() — API failure scenarios", () => {
             type: "perp",
           },
         ],
-      }),
-    });
+      });
 
     const result = await getHedgeView(baseConfig, "484645");
 
@@ -399,10 +331,8 @@ describe("getHedgeView() — API failure scenarios", () => {
 
   // Additional edge case: cumFunding.sinceOpen missing (defaults to "0")
   it("cumFunding.sinceOpen missing: defaults to 0", async () => {
-    mockFetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    mockFetch = async () =>
+      jsonResponse({
         assetPositions: [
           {
             position: {
@@ -421,8 +351,7 @@ describe("getHedgeView() — API failure scenarios", () => {
             type: "perp",
           },
         ],
-      }),
-    });
+      });
 
     const result = await getHedgeView(baseConfig, "484645");
 

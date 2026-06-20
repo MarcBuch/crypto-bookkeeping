@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
 import { getHistoricalPrice, getUsdPrices } from "../services/pricing.js";
+import { getRequestUrl, jsonResponse, setFetchMock } from "./helpers/http.js";
 
 const originalFetch = globalThis.fetch;
 const originalDateNow = Date.now;
@@ -9,31 +10,21 @@ type FetchCall = {
   url: string;
 };
 
-function getRequestUrl(input: RequestInfo | URL): string {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.href;
-  return input.url;
-}
-
 function mockFetchJson(data: unknown, init: ResponseInit = {}): FetchCall[] {
   const calls: FetchCall[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  setFetchMock(async (input) => {
     calls.push({ url: getRequestUrl(input) });
-    const status = init.status ?? 200;
-    return {
-      ok: status >= 200 && status < 300,
-      json: async () => data,
-    } as Response;
-  }) as unknown as typeof fetch;
+    return jsonResponse(data, init);
+  });
   return calls;
 }
 
 function mockFetchReject(error = new Error("network down")): FetchCall[] {
   const calls: FetchCall[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  setFetchMock(async (input) => {
     calls.push({ url: getRequestUrl(input) });
     throw error;
-  }) as unknown as typeof fetch;
+  });
   return calls;
 }
 
@@ -163,13 +154,10 @@ describe("getUsdPrices", () => {
     setNow(1_000);
     let price = 10;
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ positive_cache_token: { usd: price } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ positive_cache_token: { usd: price } });
+    });
 
     const config = { pricing: { coingeckoIds: { POSITIVE_CACHE_TOKEN: "positive_cache_token" } } };
 
@@ -197,13 +185,10 @@ describe("getUsdPrices", () => {
     let data: unknown = { negative_cache_token: { usd: null } };
     const calls = mockFetchJson(data);
 
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => data,
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse(data);
+    });
 
     const config = { pricing: { coingeckoIds: { NEGATIVE_CACHE_TOKEN: "negative_cache_token" } } };
 
@@ -263,7 +248,7 @@ describe("getHistoricalPrice — EUR — unknown assets and invalid inputs", () 
   it("returns null and avoids fetch when config has no pricing key", async () => {
     const calls = mockFetchJson({ market_data: { current_price: { eur: 10 } } });
     const result = await getHistoricalPrice(
-      {} as any,
+      {},
       "H_NO_PRICING_KEY",
       "2024-01-15T00:00:00.000Z",
       "eur",
@@ -303,13 +288,10 @@ describe("getHistoricalPrice — EUR — unknown assets and invalid inputs", () 
 
   it("resolves case-insensitively: config has HYPE_CASE_TEST, call uses hype_case_test", async () => {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ market_data: { current_price: { eur: 42.5 } } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 42.5 } } });
+    });
 
     const config = { pricing: { coingeckoIds: { HYPE_CASE_TEST: "hyperliquid-case-test" } } };
     const result = await getHistoricalPrice(
@@ -503,13 +485,10 @@ describe("getHistoricalPrice — EUR — caching", () => {
 
     let price = 100;
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ market_data: { current_price: { eur: price } } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ market_data: { current_price: { eur: price } } });
+    });
 
     const config = { pricing: { coingeckoIds: { H_CACHE_TTL_POS: "h-cache-ttl-pos-id" } } };
     const ts = "2024-06-04T12:00:00.000Z";
@@ -536,13 +515,10 @@ describe("getHistoricalPrice — EUR — caching", () => {
     let responseOk = false;
     let responseData: unknown = { error: "not found" };
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: responseOk,
-        json: async () => responseData,
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse(responseData, { status: responseOk ? 200 : 404 });
+    });
 
     const config = { pricing: { coingeckoIds: { H_CACHE_TTL_NEG: "h-cache-ttl-neg-id" } } };
     const ts = "2024-06-05T12:00:00.000Z";
@@ -568,7 +544,7 @@ describe("getHistoricalPrice — EUR — caching", () => {
 describe("getHistoricalPrice — USD — unknown assets and invalid inputs", () => {
   it("returns null and avoids fetch when pricing config is missing", async () => {
     const calls = mockFetchJson({ market_data: { current_price: { usd: 10 } } });
-    const result = await getHistoricalPrice({} as any, "HYPE", "2024-01-15T00:00:00.000Z", "eur");
+    const result = await getHistoricalPrice({}, "HYPE", "2024-01-15T00:00:00.000Z", "eur");
     expect(result).toBeNull();
     expect(calls).toHaveLength(0);
   });
@@ -856,13 +832,10 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
   it("cache hit after successful fetch — second call returns same price without new fetch", async () => {
     const calls: FetchCall[] = [];
     let responseData: unknown = { market_data: { current_price: { usd: 50 } } };
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => responseData,
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse(responseData);
+    });
 
     const config = { pricing: { coingeckoIds: { USD_HIT: "usd-hit-id" } } };
     const ts = "2024-06-02T10:00:00.000Z";
@@ -902,13 +875,10 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
     let responseOk = false;
     let responseData: unknown = { error: "not found" };
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: responseOk,
-        json: async () => responseData,
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse(responseData, { status: responseOk ? 200 : 404 });
+    });
 
     const config = { pricing: { coingeckoIds: { USD_TTL_NEG: "usd-ttl-neg-id" } } };
     const ts = "2024-06-04T10:00:00.000Z";
@@ -931,13 +901,10 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
 
   it("EUR/USD cache isolation — EUR and USD use different cache keys for same symbol+date", async () => {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ market_data: { current_price: { eur: 35, usd: 42 } } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 35, usd: 42 } } });
+    });
 
     const config = { pricing: { coingeckoIds: { CACHED_ISO: "cached-iso-id" } } };
     const ts = "2024-06-05T10:00:00.000Z";
@@ -968,13 +935,10 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
 describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
   it("EUR and USD for same coin+date are stored under different cache keys — EUR fetch does NOT warm USD cache", async () => {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ market_data: { current_price: { eur: 35, usd: 42 } } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 35, usd: 42 } } });
+    });
 
     const config = { pricing: { coingeckoIds: { CLUSTER_A_1: "cluster-a-1-id" } } };
     const ts = "2024-06-10T10:00:00.000Z";
@@ -992,13 +956,10 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
 
   it("after fetching EUR, calling getHistoricalPrice for USD for same coin+date triggers a NEW fetch", async () => {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ market_data: { current_price: { eur: 50, usd: 60 } } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 50, usd: 60 } } });
+    });
 
     const config = { pricing: { coingeckoIds: { CLUSTER_A_2: "cluster-a-2-id" } } };
     const ts = "2024-06-11T10:00:00.000Z";
@@ -1016,13 +977,10 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
 
   it("after fetching USD, calling getHistoricalPrice for EUR for same coin+date triggers a NEW fetch", async () => {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({ market_data: { current_price: { eur: 25, usd: 30 } } }),
-      } as Response;
-    }) as unknown as typeof fetch;
+      return jsonResponse({ market_data: { current_price: { eur: 25, usd: 30 } } });
+    });
 
     const config = { pricing: { coingeckoIds: { CLUSTER_A_3: "cluster-a-3-id" } } };
     const ts = "2024-06-12T10:00:00.000Z";
@@ -1040,20 +998,17 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
 
   it("EUR price is read from current_price.eur, USD from current_price.usd — they can differ and must not cross-contaminate", async () => {
     const calls: FetchCall[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchMock(async (input) => {
       calls.push({ url: getRequestUrl(input) });
-      return {
-        ok: true,
-        json: async () => ({
-          market_data: {
-            current_price: {
-              eur: 100,
-              usd: 200,
-            },
+      return jsonResponse({
+        market_data: {
+          current_price: {
+            eur: 100,
+            usd: 200,
           },
-        }),
-      } as Response;
-    }) as unknown as typeof fetch;
+        },
+      });
+    });
 
     const config = { pricing: { coingeckoIds: { CLUSTER_A_4: "cluster-a-4-id" } } };
     const ts = "2024-06-13T10:00:00.000Z";

@@ -181,6 +181,44 @@ describe("dashboard rendering", () => {
     expect(html).toContain("out of range");
   });
 
+  it("derives balance USD from token1 price when token0 USD price is missing", () => {
+    const positionWithDerivedToken0Usd: DashboardPosition = {
+      ...activePosition,
+      currentPrice: 2.4,
+      currentAmount0: 1.75,
+      currentAmount1: 3.2,
+      pnl: {
+        ...activePosition.pnl!,
+        token0UsdPrice: null,
+        token1UsdPrice: 2.5,
+      },
+    };
+
+    const html = renderDashboard([positionWithDerivedToken0Usd]);
+
+    expect(html).toContain("$18.50");
+    expect(html).not.toContain("USD unavailable");
+  });
+
+  it("derives balance USD from token0 price when token1 USD price is missing", () => {
+    const positionWithDerivedToken1Usd: DashboardPosition = {
+      ...activePosition,
+      currentPrice: 2.4,
+      currentAmount0: 1.75,
+      currentAmount1: 3.2,
+      pnl: {
+        ...activePosition.pnl!,
+        token0UsdPrice: 6,
+        token1UsdPrice: null,
+      },
+    };
+
+    const html = renderDashboard([positionWithDerivedToken1Usd]);
+
+    expect(html).toContain("$18.50");
+    expect(html).not.toContain("USD unavailable");
+  });
+
   it("renders ledger USD fee as primary and token1 fees as secondary context", () => {
     const html = renderDashboard([activePosition]);
 

@@ -908,12 +908,32 @@ function formatSignedPercent(value: number): string {
 function currentBalanceUsd(position: DashboardPosition): number | null {
   const token0Usd = position.pnl?.token0UsdPrice;
   const token1Usd = position.pnl?.token1UsdPrice;
+  const currentPrice = position.currentPrice;
 
-  if (typeof token0Usd !== "number" || typeof token1Usd !== "number") {
-    return null;
+  const hasFiniteNumber = (value: number | null | undefined): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+
+  if (hasFiniteNumber(token0Usd) && hasFiniteNumber(token1Usd)) {
+    return position.currentAmount0 * token0Usd + position.currentAmount1 * token1Usd;
   }
 
-  return position.currentAmount0 * token0Usd + position.currentAmount1 * token1Usd;
+  if (hasFiniteNumber(token0Usd)) {
+    const token0Balance = position.currentAmount0 * token0Usd;
+    if (position.currentAmount1 === 0) return token0Balance;
+    if (Number.isFinite(currentPrice) && currentPrice > 0) {
+      return token0Balance + position.currentAmount1 * (token0Usd / currentPrice);
+    }
+  }
+
+  if (hasFiniteNumber(token1Usd)) {
+    const token1Balance = position.currentAmount1 * token1Usd;
+    if (position.currentAmount0 === 0) return token1Balance;
+    if (Number.isFinite(currentPrice) && currentPrice > 0) {
+      return token1Balance + position.currentAmount0 * currentPrice * token1Usd;
+    }
+  }
+
+  return null;
 }
 
 function venueLabel(position: DashboardPosition): { name: string; dotClass: string } {

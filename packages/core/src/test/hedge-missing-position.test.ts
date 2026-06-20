@@ -18,7 +18,7 @@ import { getHedgeView } from "../services/hedge.js";
 // Mock getDb before importing store functions
 let testDb: Database;
 
-mock.module("../db/schema.js", () => ({
+await mock.module("../db/schema.js", () => ({
   getDb: () => testDb,
   initSchema,
   resolveDbPath: () => ":memory:",
@@ -70,6 +70,16 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+async function captureError<T>(promise: Promise<T>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+
+  throw new Error("Expected promise to reject");
+}
+
 // ---------------------------------------------------------------------------
 // Minimal valid config builder
 // ---------------------------------------------------------------------------
@@ -110,7 +120,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/hedge/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/hedge/i);
   });
 
   it("throws with 'does not have a hedge configuration' message when hedge config is missing", async () => {
@@ -124,9 +136,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "456")).rejects.toThrow(
-      /does not have a hedge configuration/i,
-    );
+    const error = await captureError(getHedgeView(config, "456"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/does not have a hedge configuration/i);
   });
 
   // =========================================================================
@@ -145,7 +157,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/hedge/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/hedge/i);
   });
 
   // =========================================================================
@@ -164,7 +178,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/HYPE/);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/HYPE/);
   });
 
   it("throws with 'no open' message when assetPositions is empty", async () => {
@@ -179,7 +195,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/no open/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/no open/i);
   });
 
   // =========================================================================
@@ -215,7 +233,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
       ],
     });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/HYPE/);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/HYPE/);
   });
 
   it("throws with 'Available positions' message when coin mismatch occurs", async () => {
@@ -247,7 +267,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
       ],
     });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/Available positions/);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/Available positions/);
   });
 
   // =========================================================================
@@ -388,7 +410,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({});
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/assetPositions/);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/assetPositions/);
   });
 
   it("throws with 'missing assetPositions' message when response lacks the key", async () => {
@@ -403,7 +427,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ someOtherField: "value" });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/missing assetPositions/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/missing assetPositions/i);
   });
 
   it("throws with 'Response structure may have changed' message when assetPositions is missing", async () => {
@@ -418,7 +444,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ data: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/Response structure/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/Response structure/i);
   });
 
   // =========================================================================
@@ -432,7 +460,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/hedge/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/hedge/i);
   });
 
   it("throws when config.positions is null", async () => {
@@ -442,7 +472,9 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/hedge/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/hedge/i);
   });
 
   it("throws when hedge config is null", async () => {
@@ -457,6 +489,8 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     mockFetchJson({ assetPositions: [] });
 
-    await expect(getHedgeView(config, "123")).rejects.toThrow(/hedge/i);
+    const error = await captureError(getHedgeView(config, "123"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/hedge/i);
   });
 });

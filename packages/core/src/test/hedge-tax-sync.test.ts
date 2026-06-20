@@ -16,7 +16,7 @@ import { describe, expect, it, beforeEach, afterEach, mock } from "bun:test";
 let mockClosedEvents: unknown[] = [];
 let upsertCalls: unknown[] = [];
 
-mock.module("../db/store.js", () => ({
+await mock.module("../db/store.js", () => ({
   getAllClosedHedgeEvents: () => mockClosedEvents,
   getTaxTransaction: () => null, // No existing rows, so enrichment path is exercised
   upsertSyncedTaxTransaction: (entry: unknown) => {
@@ -29,7 +29,7 @@ mock.module("../db/store.js", () => ({
   upsertTaxSyncState: () => {},
 }));
 
-mock.module("../services/pricing.js", () => ({
+await mock.module("../services/pricing.js", () => ({
   getHistoricalPrice: async () => 1.0, // Fixed price, no network calls
 }));
 

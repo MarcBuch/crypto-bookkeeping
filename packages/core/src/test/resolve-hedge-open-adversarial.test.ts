@@ -6,7 +6,7 @@ import { initSchema } from "../db/schema.js";
 // Mock getDb before importing store functions
 let testDb: Database;
 
-mock.module("../db/schema.js", () => ({
+await mock.module("../db/schema.js", () => ({
   getDb: () => testDb,
   initSchema,
   resolveDbPath: () => ":memory:",

@@ -26,14 +26,14 @@ let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
 let mockGetHedgeView: (...args: unknown[]) => unknown = async () => ({});
 let mockSnapshotHedge: (...args: unknown[]) => unknown = () => {};
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: (...args: unknown[]) => mockGetPositionData(...args),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async () => ({ symbol: "TEST", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099",
   getSlot0: async () => ({
@@ -53,11 +53,11 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({}),
 }));
 
-mock.module("../chain/events.js", () => ({
+await mock.module("../chain/events.js", () => ({
   findOpenEvent: async () => ({
     blockNumber: 100000n,
     amount0: 1000000000000000000n,
@@ -68,7 +68,7 @@ mock.module("../chain/events.js", () => ({
   getPoolPriceAtBlock: async () => ({ sqrtPriceX96: 79228162514264337593543950336n }),
 }));
 
-mock.module("../services/pnl.js", () => ({
+await mock.module("../services/pnl.js", () => ({
   getPnLView: (...args: unknown[]) => mockGetPnLView(...args),
   calculateUsdFeeIncome: () => ({
     feesCollected0Usd: null,
@@ -78,7 +78,7 @@ mock.module("../services/pnl.js", () => ({
   }),
 }));
 
-mock.module("../services/hedge.js", () => ({
+await mock.module("../services/hedge.js", () => ({
   getHedgeView: (...args: unknown[]) => mockGetHedgeView(...args),
   snapshotHedge: (...args: unknown[]) => mockSnapshotHedge(...args),
 }));
@@ -195,7 +195,7 @@ describe("hedge sync wiring — getHedgeView throws", () => {
     mockGetPositionData = async () => fakeRawPosition;
 
     let getAllPositionsCallCount = 0;
-    mock.module("../chain/positions.js", () => ({
+    await mock.module("../chain/positions.js", () => ({
       getAllPositions: async () => {
         getAllPositionsCallCount++;
         return [fakeRawPosition];
@@ -301,7 +301,7 @@ describe("hedge sync wiring — no hedge config", () => {
 
     // Mock getAllPositions to return one position
     let getAllPositionsCalls = 0;
-    mock.module("../chain/positions.js", () => ({
+    await mock.module("../chain/positions.js", () => ({
       getAllPositions: async () => {
         getAllPositionsCalls++;
         return [fakeRawPosition];
@@ -382,7 +382,7 @@ describe("hedge sync wiring — happy path", () => {
     };
 
     // Mock getAllPositions to return one position
-    mock.module("../chain/positions.js", () => ({
+    await mock.module("../chain/positions.js", () => ({
       getAllPositions: async () => [fakeRawPosition],
       getPositionCount: async () => 0n,
       getTokenId: async () => 0n,

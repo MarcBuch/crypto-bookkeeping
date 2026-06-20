@@ -6,7 +6,7 @@ import { initSchema } from "../db/schema.js";
 // Mock getDb before importing store functions
 let testDb: Database;
 
-mock.module("../db/schema.js", () => ({
+await mock.module("../db/schema.js", () => ({
   getDb: () => testDb,
   initSchema,
   resolveDbPath: () => ":memory:",
@@ -89,9 +89,13 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       try {
         const config = minimalConfig();
-        await expect(resolveHedgeClose(config, "token-123", "HYPE")).rejects.toThrow(
-          "Network timeout",
-        );
+        try {
+          await resolveHedgeClose(config, "token-123", "HYPE");
+          throw new Error("Expected resolveHedgeClose to reject");
+        } catch (error) {
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toContain("Network timeout");
+        }
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -114,9 +118,13 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       try {
         const config = minimalConfig();
-        await expect(resolveHedgeClose(config, "token-123", "HYPE")).rejects.toThrow(
-          "Hyperliquid API error (500)",
-        );
+        try {
+          await resolveHedgeClose(config, "token-123", "HYPE");
+          throw new Error("Expected resolveHedgeClose to reject");
+        } catch (error) {
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toContain("Hyperliquid API error (500)");
+        }
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -141,7 +149,15 @@ describe("resolveHedgeClose — adversarial tests", () => {
 
       try {
         const config = minimalConfig();
-        await expect(resolveHedgeClose(config, "token-123", "HYPE")).rejects.toThrow();
+        try {
+          await resolveHedgeClose(config, "token-123", "HYPE");
+          expect.unreachable("Expected resolveHedgeClose to reject");
+        } catch (error) {
+          if (error instanceof Error && error.message === "Expected resolveHedgeClose to reject") {
+            throw error;
+          }
+          expect(error).toBeInstanceOf(Error);
+        }
       } finally {
         globalThis.fetch = originalFetch;
       }

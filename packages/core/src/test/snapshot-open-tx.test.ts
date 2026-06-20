@@ -15,7 +15,7 @@ import { mock, describe, it, expect, afterAll, beforeEach } from "bun:test";
 let mockFindOpenEvent: (..._args: unknown[]) => unknown = async () => ({ status: "not_found" });
 let findOpenEventCallCount = 0;
 
-mock.module("../chain/events.js", () => ({
+await mock.module("../chain/events.js", () => ({
   findOpenEvent: (...args: unknown[]) => {
     findOpenEventCallCount++;
     return mockFindOpenEvent(...args);
@@ -24,25 +24,25 @@ mock.module("../chain/events.js", () => ({
   getPoolPriceAtBlock: async () => null,
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({
     getBlockNumber: async () => 1000n,
   }),
 }));
 
-mock.module("../chain/hypersync.js", () => ({
+await mock.module("../chain/hypersync.js", () => ({
   createHyperSyncClient: () => ({}),
   DEFAULT_HYPERSYNC_URL: "https://hypersync.example.com",
 }));
 
-mock.module("../chain/rpc.js", () => ({
+await mock.module("../chain/rpc.js", () => ({
   withRetry: (fn: () => unknown) => fn(),
 }));
 
 // Pool state mock — sqrtPriceX96 represents price ≈ 1 (1:1 ratio)
 const SQRT_PRICE_1_1 = 79228162514264337593543950336n;
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async () => ({ symbol: "TOK", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099" as const,
   getPoolState: async () => ({
@@ -62,14 +62,14 @@ mock.module("../chain/pools.js", () => ({
 
 let mockGetAllPositions: () => unknown = async () => [];
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => mockGetAllPositions(),
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: async () => ({}),
 }));
 
-mock.module("../math/divergence-loss.js", () => ({
+await mock.module("../math/divergence-loss.js", () => ({
   deriveEntryPriceFromAmounts: () => SQRT_PRICE_1_1,
   getTokenAmounts: () => ({ amount0: 500000000000000000n, amount1: 500000000000000000n }),
   sqrtPriceX96ToPrice: () => 1.0,

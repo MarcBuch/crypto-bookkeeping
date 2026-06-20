@@ -60,7 +60,7 @@ let mockGetHistoryView: (...args: unknown[]) => unknown = async () => [fakeHisto
 let lastHistoryCallArgs: unknown[] = [];
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-mock.module("@lp-tracker/core", () => ({
+await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],

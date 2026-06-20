@@ -20,6 +20,16 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+async function captureError<T>(promise: Promise<T>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+
+  throw new Error("Expected promise to reject");
+}
+
 function mockFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): void {
@@ -72,6 +82,7 @@ const pnl: PnLView = {
   feesCollected0Usd: 0.03,
   feesCollected1Usd: 0.02,
   feesValueInToken1: 0.03,
+  pendingFeesValueInToken1: 0,
   feesValueUsd: 0.05,
   token0UsdPrice: 3,
   token1UsdPrice: 1,
@@ -130,19 +141,23 @@ describe("API client", () => {
       Promise.reject(new TypeError("fetch failed")),
     ) as unknown as typeof fetch;
 
-    await expect(getPositions()).rejects.toThrow("fetch failed");
+    const error = await captureError(getPositions());
+    expect(error).toBeInstanceOf(TypeError);
+    expect((error as Error).message).toContain("fetch failed");
   });
 
   it("returns an empty positions list as valid data", async () => {
     mockFetch(() => jsonResponse({ positions: [] }));
 
-    await expect(getPositions()).resolves.toEqual({ positions: [], syncedAt: null });
+    const result = await getPositions();
+    expect(result).toEqual({ positions: [], syncedAt: null });
   });
 
   it("throws API errors from non-2xx JSON responses", async () => {
     mockFetch(() => jsonResponse({ error: "RPC rate limited" }, 503));
 
-    await expect(getPnL()).rejects.toMatchObject({
+    const error = await captureError(getPnL());
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "RPC rate limited",
       status: 503,
@@ -152,7 +167,8 @@ describe("API client", () => {
   it("throws stable generic errors for non-JSON failures", async () => {
     mockFetch(() => new Response("bad gateway", { status: 502, statusText: "Bad Gateway" }));
 
-    await expect(getPositions()).rejects.toMatchObject({
+    const error = await captureError(getPositions());
+    expect(error).toMatchObject({
       message: "API request failed with status 502",
       status: 502,
     });
@@ -161,14 +177,17 @@ describe("API client", () => {
   it("throws when positions response has malformed shape", async () => {
     mockFetch(() => jsonResponse({ positions: null }));
 
-    await expect(getPositions()).rejects.toBeInstanceOf(ApiError);
-    await expect(getPositions()).rejects.toThrow("API response did not include positions.");
+    const error = await captureError(getPositions());
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as Error).message).toContain("API response did not include positions.");
   });
 
   it("throws when P&L response has malformed shape", async () => {
     mockFetch(() => jsonResponse({ data: [] }));
 
-    await expect(getPnL()).rejects.toThrow("API response did not include P&L positions.");
+    const error = await captureError(getPnL());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response did not include P&L positions.");
   });
 
   it("merges positions and P&L by tokenId", async () => {
@@ -273,7 +292,8 @@ describe("API client", () => {
       return jsonResponse({ positions: [] });
     });
 
-    await expect(getDashboardPositions()).resolves.toMatchObject({
+    const result = await getDashboardPositions();
+    expect(result).toMatchObject({
       positions: [{ ...position, pnl: undefined }],
     });
   });
@@ -285,9 +305,8 @@ describe("API client", () => {
       return jsonResponse({ transactions: [taxTransaction] });
     });
 
-    await expect(getTaxTransactions({ limit: 10, offset: 5, label: "Trade" })).resolves.toEqual([
-      taxTransaction,
-    ]);
+    const result = await getTaxTransactions({ limit: 10, offset: 5, label: "Trade" });
+    expect(result).toEqual([taxTransaction]);
   });
 
   it("fetches tax transactions filtered by Approval label", async () => {
@@ -298,9 +317,8 @@ describe("API client", () => {
       return jsonResponse({ transactions: [approvalTaxTransaction] });
     });
 
-    await expect(getTaxTransactions({ label: "Approval" })).resolves.toEqual([
-      approvalTaxTransaction,
-    ]);
+    const result = await getTaxTransactions({ label: "Approval" });
+    expect(result).toEqual([approvalTaxTransaction]);
   });
 
   it("omits null tax labels while preserving zero offset and provided limit", async () => {
@@ -309,13 +327,15 @@ describe("API client", () => {
       return jsonResponse({ transactions: [] });
     });
 
-    await expect(getTaxTransactions({ limit: 25, offset: 0, label: null })).resolves.toEqual([]);
+    const result = await getTaxTransactions({ limit: 25, offset: 0, label: null });
+    expect(result).toEqual([]);
   });
 
   it("throws when tax transactions response lacks a transactions array", async () => {
     mockFetch(() => jsonResponse({}));
 
-    await expect(getTaxTransactions()).rejects.toMatchObject({
+    const error = await captureError(getTaxTransactions());
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API response did not include tax transactions.",
     });
@@ -324,23 +344,24 @@ describe("API client", () => {
   it("throws when tax transactions response has null transactions", async () => {
     mockFetch(() => jsonResponse({ transactions: null }));
 
-    await expect(getTaxTransactions()).rejects.toThrow(
-      "API response did not include tax transactions.",
-    );
+    const error = await captureError(getTaxTransactions());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response did not include tax transactions.");
   });
 
   it("throws when tax transactions contain missing id or hash", async () => {
     mockFetch(() => jsonResponse({ transactions: [{ ...taxTransaction, hash: undefined }] }));
 
-    await expect(getTaxTransactions()).rejects.toThrow(
-      "API response included malformed tax transactions.",
-    );
+    const error = await captureError(getTaxTransactions());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response included malformed tax transactions.");
   });
 
   it("propagates tax transactions non-JSON failures with generic status message", async () => {
     mockFetch(() => new Response("upstream unavailable", { status: 503 }));
 
-    await expect(getTaxTransactions()).rejects.toMatchObject({
+    const error = await captureError(getTaxTransactions());
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API request failed with status 503",
       status: 503,
@@ -356,13 +377,15 @@ describe("API client", () => {
       return jsonResponse({ sync: summary });
     });
 
-    await expect(syncTaxTransactions()).resolves.toEqual(summary);
+    const result = await syncTaxTransactions();
+    expect(result).toEqual(summary);
   });
 
   it("throws when tax sync response lacks a sync object", async () => {
     mockFetch(() => jsonResponse({}));
 
-    await expect(syncTaxTransactions()).rejects.toMatchObject({
+    const error = await captureError(syncTaxTransactions());
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API response did not include tax sync summary.",
     });
@@ -370,20 +393,21 @@ describe("API client", () => {
 
   it("throws when tax sync response has null or array sync", async () => {
     mockFetch(() => jsonResponse({ sync: null }));
-    await expect(syncTaxTransactions()).rejects.toThrow(
-      "API response did not include tax sync summary.",
-    );
+    let error = await captureError(syncTaxTransactions());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response did not include tax sync summary.");
 
     mockFetch(() => jsonResponse({ sync: [] }));
-    await expect(syncTaxTransactions()).rejects.toThrow(
-      "API response did not include tax sync summary.",
-    );
+    error = await captureError(syncTaxTransactions());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response did not include tax sync summary.");
   });
 
   it("propagates tax sync non-2xx JSON server errors", async () => {
     mockFetch(() => jsonResponse({ error: "sync failed" }, 409));
 
-    await expect(syncTaxTransactions()).rejects.toMatchObject({
+    const error = await captureError(syncTaxTransactions());
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "sync failed",
       status: 409,
@@ -393,7 +417,8 @@ describe("API client", () => {
   it("propagates tax sync non-JSON failures with generic status message", async () => {
     mockFetch(() => new Response("gateway timeout", { status: 504 }));
 
-    await expect(syncTaxTransactions()).rejects.toMatchObject({
+    const error = await captureError(syncTaxTransactions());
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API request failed with status 504",
       status: 504,
@@ -422,13 +447,15 @@ describe("API client", () => {
       return jsonResponse({ transaction: created });
     });
 
-    await expect(createTaxTransaction(input)).resolves.toEqual(created);
+    const result = await createTaxTransaction(input);
+    expect(result).toEqual(created);
   });
 
   it("throws when tax create response lacks a transaction object", async () => {
     mockFetch(() => jsonResponse({}));
 
-    await expect(createTaxTransaction({ hash: "manual:missing" })).rejects.toMatchObject({
+    const error = await captureError(createTaxTransaction({ hash: "manual:missing" }));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API response did not include tax transaction.",
     });
@@ -437,7 +464,8 @@ describe("API client", () => {
   it("throws when tax create response transaction misses id or hash", async () => {
     mockFetch(() => jsonResponse({ transaction: { ...taxTransaction, hash: undefined } }));
 
-    await expect(createTaxTransaction({ hash: "manual:malformed" })).rejects.toMatchObject({
+    const error = await captureError(createTaxTransaction({ hash: "manual:malformed" }));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API response included malformed tax transaction.",
     });
@@ -446,7 +474,8 @@ describe("API client", () => {
   it("propagates tax create non-2xx JSON server errors", async () => {
     mockFetch(() => jsonResponse({ error: "manual transaction already exists" }, 409));
 
-    await expect(createTaxTransaction({ hash: "manual:duplicate" })).rejects.toMatchObject({
+    let error = await captureError(createTaxTransaction({ hash: "manual:duplicate" }));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "manual transaction already exists",
       status: 409,
@@ -454,7 +483,8 @@ describe("API client", () => {
 
     mockFetch(() => jsonResponse({ error: "hash is required" }, 400));
 
-    await expect(createTaxTransaction({})).rejects.toMatchObject({
+    error = await captureError(createTaxTransaction({}));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "hash is required",
       status: 400,
@@ -464,7 +494,8 @@ describe("API client", () => {
   it("propagates tax create non-JSON failures with generic status message", async () => {
     mockFetch(() => new Response("conflict", { status: 409 }));
 
-    await expect(createTaxTransaction({ hash: "manual:non-json" })).rejects.toMatchObject({
+    const error = await captureError(createTaxTransaction({ hash: "manual:non-json" }));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API request failed with status 409",
       status: 409,
@@ -476,9 +507,9 @@ describe("API client", () => {
       Promise.reject(new TypeError("create fetch failed")),
     ) as unknown as typeof fetch;
 
-    await expect(createTaxTransaction({ hash: "manual:network" })).rejects.toThrow(
-      "create fetch failed",
-    );
+    const error = await captureError(createTaxTransaction({ hash: "manual:network" }));
+    expect(error).toBeInstanceOf(TypeError);
+    expect((error as Error).message).toContain("create fetch failed");
   });
 
   it("updates tax transaction metadata with PATCH", async () => {
@@ -493,9 +524,11 @@ describe("API client", () => {
       return jsonResponse({ transaction: updated });
     });
 
-    await expect(
-      updateTaxTransaction(taxTransaction.id, { label: "Transfer", comment: "Manual" }),
-    ).resolves.toEqual(updated);
+    const result = await updateTaxTransaction(taxTransaction.id, {
+      label: "Transfer",
+      comment: "Manual",
+    });
+    expect(result).toEqual(updated);
   });
 
   it("URL-encodes tax transaction ids with reserved URL characters", async () => {
@@ -507,7 +540,8 @@ describe("API client", () => {
       return jsonResponse({ transaction: { ...taxTransaction, id } });
     });
 
-    await expect(updateTaxTransaction(id, { comment: "reserved chars" })).resolves.toMatchObject({
+    const result = await updateTaxTransaction(id, { comment: "reserved chars" });
+    expect(result).toMatchObject({
       id,
     });
   });
@@ -515,9 +549,8 @@ describe("API client", () => {
   it("throws when tax update response lacks a transaction object", async () => {
     mockFetch(() => jsonResponse({}));
 
-    await expect(
-      updateTaxTransaction(taxTransaction.id, { comment: "Manual" }),
-    ).rejects.toMatchObject({
+    const error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API response did not include tax transaction.",
     });
@@ -525,42 +558,40 @@ describe("API client", () => {
 
   it("throws when tax update response has null or array transaction", async () => {
     mockFetch(() => jsonResponse({ transaction: null }));
-    await expect(updateTaxTransaction(taxTransaction.id, { comment: "Manual" })).rejects.toThrow(
-      "API response did not include tax transaction.",
-    );
+    let error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response did not include tax transaction.");
 
     mockFetch(() => jsonResponse({ transaction: [] }));
-    await expect(updateTaxTransaction(taxTransaction.id, { comment: "Manual" })).rejects.toThrow(
-      "API response did not include tax transaction.",
-    );
+    error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response did not include tax transaction.");
   });
 
   it("throws when tax update response transaction misses id or hash", async () => {
     mockFetch(() => jsonResponse({ transaction: { ...taxTransaction, id: undefined } }));
 
-    await expect(updateTaxTransaction(taxTransaction.id, { comment: "Manual" })).rejects.toThrow(
-      "API response included malformed tax transaction.",
-    );
+    const error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("API response included malformed tax transaction.");
   });
 
   it("propagates tax update non-2xx JSON server errors", async () => {
     mockFetch(() => jsonResponse({ error: "annotation rejected" }, 422));
 
-    await expect(updateTaxTransaction(taxTransaction.id, { label: "Trade" })).rejects.toMatchObject(
-      {
-        name: "ApiError",
-        message: "annotation rejected",
-        status: 422,
-      },
-    );
+    const error = await captureError(updateTaxTransaction(taxTransaction.id, { label: "Trade" }));
+    expect(error).toMatchObject({
+      name: "ApiError",
+      message: "annotation rejected",
+      status: 422,
+    });
   });
 
   it("propagates tax update non-JSON failures with generic status message", async () => {
     mockFetch(() => new Response("service unavailable", { status: 503 }));
 
-    await expect(
-      updateTaxTransaction(taxTransaction.id, { label: "Transfer" }),
-    ).rejects.toMatchObject({
+    const error = await captureError(updateTaxTransaction(taxTransaction.id, { label: "Transfer" }));
+    expect(error).toMatchObject({
       name: "ApiError",
       message: "API request failed with status 503",
       status: 503,

@@ -17,7 +17,7 @@ let mockGetUsdPrices: (..._args: unknown[]) => unknown = async () => ({});
 let mockGetHistoricalPrice: (..._args: unknown[]) => unknown = async () => null;
 let mockFindCloseEvent: (..._args: unknown[]) => unknown = async () => ({ status: "not_found" });
 
-mock.module("../services/pricing.js", () => ({
+await mock.module("../services/pricing.js", () => ({
   getUsdPrices: (...args: unknown[]) => mockGetUsdPrices(...args),
   getHistoricalPrice: (...args: unknown[]) => mockGetHistoricalPrice(...args),
 }));
@@ -28,18 +28,18 @@ let mockGetBlock: (_args: {
   timestamp: 1700000000n,
 });
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({
     getBlockNumber: async () => 100000n,
     getBlock: (args: { blockNumber: bigint }) => mockGetBlock(args),
   }),
 }));
 
-mock.module("../chain/rpc.js", () => ({
+await mock.module("../chain/rpc.js", () => ({
   withRetry: (fn: () => unknown) => fn(),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async (_client: unknown, addr: string) => {
     if (addr === TOKEN0_ADDR) return { symbol: "TKN0", decimals: 18 };
     return { symbol: "TKN1", decimals: 6 };
@@ -57,20 +57,20 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../chain/events.js", () => ({
+await mock.module("../chain/events.js", () => ({
   findOpenEvent: async () => ({ status: "not_found" }),
   findCloseEvent: (...args: unknown[]) => mockFindCloseEvent(...args),
   getPoolPriceAtBlock: async () => null,
 }));
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: async () => ({}),
 }));
 
-mock.module("../math/divergence-loss.js", () => ({
+await mock.module("../math/divergence-loss.js", () => ({
   deriveEntryPriceFromAmounts: () => 79228162514264337593543950336n,
   getTokenAmounts: () => ({ amount0: 500n, amount1: 500n }),
   calculateFeeGrowthInside: () => ({

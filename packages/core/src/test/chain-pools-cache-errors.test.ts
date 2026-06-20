@@ -48,9 +48,13 @@ describe("poolAddressCache — error cases", () => {
   it("RPC error propagates and does not cache the failed lookup", async () => {
     const cache = new Map<string, Address>();
 
-    await expect(
-      getPoolAddressWithCache(alwaysThrowReadContract, T0, T1, 500, cache),
-    ).rejects.toThrow("network error");
+    try {
+      await getPoolAddressWithCache(alwaysThrowReadContract, T0, T1, 500, cache);
+      expect.unreachable("Expected getPoolAddressWithCache to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("network error");
+    }
 
     // Cache must remain empty — no poisoned entry
     const cacheKey = buildPoolCacheKey(T0, T1, 500);
@@ -68,9 +72,13 @@ describe("poolAddressCache — error cases", () => {
     };
 
     // First call fails
-    await expect(getPoolAddressWithCache(readContract, T0, T1, 3000, cache)).rejects.toThrow(
-      "transient error",
-    );
+    try {
+      await getPoolAddressWithCache(readContract, T0, T1, 3000, cache);
+      throw new Error("Expected getPoolAddressWithCache to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("transient error");
+    }
 
     // Second call succeeds and hits RPC (not a stale cache entry)
     const result = await getPoolAddressWithCache(readContract, T0, T1, 3000, cache);

@@ -228,15 +228,25 @@ describe("resolveTokenMetadata — invalid address", () => {
   it("non-hex string throws with message containing 'invalid contract address'", async () => {
     const client = mockClient({});
 
-    await expect(resolveTokenMetadata(client, "not-an-address")).rejects.toThrow(
-      "invalid contract address",
-    );
+    try {
+      await resolveTokenMetadata(client, "not-an-address");
+      throw new Error("Expected resolveTokenMetadata to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("invalid contract address");
+    }
   });
 
   it("empty string throws with message containing 'invalid contract address'", async () => {
     const client = mockClient({});
 
-    await expect(resolveTokenMetadata(client, "")).rejects.toThrow("invalid contract address");
+    try {
+      await resolveTokenMetadata(client, "");
+      throw new Error("Expected resolveTokenMetadata to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("invalid contract address");
+    }
   });
 });
 

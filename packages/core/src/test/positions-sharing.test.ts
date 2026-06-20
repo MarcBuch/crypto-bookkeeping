@@ -17,7 +17,7 @@ let mockGetAllPositionsCallCount = 0;
 let mockGetAllPositionsResult: unknown = [];
 let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => {
     mockGetAllPositionsCallCount++;
     return mockGetAllPositionsResult;
@@ -27,7 +27,7 @@ mock.module("../chain/positions.js", () => ({
   getPositionData: async () => ({}),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async () => ({ symbol: "TEST", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099",
   getSlot0: async () => ({
@@ -47,7 +47,7 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({
     getBlockNumber: async () => 100000n,
     getLogs: async () => [],
@@ -55,7 +55,7 @@ mock.module("../chain/client.js", () => ({
   }),
 }));
 
-mock.module("../chain/events.js", () => ({
+await mock.module("../chain/events.js", () => ({
   findOpenEvent: async () => ({
     blockNumber: 100000n,
     amount0: 1000000000000000000n, // 1 token with 18 decimals
@@ -66,7 +66,7 @@ mock.module("../chain/events.js", () => ({
   getPoolPriceAtBlock: async () => ({ sqrtPriceX96: 79228162514264337593543950336n }),
 }));
 
-mock.module("../services/pnl.js", () => ({
+await mock.module("../services/pnl.js", () => ({
   getPnLView: (config: unknown, tokenId?: unknown, rawPositions?: unknown) =>
     mockGetPnLView(config, tokenId, rawPositions),
   calculateUsdFeeIncome: () => ({

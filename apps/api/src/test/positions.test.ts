@@ -59,7 +59,7 @@ let mockSyncSinglePosition: (config: unknown, tokenId: string) => Promise<unknow
 });
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-mock.module("@lp-tracker/core", () => ({
+await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],

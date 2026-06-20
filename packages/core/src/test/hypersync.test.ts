@@ -250,7 +250,13 @@ describe("fetchTransactionsByAddress — pagination", () => {
       },
     } as unknown as HypersyncClient;
 
-    await expect(fetchTransactionsByAddress(client, WALLET, 0)).rejects.toThrow("network error");
+    try {
+      await fetchTransactionsByAddress(client, WALLET, 0);
+      throw new Error("Expected fetchTransactionsByAddress to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("network error");
+    }
   });
 
   it("toBlock respected: loop terminates when nextBlock >= toBlock", async () => {
@@ -430,7 +436,13 @@ describe("fetchTokenTransfersByAddress — pagination", () => {
       },
     } as unknown as HypersyncClient;
 
-    await expect(fetchTokenTransfersByAddress(client, WALLET, 0)).rejects.toThrow("network error");
+    try {
+      await fetchTokenTransfersByAddress(client, WALLET, 0);
+      throw new Error("Expected fetchTokenTransfersByAddress to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("network error");
+    }
   });
 
   it("toBlock respected: loop terminates when nextBlock >= toBlock", async () => {

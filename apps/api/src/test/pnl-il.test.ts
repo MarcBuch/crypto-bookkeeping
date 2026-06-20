@@ -115,7 +115,7 @@ let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
 let mockGetILView: (...args: unknown[]) => unknown = async () => [];
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-mock.module("@lp-tracker/core", () => ({
+await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],

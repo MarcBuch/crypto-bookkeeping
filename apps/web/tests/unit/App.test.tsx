@@ -39,6 +39,7 @@ const activePosition: DashboardPosition = {
     feesCollected0Usd: 1.23,
     feesCollected1Usd: 2,
     feesValueInToken1: 12.345,
+    pendingFeesValueInToken1: 0,
     feesValueUsd: 3.23,
     token0UsdPrice: 12.3,
     token1UsdPrice: 1,

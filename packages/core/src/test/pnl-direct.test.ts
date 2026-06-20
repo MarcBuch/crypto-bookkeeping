@@ -12,14 +12,14 @@ import { mock, describe, it, expect } from "bun:test";
 // Mocks must be set up BEFORE importing the module under test
 // ---------------------------------------------------------------------------
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: async () => ({}),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async () => ({ symbol: "TEST", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099",
   getSlot0: async () => ({
@@ -39,7 +39,7 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({
     getBlockNumber: async () => 100000n,
     getLogs: async () => [],
@@ -47,7 +47,7 @@ mock.module("../chain/client.js", () => ({
   }),
 }));
 
-mock.module("../chain/events.js", () => ({
+await mock.module("../chain/events.js", () => ({
   findOpenEvent: async () => ({
     blockNumber: 100000n,
     amount0: 1000000000000000000n,
@@ -88,7 +88,7 @@ let mockGetPnLView: (
   }));
 };
 
-mock.module("../services/pnl.js", () => ({
+await mock.module("../services/pnl.js", () => ({
   getPnLView: (config: unknown, tokenId?: unknown, rawPositions?: unknown) =>
     mockGetPnLView(config, tokenId, rawPositions),
   calculateUsdFeeIncome: () => ({
@@ -149,7 +149,12 @@ describe("getPnLView — NotFoundError on missing tokenId", () => {
   it("throws NotFoundError when tokenId not in rawPositions", async () => {
     const rawPositions = [fakePosData];
 
-    await expect(getPnLView(fakeConfig, "999", rawPositions)).rejects.toThrow(NotFoundError);
+    try {
+      await getPnLView(fakeConfig, "999", rawPositions);
+      throw new Error("Expected getPnLView to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(NotFoundError);
+    }
   });
 
   it("NotFoundError message includes the tokenId", async () => {

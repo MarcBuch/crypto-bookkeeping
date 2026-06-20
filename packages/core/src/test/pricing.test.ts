@@ -44,27 +44,28 @@ describe("getUsdPrices", () => {
   it("returns null and avoids fetch when pricing config is missing", async () => {
     const calls = mockFetchJson({ unused: { usd: 1 } });
 
-    await expect(getUsdPrices({}, ["HYPE"])).resolves.toEqual({ HYPE: null });
+    const result = await getUsdPrices({}, ["HYPE"]);
+    expect(result).toEqual({ HYPE: null });
     expect(calls).toHaveLength(0);
   });
 
   it("returns null and avoids fetch when no token mapping exists", async () => {
     const calls = mockFetchJson({ unused: { usd: 1 } });
 
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { OTHER: "other-id" } } }, ["HYPE"]),
-    ).resolves.toEqual({ HYPE: null });
+    const result = await getUsdPrices({ pricing: { coingeckoIds: { OTHER: "other-id" } } }, [
+      "HYPE",
+    ]);
+    expect(result).toEqual({ HYPE: null });
     expect(calls).toHaveLength(0);
   });
 
   it("fetches CoinGecko simple prices and returns USD keyed by token identity", async () => {
     const calls = mockFetchJson({ hyperliquid: { usd: 37.42 } });
 
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { HYPE: "hyperliquid" } } }, [
-        { symbol: "HYPE", address: "0xABCDEF" },
-      ]),
-    ).resolves.toEqual({ "0xabcdef": 37.42 });
+    const result = await getUsdPrices({ pricing: { coingeckoIds: { HYPE: "hyperliquid" } } }, [
+      { symbol: "HYPE", address: "0xABCDEF" },
+    ]);
+    expect(result).toEqual({ "0xabcdef": 37.42 });
 
     expect(calls).toHaveLength(1);
     const url = new URL(calls[0].url);
@@ -76,19 +77,19 @@ describe("getUsdPrices", () => {
   it("returns null for malformed responses and missing token entries", async () => {
     const malformedCalls = mockFetchJson(["not", "an", "object"]);
 
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { BAD_ARRAY_TOKEN: "bad-array-response" } } }, [
-        "BAD_ARRAY_TOKEN",
-      ]),
-    ).resolves.toEqual({ BAD_ARRAY_TOKEN: null });
+    let result = await getUsdPrices(
+      { pricing: { coingeckoIds: { BAD_ARRAY_TOKEN: "bad-array-response" } } },
+      ["BAD_ARRAY_TOKEN"],
+    );
+    expect(result).toEqual({ BAD_ARRAY_TOKEN: null });
     expect(malformedCalls).toHaveLength(1);
 
     const missingCalls = mockFetchJson({ other: { usd: 1 } });
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { MISSING_TOKEN: "missing-token-entry" } } }, [
-        "MISSING_TOKEN",
-      ]),
-    ).resolves.toEqual({ MISSING_TOKEN: null });
+    result = await getUsdPrices(
+      { pricing: { coingeckoIds: { MISSING_TOKEN: "missing-token-entry" } } },
+      ["MISSING_TOKEN"],
+    );
+    expect(result).toEqual({ MISSING_TOKEN: null });
     expect(missingCalls).toHaveLength(1);
   });
 
@@ -100,21 +101,20 @@ describe("getUsdPrices", () => {
       negative_price: { usd: -1 },
     });
 
-    await expect(
-      getUsdPrices(
-        {
-          pricing: {
-            coingeckoIds: {
-              NULL_PRICE: "null_price",
-              STRING_PRICE: "string_price",
-              INFINITE_PRICE: "infinite_price",
-              NEGATIVE_PRICE: "negative_price",
-            },
+    const result = await getUsdPrices(
+      {
+        pricing: {
+          coingeckoIds: {
+            NULL_PRICE: "null_price",
+            STRING_PRICE: "string_price",
+            INFINITE_PRICE: "infinite_price",
+            NEGATIVE_PRICE: "negative_price",
           },
         },
-        ["NULL_PRICE", "STRING_PRICE", "INFINITE_PRICE", "NEGATIVE_PRICE"],
-      ),
-    ).resolves.toEqual({
+      },
+      ["NULL_PRICE", "STRING_PRICE", "INFINITE_PRICE", "NEGATIVE_PRICE"],
+    );
+    expect(result).toEqual({
       NULL_PRICE: null,
       STRING_PRICE: null,
       INFINITE_PRICE: null,
@@ -126,32 +126,30 @@ describe("getUsdPrices", () => {
   it("returns null without throwing for non-2xx responses", async () => {
     const calls = mockFetchJson({ error: "rate limited" }, { status: 429 });
 
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { NON_2XX_TOKEN: "non-2xx-token" } } }, [
-        "NON_2XX_TOKEN",
-      ]),
-    ).resolves.toEqual({ NON_2XX_TOKEN: null });
+    const result = await getUsdPrices(
+      { pricing: { coingeckoIds: { NON_2XX_TOKEN: "non-2xx-token" } } },
+      ["NON_2XX_TOKEN"],
+    );
+    expect(result).toEqual({ NON_2XX_TOKEN: null });
     expect(calls).toHaveLength(1);
   });
 
   it("returns null without throwing when fetch rejects", async () => {
     const calls = mockFetchReject();
 
-    await expect(
-      getUsdPrices(
-        { pricing: { coingeckoIds: { REJECTED_FETCH_TOKEN: "rejected-fetch-token" } } },
-        ["REJECTED_FETCH_TOKEN"],
-      ),
-    ).resolves.toEqual({ REJECTED_FETCH_TOKEN: null });
+    const result = await getUsdPrices(
+      { pricing: { coingeckoIds: { REJECTED_FETCH_TOKEN: "rejected-fetch-token" } } },
+      ["REJECTED_FETCH_TOKEN"],
+    );
+    expect(result).toEqual({ REJECTED_FETCH_TOKEN: null });
     expect(calls).toHaveLength(1);
   });
 
   it("avoids fetch for an empty token list", async () => {
     const calls = mockFetchJson({ unused: { usd: 1 } });
 
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { HYPE: "hyperliquid" } } }, []),
-    ).resolves.toEqual({});
+    const result = await getUsdPrices({ pricing: { coingeckoIds: { HYPE: "hyperliquid" } } }, []);
+    expect(result).toEqual({});
     expect(calls).toHaveLength(0);
   });
 
@@ -169,16 +167,19 @@ describe("getUsdPrices", () => {
 
     const config = { pricing: { coingeckoIds: { POSITIVE_CACHE_TOKEN: "positive_cache_token" } } };
 
-    await expect(getUsdPrices(config, ["POSITIVE_CACHE_TOKEN"])).resolves.toEqual({
+    let result = await getUsdPrices(config, ["POSITIVE_CACHE_TOKEN"]);
+    expect(result).toEqual({
       POSITIVE_CACHE_TOKEN: 10,
     });
     price = 20;
     setNow(60_999);
-    await expect(getUsdPrices(config, ["POSITIVE_CACHE_TOKEN"])).resolves.toEqual({
+    result = await getUsdPrices(config, ["POSITIVE_CACHE_TOKEN"]);
+    expect(result).toEqual({
       POSITIVE_CACHE_TOKEN: 10,
     });
     setNow(61_000);
-    await expect(getUsdPrices(config, ["POSITIVE_CACHE_TOKEN"])).resolves.toEqual({
+    result = await getUsdPrices(config, ["POSITIVE_CACHE_TOKEN"]);
+    expect(result).toEqual({
       POSITIVE_CACHE_TOKEN: 20,
     });
 
@@ -200,16 +201,19 @@ describe("getUsdPrices", () => {
 
     const config = { pricing: { coingeckoIds: { NEGATIVE_CACHE_TOKEN: "negative_cache_token" } } };
 
-    await expect(getUsdPrices(config, ["NEGATIVE_CACHE_TOKEN"])).resolves.toEqual({
+    let result = await getUsdPrices(config, ["NEGATIVE_CACHE_TOKEN"]);
+    expect(result).toEqual({
       NEGATIVE_CACHE_TOKEN: null,
     });
     data = { negative_cache_token: { usd: 30 } };
     setNow(6_999);
-    await expect(getUsdPrices(config, ["NEGATIVE_CACHE_TOKEN"])).resolves.toEqual({
+    result = await getUsdPrices(config, ["NEGATIVE_CACHE_TOKEN"]);
+    expect(result).toEqual({
       NEGATIVE_CACHE_TOKEN: null,
     });
     setNow(7_000);
-    await expect(getUsdPrices(config, ["NEGATIVE_CACHE_TOKEN"])).resolves.toEqual({
+    result = await getUsdPrices(config, ["NEGATIVE_CACHE_TOKEN"]);
+    expect(result).toEqual({
       NEGATIVE_CACHE_TOKEN: 30,
     });
 
@@ -219,12 +223,11 @@ describe("getUsdPrices", () => {
   it("skips invalid token objects without creating an empty-string key", async () => {
     const calls = mockFetchJson({ empty_token: { usd: 1 } });
 
-    await expect(
-      getUsdPrices({ pricing: { coingeckoIds: { "": "empty_token" } } }, [
-        {},
-        { symbol: "", address: "" },
-      ]),
-    ).resolves.toEqual({});
+    const result = await getUsdPrices({ pricing: { coingeckoIds: { "": "empty_token" } } }, [
+      {},
+      { symbol: "", address: "" },
+    ]);
+    expect(result).toEqual({});
     expect(calls).toHaveLength(0);
   });
 });

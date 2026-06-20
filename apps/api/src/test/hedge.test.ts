@@ -47,7 +47,7 @@ let mockGetHedgeView: (config: unknown, tokenId: string) => Promise<unknown> = a
 let mockGetHedgeEvents: (tokenId: string) => Promise<unknown> = async () => [];
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-mock.module("@lp-tracker/core", () => ({
+await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],

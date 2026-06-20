@@ -16,7 +16,7 @@ import { initSchema } from "../db/schema.js";
 // Mock getDb before importing store functions
 let testDb: Database;
 
-mock.module("../db/schema.js", () => ({
+await mock.module("../db/schema.js", () => ({
   getDb: () => testDb,
   initSchema,
   resolveDbPath: () => ":memory:",
@@ -109,6 +109,16 @@ afterAll(() => {
   globalThis.fetch = originalFetch;
 });
 
+async function captureError<T>(promise: Promise<T>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+
+  throw new Error("Expected promise to reject");
+}
+
 // ---------------------------------------------------------------------------
 // Cluster: API failure scenarios
 // ---------------------------------------------------------------------------
@@ -120,7 +130,9 @@ describe("getHedgeView() — API failure scenarios", () => {
       throw new Error("network error");
     };
 
-    await expect(getHedgeView(baseConfig, "484645")).rejects.toThrow("network error");
+    const error = await captureError(getHedgeView(baseConfig, "484645"));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("network error");
   });
 
   // Test 2: Non-200 response
@@ -132,8 +144,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     });
 
     const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    await expect(promise).rejects.toThrow("503");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("503");
   });
 
   // Test 3: Response not valid JSON
@@ -146,7 +159,8 @@ describe("getHedgeView() — API failure scenarios", () => {
       },
     });
 
-    await expect(getHedgeView(baseConfig, "484645")).rejects.toThrow();
+    const error = await captureError(getHedgeView(baseConfig, "484645"));
+    expect(error).toBeInstanceOf(Error);
   });
 
   // Test 4: Response is empty object {}
@@ -158,9 +172,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     });
 
     const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    // Should mention missing assetPositions
-    await expect(promise).rejects.toThrow("assetPositions");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("assetPositions");
   });
 
   // Test 5: Response has assetPositions with missing entryPx
@@ -209,9 +223,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     });
 
     const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    // Should mention assetPositions, not a generic TypeError
-    await expect(promise).rejects.toThrow("assetPositions");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("assetPositions");
   });
 
   // Additional edge case: 404 response
@@ -223,8 +237,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     });
 
     const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    await expect(promise).rejects.toThrow("404");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("404");
   });
 
   // Additional edge case: 500 response
@@ -236,8 +251,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     });
 
     const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    await expect(promise).rejects.toThrow("500");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("500");
   });
 
   // Additional edge case: assetPositions is empty array
@@ -258,9 +274,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     };
 
     const promise = getHedgeView(baseConfig, "484645");
-    await expect(promise).rejects.toThrow();
-    // Should mention no open position found
-    await expect(promise).rejects.toThrow("No open");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("No open");
   });
 
   // Additional edge case: position with szi = 0 (closed)
@@ -323,9 +339,9 @@ describe("getHedgeView() — API failure scenarios", () => {
     };
 
     const promise = getHedgeView(configWithoutHedge, "484645");
-    await expect(promise).rejects.toThrow();
-    // Should mention hedge configuration
-    await expect(promise).rejects.toThrow("hedge");
+    const error = await captureError(promise);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("hedge");
   });
 
   // Additional edge case: valid response with all fields

@@ -14,7 +14,7 @@ import { initSchema } from "../db/schema.js";
 // Mock getDb before importing store functions
 let testDb: Database;
 
-mock.module("../db/schema.js", () => ({
+await mock.module("../db/schema.js", () => ({
   getDb: () => testDb,
   initSchema,
   resolveDbPath: () => ":memory:",
@@ -74,6 +74,16 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
+
+async function captureError<T>(promise: Promise<T>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+
+  throw new Error("Expected promise to reject");
+}
 
 describe("getHedgeView() — closed position path", () => {
   // =========================================================================
@@ -200,7 +210,9 @@ describe("getHedgeView() — closed position path", () => {
         throw new Error(`Unexpected fetch: ${JSON.stringify(body)}`);
       }) as unknown as typeof fetch;
 
-      await expect(getHedgeView(config, "789")).rejects.toThrow("Network error");
+      const error = await captureError(getHedgeView(config, "789"));
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("Network error");
     });
 
     it("szi=0, userFillsByTime returns HTTP 502 → propagates error (not swallowed)", async () => {
@@ -246,8 +258,9 @@ describe("getHedgeView() — closed position path", () => {
       }) as unknown as typeof fetch;
 
       const promise = getHedgeView(config, "999");
-      await expect(promise).rejects.toThrow();
-      await expect(promise).rejects.toThrow("502");
+      const error = await captureError(promise);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("502");
     });
   });
 

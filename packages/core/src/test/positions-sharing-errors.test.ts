@@ -30,14 +30,14 @@ let mockGetPoolState: (...args: unknown[]) => Promise<unknown> = async () => ({
 });
 let mockGetPnLView: (...args: unknown[]) => Promise<unknown> = async () => [];
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => mockGetAllPositions(),
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: async () => ({}),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: (arg1: unknown, arg2: unknown) => mockGetTokenInfo(arg1, arg2),
   getPoolAddress: (arg1: unknown, arg2: unknown, arg3: unknown, arg4: unknown, arg5: unknown) =>
     mockGetPoolAddress(arg1, arg2, arg3, arg4, arg5),
@@ -49,11 +49,11 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../services/pnl.js", () => ({
+await mock.module("../services/pnl.js", () => ({
   getPnLView: (arg1: unknown, arg2?: unknown, arg3?: unknown) => mockGetPnLView(arg1, arg2, arg3),
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({}),
 }));
 
@@ -201,7 +201,13 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     };
     mockGetPnLView = async () => [];
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("pool lookup failed");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("pool lookup failed");
+    }
   });
 
   it("leaves position cache unchanged when getPoolAddress throws", async () => {
@@ -256,7 +262,13 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     };
     mockGetPnLView = async () => [];
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("slot0 fetch failed");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("slot0 fetch failed");
+    }
   });
 
   it("leaves both caches unchanged when getSlot0 throws", async () => {
@@ -290,7 +302,13 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     };
     mockGetPnLView = async () => [];
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("token info fetch failed");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("token info fetch failed");
+    }
   });
 
   it("leaves both caches unchanged when getTokenInfo throws", async () => {
@@ -329,7 +347,13 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
       throw new Error("pnl view exploded");
     };
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("pnl view exploded");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("pnl view exploded");
+    }
   });
 
   it("leaves both caches unchanged when getPnLView throws (empty list case)", async () => {
@@ -361,7 +385,13 @@ describe("syncLpData — getPnLView throws with shared position list", () => {
       throw new Error("pnl view exploded");
     };
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("pnl view exploded");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("pnl view exploded");
+    }
   });
 
   it("leaves both caches unchanged when getPnLView throws (with positions)", async () => {

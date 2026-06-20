@@ -15,19 +15,19 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 let mockGetAllPositions: () => unknown = async () => [];
 let mockGetPnLView: (config: unknown) => unknown = async () => [];
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => mockGetAllPositions(),
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: async () => ({}),
 }));
 
-mock.module("../services/pnl.js", () => ({
+await mock.module("../services/pnl.js", () => ({
   getPnLView: (config: unknown, _tokenId?: unknown, _rawPositions?: unknown) =>
     mockGetPnLView(config),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async () => ({ symbol: "TEST", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099",
   getSlot0: async () => ({
@@ -47,7 +47,7 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({}),
 }));
 
@@ -160,7 +160,13 @@ describe("syncLpData — getPnLView throws", () => {
     };
     mockGetAllPositions = async () => [];
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("pnl fetch failed");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("pnl fetch failed");
+    }
   });
 
   it("leaves position cache unchanged when getPnLView throws", async () => {
@@ -216,7 +222,13 @@ describe("syncLpData — getPositionsView throws", () => {
     };
     mockGetPnLView = async () => [];
 
-    await expect(syncLpData(fakeConfig)).rejects.toThrow("chain RPC failed");
+    try {
+      await syncLpData(fakeConfig);
+      throw new Error("Expected syncLpData to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("chain RPC failed");
+    }
   });
 
   it("leaves position cache unchanged when getAllPositions throws", async () => {

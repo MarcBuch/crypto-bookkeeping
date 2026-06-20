@@ -84,7 +84,12 @@ describe("getHistoryView — no stored position", () => {
   useTestDb();
 
   it("throws NotFoundError when tokenId has no stored position", async () => {
-    await expect(getHistoryView("999999", 10)).rejects.toThrow(NotFoundError);
+    try {
+      await getHistoryView("999999", 10);
+      throw new Error("Expected getHistoryView to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(NotFoundError);
+    }
   });
 
   it("error message references the tokenId", async () => {
@@ -107,7 +112,12 @@ describe("getHistoryView — position exists but no snapshots", () => {
 
   it("throws NotFoundError when position exists but has no snapshots", async () => {
     makePosition("42");
-    await expect(getHistoryView("42", 10)).rejects.toThrow(NotFoundError);
+    try {
+      await getHistoryView("42", 10);
+      throw new Error("Expected getHistoryView to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(NotFoundError);
+    }
   });
 
   it("NotFoundError message mentions 'snapshot'", async () => {
@@ -181,7 +191,12 @@ describe("getHistoryView — limit edge cases", () => {
 
     // The service delegates limit directly to getSnapshots, which passes it to SQL.
     // LIMIT 0 in SQLite returns empty result — service treats it as no snapshots.
-    await expect(getHistoryView("10", 0)).rejects.toThrow(NotFoundError);
+    try {
+      await getHistoryView("10", 0);
+      throw new Error("Expected getHistoryView to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(NotFoundError);
+    }
   });
 
   it("limit = -1: service does not crash — either throws or returns empty-like result", async () => {

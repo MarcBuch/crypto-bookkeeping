@@ -25,14 +25,14 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 let mockGetPositionData: (...args: unknown[]) => unknown = async () => ({});
 let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
 
-mock.module("../chain/positions.js", () => ({
+await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
   getPositionCount: async () => 0n,
   getTokenId: async () => 0n,
   getPositionData: (...args: unknown[]) => mockGetPositionData(...args),
 }));
 
-mock.module("../chain/pools.js", () => ({
+await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async () => ({ symbol: "TEST", decimals: 18 }),
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099",
   getSlot0: async () => ({
@@ -52,11 +52,11 @@ mock.module("../chain/pools.js", () => ({
   }),
 }));
 
-mock.module("../chain/client.js", () => ({
+await mock.module("../chain/client.js", () => ({
   createClient: () => ({}),
 }));
 
-mock.module("../chain/events.js", () => ({
+await mock.module("../chain/events.js", () => ({
   findOpenEvent: async () => ({
     blockNumber: 100000n,
     amount0: 1000000000000000000n,
@@ -67,7 +67,7 @@ mock.module("../chain/events.js", () => ({
   getPoolPriceAtBlock: async () => ({ sqrtPriceX96: 79228162514264337593543950336n }),
 }));
 
-mock.module("../services/pnl.js", () => ({
+await mock.module("../services/pnl.js", () => ({
   getPnLView: (...args: unknown[]) => mockGetPnLView(...args),
   calculateUsdFeeIncome: () => ({
     feesCollected0Usd: null,
@@ -173,19 +173,43 @@ afterEach(() => {
 
 describe("syncSinglePosition — validation", () => {
   it("empty tokenId throws Invalid tokenId error", async () => {
-    await expect(syncSinglePosition(fakeConfig, "")).rejects.toThrow(/Invalid tokenId/);
+    try {
+      await syncSinglePosition(fakeConfig, "");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/Invalid tokenId/);
+    }
   });
 
   it("non-numeric tokenId throws Invalid tokenId error", async () => {
-    await expect(syncSinglePosition(fakeConfig, "abc")).rejects.toThrow(/Invalid tokenId/);
+    try {
+      await syncSinglePosition(fakeConfig, "abc");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/Invalid tokenId/);
+    }
   });
 
   it("decimal tokenId throws Invalid tokenId error", async () => {
-    await expect(syncSinglePosition(fakeConfig, "1.5")).rejects.toThrow(/Invalid tokenId/);
+    try {
+      await syncSinglePosition(fakeConfig, "1.5");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/Invalid tokenId/);
+    }
   });
 
   it("negative tokenId throws Invalid tokenId error", async () => {
-    await expect(syncSinglePosition(fakeConfig, "-1")).rejects.toThrow(/Invalid tokenId/);
+    try {
+      await syncSinglePosition(fakeConfig, "-1");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/Invalid tokenId/);
+    }
   });
 });
 
@@ -199,7 +223,13 @@ describe("syncSinglePosition — RPC error propagation", () => {
       throw new Error("RPC timeout");
     };
 
-    await expect(syncSinglePosition(fakeConfig, "12345")).rejects.toThrow("RPC timeout");
+    try {
+      await syncSinglePosition(fakeConfig, "12345");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("RPC timeout");
+    }
 
     // Verify cache is empty (no partial write)
     const positions = listCachedPositionViews();
@@ -216,7 +246,13 @@ describe("syncSinglePosition — RPC error propagation", () => {
     };
 
     // Should throw because getPnLView throws before cache writes
-    await expect(syncSinglePosition(fakeConfig, "12345")).rejects.toThrow("PnL calculation failed");
+    try {
+      await syncSinglePosition(fakeConfig, "12345");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("PnL calculation failed");
+    }
 
     // Cache should be empty (no partial write)
     const positions = listCachedPositionViews();
@@ -248,7 +284,13 @@ describe("syncSinglePosition — partial failure and idempotency", () => {
     };
 
     // Call syncSinglePosition — should throw
-    await expect(syncSinglePosition(fakeConfig, "42")).rejects.toThrow("RPC error during fetch");
+    try {
+      await syncSinglePosition(fakeConfig, "42");
+      throw new Error("Expected syncSinglePosition to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("RPC error during fetch");
+    }
 
     // Verify the original cache row is still there (was NOT overwritten)
     cachedPositions = listCachedPositionViews();

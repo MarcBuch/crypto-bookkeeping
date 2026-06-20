@@ -46,7 +46,7 @@ let mockEnrichTaxTransactionsEurValues: (...args: unknown[]) => unknown = () => 
   skipped: 0,
 });
 
-mock.module("@lp-tracker/core", () => ({
+await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],

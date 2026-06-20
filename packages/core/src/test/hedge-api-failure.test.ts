@@ -44,7 +44,8 @@ setFetchMock((input, init) => mockFetch(input, init));
 // ---------------------------------------------------------------------------
 
 import type { Config } from "../config.js";
-import { getHedgeView } from "../services/hedge.js";
+import { insertHedgeEvent, insertHedgeSnapshot, listHedgeSnapshots } from "../db/store.js";
+import { getHedgeView, snapshotHedge } from "../services/hedge.js";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -120,6 +121,79 @@ describe("getHedgeView() — API failure scenarios", () => {
 
     const error = await captureError(getHedgeView(baseConfig, "484645"));
     expect(expectError(error).message).toContain("network error");
+  });
+
+  it("network error falls back to latest stored snapshot when one exists", async () => {
+    insertHedgeSnapshot({
+      token_id: "484645",
+      coin: "HYPE",
+      szi: "-12.5",
+      entry_px: 1.45,
+      mark_px: 1.52,
+      unrealized_pnl: 3.25,
+      funding_earned: 0.15,
+      liquidation_px: 0.91,
+    });
+
+    mockFetch = async () => {
+      throw new Error("network error");
+    };
+
+    const result = await getHedgeView(baseConfig, "484645");
+
+    expect(result.tokenId).toBe("484645");
+    expect(result.coin).toBe("HYPE");
+    expect(result.szi).toBe("-12.5");
+    expect(result.entryPx).toBe(1.45);
+    expect(result.markPx).toBe(1.52);
+    expect(result.unrealizedPnl).toBe(3.25);
+    expect(result.fundingEarned).toBe(0.15);
+    expect(result.liquidationPx).toBe(0.91);
+    expect(result.leverage).toEqual({ type: "cross", value: 0 });
+    expect(result.status).toBe("active");
+    expect(result.stale).toBe(true);
+  });
+
+  it("closed hedge fallback uses stored close event when snapshot indicates the position is closed", async () => {
+    insertHedgeSnapshot({
+      token_id: "484645",
+      coin: "HYPE",
+      szi: "0",
+      entry_px: 1.45,
+      mark_px: 1.52,
+      unrealized_pnl: 0,
+      funding_earned: 0.4,
+      liquidation_px: null,
+    });
+    insertHedgeEvent({
+      token_id: "484645",
+      coin: "HYPE",
+      status: "closed",
+      entry_px: 1.45,
+      size: 12.5,
+      opened_at: "2026-06-01T00:00:00.000Z",
+      closed_at: "2026-06-02T00:00:00.000Z",
+      close_px: 1.4,
+      realized_pnl: 2.75,
+      funding_earned: 0.65,
+      close_reason: "manual_close",
+      hl_fill_hash: "123456",
+    });
+
+    mockFetch = async () => {
+      throw new Error("network error");
+    };
+
+    const result = await getHedgeView(baseConfig, "484645");
+
+    expect(result.status).toBe("closed");
+    expect(result.szi).toBe("0");
+    expect(result.markPx).toBe(1.4);
+    expect(result.realizedPnl).toBe(2.75);
+    expect(result.fundingEarned).toBe(0.65);
+    expect(result.closedAt).toBe("2026-06-02T00:00:00.000Z");
+    expect(result.closeReason).toBe("manual_close");
+    expect(result.stale).toBe(true);
   });
 
   // Test 2: Non-200 response
@@ -208,6 +282,31 @@ describe("getHedgeView() — API failure scenarios", () => {
     const promise = getHedgeView(baseConfig, "484645");
     const error = await captureError(promise);
     expect(expectError(error).message).toContain("500");
+  });
+
+  it("snapshotHedge ignores stale fallback views so they are not duplicated", async () => {
+    insertHedgeSnapshot({
+      token_id: "484645",
+      coin: "HYPE",
+      szi: "-7.5",
+      entry_px: 1.11,
+      mark_px: 1.09,
+      unrealized_pnl: -0.4,
+      funding_earned: 0.02,
+      liquidation_px: 0.7,
+    });
+
+    mockFetch = async () => {
+      throw new Error("network error");
+    };
+
+    const result = await getHedgeView(baseConfig, "484645");
+    expect(result.stale).toBe(true);
+
+    snapshotHedge(result);
+
+    const snapshots = listHedgeSnapshots("484645");
+    expect(snapshots).toHaveLength(1);
   });
 
   // Additional edge case: assetPositions is empty array

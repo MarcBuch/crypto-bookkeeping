@@ -70,6 +70,7 @@ export interface HedgeView {
   realizedPnl?: number | null;
   closedAt?: string | null;
   closeReason?: string | null;
+  stale?: boolean;
 }
 
 export interface HedgeEvent {

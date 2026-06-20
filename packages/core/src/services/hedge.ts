@@ -8,6 +8,7 @@ import {
   closeHedgeEvent,
   getHedgeEvents,
   type StoredHedgeEvent,
+  type StoredHedgeSnapshot,
 } from "../db/store.js";
 import { isRecord } from "../utils/guards.js";
 import type { PnLView } from "./pnl.js";
@@ -26,7 +27,17 @@ export interface HedgeView {
   realizedPnl?: number | null;
   closedAt?: string | null;
   closeReason?: string | null;
+  stale?: boolean;
 }
+
+class HyperliquidApiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HyperliquidApiError";
+  }
+}
+
+const STALE_LEVERAGE = { type: "cross", value: 0 };
 
 interface HyperliquidPosition {
   position: {
@@ -45,6 +56,10 @@ interface HyperliquidPosition {
   type: string;
 }
 
+interface HyperliquidClearinghouseState {
+  assetPositions: HyperliquidPosition[];
+}
+
 interface HyperliquidFill {
   coin: string;
   px: string;
@@ -55,6 +70,123 @@ interface HyperliquidFill {
   oid: number;
   tid: number;
   dir: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function postHyperliquid<T>(
+  config: Config,
+  payload: Record<string, unknown>,
+  context: string,
+): Promise<T> {
+  let response: Response;
+
+  try {
+    response = await fetch("https://api.hyperliquid.xyz/info", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new HyperliquidApiError(
+      `Hyperliquid API request failed when ${context} for wallet ${config.wallet}: ${errorMessage(error)}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new HyperliquidApiError(
+      `Hyperliquid API error (${response.status}): ${response.statusText} ` +
+        `when ${context} for wallet ${config.wallet}`,
+    );
+  }
+
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    throw new HyperliquidApiError(
+      `Hyperliquid API returned invalid JSON when ${context} for wallet ${config.wallet}: ${errorMessage(error)}`,
+    );
+  }
+}
+
+function buildStaleHedgeView(
+  tokenId: string,
+  coin: string,
+  snapshot: StoredHedgeSnapshot,
+): HedgeView {
+  const closedEvent = getHedgeEvents(tokenId).find(
+    (event) => event.coin === coin && event.status === "closed",
+  );
+  const isClosed = parseFloat(snapshot.szi) === 0 || closedEvent != null;
+
+  if (isClosed) {
+    return {
+      tokenId,
+      coin,
+      szi: snapshot.szi,
+      entryPx: closedEvent?.entry_px ?? snapshot.entry_px,
+      markPx: closedEvent?.close_px ?? snapshot.mark_px,
+      unrealizedPnl: 0,
+      fundingEarned: closedEvent?.funding_earned ?? snapshot.funding_earned,
+      liquidationPx: snapshot.liquidation_px,
+      leverage: STALE_LEVERAGE,
+      status: "closed",
+      realizedPnl: closedEvent?.realized_pnl ?? null,
+      closedAt: closedEvent?.closed_at ?? null,
+      closeReason: closedEvent?.close_reason ?? null,
+      stale: true,
+    };
+  }
+
+  return {
+    tokenId,
+    coin,
+    szi: snapshot.szi,
+    entryPx: snapshot.entry_px,
+    markPx: snapshot.mark_px,
+    unrealizedPnl: snapshot.unrealized_pnl,
+    fundingEarned: snapshot.funding_earned,
+    liquidationPx: snapshot.liquidation_px,
+    leverage: STALE_LEVERAGE,
+    status: "active",
+    stale: true,
+  };
+}
+
+function buildKnownClosedStaleHedgeView(
+  tokenId: string,
+  coin: string,
+  position: HyperliquidPosition,
+  snapshot: StoredHedgeSnapshot | null,
+): HedgeView {
+  const closedEvent = getHedgeEvents(tokenId).find(
+    (event) => event.coin === coin && event.status === "closed",
+  );
+
+  return {
+    tokenId,
+    coin,
+    szi: position.position.szi,
+    entryPx: parseFloat(position.position.entryPx),
+    markPx: closedEvent?.close_px ?? parseFloat(position.position.markPx),
+    unrealizedPnl: 0,
+    fundingEarned: closedEvent?.funding_earned ?? snapshot?.funding_earned ?? 0,
+    liquidationPx: null,
+    leverage: position.position.leverage,
+    status: "closed",
+    realizedPnl: closedEvent?.realized_pnl ?? null,
+    closedAt: closedEvent?.closed_at ?? null,
+    closeReason: closedEvent?.close_reason ?? null,
+    stale: true,
+  };
+}
+
+function getLatestHedgeSnapshot(tokenId: string, coin: string): StoredHedgeSnapshot | null {
+  return listHedgeSnapshots(tokenId).find((snapshot) => snapshot.coin === coin) ?? null;
 }
 
 export async function getHedgeView(config: Config, tokenId: string): Promise<HedgeView> {
@@ -69,98 +201,117 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
 
   const coin = hedgeConfig.coin;
 
-  // Fetch clearinghouse state from Hyperliquid
-  const response = await fetch("https://api.hyperliquid.xyz/info", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      type: "clearinghouseState",
-      user: config.wallet,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Hyperliquid API error (${response.status}): ${response.statusText} ` +
-        `when fetching clearinghouse state for wallet ${config.wallet}`,
+  try {
+    const data = await postHyperliquid<HyperliquidClearinghouseState>(
+      config,
+      {
+        type: "clearinghouseState",
+        user: config.wallet,
+      },
+      "fetching clearinghouse state",
     );
-  }
 
-  const data = await response.json();
-  const assetPositions =
-    isRecord(data) && Array.isArray(data.assetPositions)
-      ? data.assetPositions.filter(isHyperliquidPosition)
-      : null;
+    const assetPositions =
+      isRecord(data) && Array.isArray(data.assetPositions)
+        ? data.assetPositions.filter(isHyperliquidPosition)
+        : null;
 
-  // Guard against missing assetPositions
-  if (!assetPositions) {
-    throw new Error(
-      `Hyperliquid API response missing assetPositions for wallet ${config.wallet}. ` +
-        `Response structure may have changed.`,
-    );
-  }
+    // Guard against missing assetPositions
+    if (!assetPositions) {
+      throw new HyperliquidApiError(
+        `Hyperliquid API response missing assetPositions for wallet ${config.wallet}. ` +
+          `Response structure may have changed.`,
+      );
+    }
 
-  // Find the position matching the configured coin
-  const position = assetPositions.find((ap) => ap.position.coin === coin);
+    // Find the position matching the configured coin
+    const position = assetPositions.find((ap) => ap.position.coin === coin);
 
-  if (!position) {
-    // Position is fully absent from Hyperliquid (settled and removed, not just szi=0).
-    // Attempt to reconstruct a closed view from fills + local data.
-    const closedView = await resolveAbsentPosition(config, tokenId, coin);
-    if (closedView) return closedView;
+    if (!position) {
+      // Position is fully absent from Hyperliquid (settled and removed, not just szi=0).
+      // Attempt to reconstruct a closed view from fills + local data.
+      const closedView = await resolveAbsentPosition(config, tokenId, coin);
+      if (closedView) return closedView;
 
-    throw new Error(
-      `No open ${coin} position found on Hyperliquid for wallet ${config.wallet}. ` +
-        `Available positions: ${assetPositions.map((ap) => ap.position.coin).join(", ") || "none"}`,
-    );
-  }
+      throw new Error(
+        `No open ${coin} position found on Hyperliquid for wallet ${config.wallet}. ` +
+          `Available positions: ${assetPositions.map((ap) => ap.position.coin).join(", ") || "none"}`,
+      );
+    }
 
-  // Check if position is closed (szi === 0)
-  const szi = parseFloat(position.position.szi);
-  if (szi === 0) {
-    // Position closed on Hyperliquid — detect and record the close
-    const closedEvent = await resolveHedgeClose(config, tokenId, coin);
+    // Check if position is closed (szi === 0)
+    const szi = parseFloat(position.position.szi);
+    if (szi === 0) {
+      // Position closed on Hyperliquid — detect and record the close
+      let closedEvent: StoredHedgeEvent | null;
+      try {
+        closedEvent = await resolveHedgeClose(config, tokenId, coin);
+      } catch (error) {
+        if (error instanceof HyperliquidApiError) {
+          return buildKnownClosedStaleHedgeView(
+            tokenId,
+            coin,
+            position,
+            getLatestHedgeSnapshot(tokenId, coin),
+          );
+        }
+
+        throw error;
+      }
+
+      return {
+        tokenId,
+        coin,
+        szi: position.position.szi,
+        entryPx: parseFloat(position.position.entryPx),
+        markPx: parseFloat(position.position.markPx),
+        unrealizedPnl: 0,
+        fundingEarned: closedEvent?.funding_earned ?? 0,
+        liquidationPx: null,
+        leverage: position.position.leverage,
+        status: "closed",
+        realizedPnl: closedEvent?.realized_pnl ?? null,
+        closedAt: closedEvent?.closed_at ?? null,
+        closeReason: closedEvent?.close_reason ?? null,
+      };
+    }
+
+    // Parse all numeric fields
+    const entryPx = parseFloat(position.position.entryPx);
+    const markPx = parseFloat(position.position.markPx);
+    const unrealizedPnl = parseFloat(position.position.unrealizedPnl);
+    const fundingEarned = parseFloat(position.position.cumFunding?.sinceOpen ?? "0");
+    const liquidationPx = parseFloat(position.position.liquidationPx);
+
     return {
       tokenId,
       coin,
       szi: position.position.szi,
-      entryPx: parseFloat(position.position.entryPx),
-      markPx: parseFloat(position.position.markPx),
-      unrealizedPnl: 0,
-      fundingEarned: closedEvent?.funding_earned ?? 0,
-      liquidationPx: null,
+      entryPx,
+      markPx,
+      unrealizedPnl,
+      fundingEarned,
+      liquidationPx: isNaN(liquidationPx) ? null : liquidationPx,
       leverage: position.position.leverage,
-      status: "closed",
-      realizedPnl: closedEvent?.realized_pnl ?? null,
-      closedAt: closedEvent?.closed_at ?? null,
-      closeReason: closedEvent?.close_reason ?? null,
+      status: "active",
     };
+  } catch (error) {
+    if (error instanceof HyperliquidApiError) {
+      const snapshot = getLatestHedgeSnapshot(tokenId, coin);
+      if (snapshot) {
+        return buildStaleHedgeView(tokenId, coin, snapshot);
+      }
+    }
+
+    throw error;
   }
-
-  // Parse all numeric fields
-  const entryPx = parseFloat(position.position.entryPx);
-  const markPx = parseFloat(position.position.markPx);
-  const unrealizedPnl = parseFloat(position.position.unrealizedPnl);
-  const fundingEarned = parseFloat(position.position.cumFunding?.sinceOpen ?? "0");
-  const liquidationPx = parseFloat(position.position.liquidationPx);
-
-  return {
-    tokenId,
-    coin,
-    szi: position.position.szi,
-    entryPx,
-    markPx,
-    unrealizedPnl,
-    fundingEarned,
-    liquidationPx: isNaN(liquidationPx) ? null : liquidationPx,
-    leverage: position.position.leverage,
-    status: "active",
-  };
 }
 
 export function snapshotHedge(view: HedgeView): void {
+  if (view.stale) {
+    return;
+  }
+
   insertHedgeSnapshot({
     token_id: view.tokenId,
     coin: view.coin,
@@ -232,24 +383,15 @@ async function resolveAbsentPosition(
   }
 
   // Fetch all fills for this wallet (no startTime filter — no local open event to anchor to)
-  const response = await fetch("https://api.hyperliquid.xyz/info", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const fills = await postHyperliquid<HyperliquidFill[]>(
+    config,
+    {
       type: "userFillsByTime",
       user: config.wallet,
       startTime: 0,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Hyperliquid API error (${response.status}) fetching fills for wallet ${config.wallet}`,
-    );
-  }
-
-  const fillsJson = await response.json();
-  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
+    },
+    "fetching fills for absent hedge resolution",
+  );
   const coinFills = fills.filter((f) => f.coin === coin);
   if (coinFills.length === 0) return null;
 
@@ -395,25 +537,15 @@ export async function resolveHedgeClose(
   const fundingEarned = mostRecentSnapshot?.funding_earned ?? 0;
 
   // Step 4: Fetch fills from Hyperliquid userFillsByTime API
-  const response = await fetch("https://api.hyperliquid.xyz/info", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const fills = await postHyperliquid<HyperliquidFill[]>(
+    config,
+    {
       type: "userFillsByTime",
       user: config.wallet,
       startTime: new Date(openEvent.opened_at).getTime(),
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Hyperliquid API error (${response.status}): ${response.statusText} ` +
-        `when fetching userFillsByTime for wallet ${config.wallet}`,
-    );
-  }
-
-  const fillsJson = await response.json();
-  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
+    },
+    "fetching userFillsByTime",
+  );
 
   // Step 5: Filter fills to find closing fills for this coin.
   // Include both voluntary closes ("Close Short", "Close Long") and

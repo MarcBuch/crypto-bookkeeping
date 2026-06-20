@@ -168,6 +168,12 @@ export async function syncSinglePosition(
 
   // 2. Create viem client
   const client = createClient(config);
+  const positionConfig = config.positions?.[tokenId];
+  const hedgePromise = positionConfig?.hedge
+    ? getHedgeView(config, tokenId)
+        .then((hedgeView) => ({ hedgeView }))
+        .catch((error: unknown) => ({ error }))
+    : null;
 
   // 3. Fetch position data for this specific tokenId (bypasses wallet enumeration)
   const rawPosition = await getPositionData(
@@ -194,14 +200,14 @@ export async function syncSinglePosition(
   }
 
   // 7. Snapshot hedge if configured (swallow errors — LP sync must complete)
-  const positionConfig = config.positions?.[tokenId];
-  if (positionConfig?.hedge) {
-    try {
-      const hedgeView = await getHedgeView(config, tokenId);
+  if (hedgePromise) {
+    const hedgeResult = await hedgePromise;
+    if ("hedgeView" in hedgeResult) {
+      const hedgeView = hedgeResult.hedgeView;
       snapshotHedge(hedgeView);
-    } catch (err) {
+    } else {
       // Log but do NOT re-throw — LP sync must complete even if HL API is down
-      console.warn(`[hedge] Failed to snapshot hedge for ${tokenId}:`, err);
+      console.warn(`[hedge] Failed to snapshot hedge for ${tokenId}:`, hedgeResult.error);
     }
   }
 

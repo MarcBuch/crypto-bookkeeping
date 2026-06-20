@@ -70,7 +70,9 @@ export function App() {
             Last synced: {syncedAt ? new Date(syncedAt).toLocaleString() : "Never synced"}
           </p>
         ) : null}
-        {!isLoading && !error && positions ? <Dashboard positions={positions} /> : null}
+        {!isLoading && !error && positions ? (
+          <Dashboard positions={positions} isSyncing={isSyncing} />
+        ) : null}
       </section>
     </main>
   );
@@ -153,7 +155,13 @@ function FeesHeaderTooltip() {
   );
 }
 
-export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
+export function Dashboard({
+  positions,
+  isSyncing = false,
+}: {
+  positions: DashboardPosition[];
+  isSyncing?: boolean;
+}) {
   if (positions.length === 0) {
     return <EmptyState />;
   }
@@ -202,7 +210,9 @@ export function Dashboard({ positions }: { positions: DashboardPosition[] }) {
         />
       </section>
 
-      {openPositions.length > 0 ? <ActivePositions positions={openPositions} /> : null}
+      {openPositions.length > 0 ? (
+        <ActivePositions positions={openPositions} isSyncing={isSyncing} />
+      ) : null}
 
       <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
@@ -276,19 +286,31 @@ function MetricCard({
   );
 }
 
-function ActivePositions({ positions }: { positions: DashboardPosition[] }) {
+function ActivePositions({
+  positions,
+  isSyncing = false,
+}: {
+  positions: DashboardPosition[];
+  isSyncing?: boolean;
+}) {
   return (
     <section className="overflow-hidden rounded-[1.75rem] border border-neutral-300 bg-neutral-200 shadow-sm">
       <div className="divide-y divide-neutral-300">
         {positions.map((position) => (
-          <ActivePositionRow key={position.tokenId} position={position} />
+          <ActivePositionRow key={position.tokenId} position={position} isSyncing={isSyncing} />
         ))}
       </div>
     </section>
   );
 }
 
-function ActivePositionRow({ position }: { position: DashboardPosition }) {
+function ActivePositionRow({
+  position,
+  isSyncing = false,
+}: {
+  position: DashboardPosition;
+  isSyncing?: boolean;
+}) {
   const pnl = position.pnl;
   const balance = currentBalanceUsd(position);
   const venue = venueLabel(position);
@@ -297,7 +319,10 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
   const rightDistance = (position.priceUpper - position.currentPrice) / position.currentPrice;
   const rangeTone = position.inRange ? "from-emerald-500 to-teal-300" : "from-rose-400 to-red-500";
   const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
-  const { data: hedgeData } = useHedge(position.tokenId);
+  const { data: hedgeData, isFetching: isFetchingHedge } = useHedge(
+    position.tokenId,
+    !(isSyncing || isSyncingPosition),
+  );
 
   // Hedge-adjusted ROI — computed via shared helper (same logic as CLI pnl-format.ts)
   const {
@@ -442,7 +467,13 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
         </div>
       </article>
 
-      {hedgeData && <HedgePanel hedge={hedgeData} pnl={position.pnl ?? undefined} />}
+      {hedgeData && (
+        <HedgePanel
+          hedge={hedgeData}
+          pnl={position.pnl ?? undefined}
+          isUpdating={isSyncing || isSyncingPosition || isFetchingHedge}
+        />
+      )}
     </div>
   );
 }
@@ -450,9 +481,11 @@ function ActivePositionRow({ position }: { position: DashboardPosition }) {
 function HedgePanel({
   hedge,
   pnl,
+  isUpdating = false,
 }: {
   hedge: import("./api").HedgeView;
   pnl?: import("./api").PnLView;
+  isUpdating?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -498,6 +531,11 @@ function HedgePanel({
           <span className="truncate font-mono text-xs font-bold tracking-tight text-neutral-950">
             {size} {hedge.coin}-PERP
           </span>
+          {hedge.stale ? (
+            <span className="inline-flex shrink-0 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[0.55rem] font-bold tracking-[0.14em] text-amber-800 uppercase">
+              cached
+            </span>
+          ) : null}
           <span className="hidden truncate text-[0.65rem] font-medium text-neutral-400 sm:inline">
             {hedge.status === "closed" && hedge.closeReason
               ? hedge.closeReason
@@ -508,6 +546,11 @@ function HedgePanel({
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
+          {isUpdating ? (
+            <span className="text-[0.6rem] font-semibold tracking-[0.14em] text-neutral-500 uppercase">
+              updating
+            </span>
+          ) : null}
           {/* Net hedged P&L — single line */}
           {combinedPnl != null && (
             <span className="font-mono text-xs font-bold">

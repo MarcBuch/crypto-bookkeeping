@@ -24,7 +24,6 @@ await mock.module("../db/schema.js", () => ({
 import type { Config } from "../config.js";
 import { insertHedgeSnapshot } from "../db/store.js";
 import { getHedgeView } from "../services/hedge.js";
-import { captureError, expectError } from "./helpers/errors.js";
 import { getRequestType, jsonResponse, setFetchMock } from "./helpers/http.js";
 
 const originalFetch = globalThis.fetch;
@@ -162,7 +161,7 @@ describe("getHedgeView() — closed position path", () => {
   // Cluster B: HL fills API down after detecting szi=0
   // =========================================================================
   describe("Cluster B: HL fills API down after detecting szi=0", () => {
-    it("szi=0, clearinghouseState returns 0 position, userFillsByTime fetch throws Network error → propagates error", async () => {
+    it("szi=0, clearinghouseState returns 0 position, userFillsByTime fetch throws Network error → falls back to stale closed view", async () => {
       const config = makeConfig({
         positions: {
           "789": {
@@ -195,12 +194,18 @@ describe("getHedgeView() — closed position path", () => {
         throw new Error(`Unexpected fetch type: ${String(type)}`);
       });
 
-      const error = await captureError(getHedgeView(config, "789"));
-      expect(error).toBeInstanceOf(Error);
-      expect(expectError(error).message).toContain("Network error");
+      const result = await getHedgeView(config, "789");
+      expect(result.status).toBe("closed");
+      expect(result.stale).toBe(true);
+      expect(result.szi).toBe("0");
+      expect(result.entryPx).toBe(61.5);
+      expect(result.markPx).toBe(62.0);
+      expect(result.realizedPnl).toBeNull();
+      expect(result.fundingEarned).toBe(0.5);
+      expect(result.leverage).toEqual({ type: "cross", value: 1 });
     });
 
-    it("szi=0, userFillsByTime returns HTTP 502 → propagates error (not swallowed)", async () => {
+    it("szi=0, userFillsByTime returns HTTP 502 → falls back to stale closed view", async () => {
       const config = makeConfig({
         positions: {
           "999": {
@@ -233,10 +238,14 @@ describe("getHedgeView() — closed position path", () => {
         throw new Error(`Unexpected fetch type: ${String(type)}`);
       });
 
-      const promise = getHedgeView(config, "999");
-      const error = await captureError(promise);
-      expect(error).toBeInstanceOf(Error);
-      expect(expectError(error).message).toContain("502");
+      const result = await getHedgeView(config, "999");
+      expect(result.status).toBe("closed");
+      expect(result.stale).toBe(true);
+      expect(result.szi).toBe("0");
+      expect(result.entryPx).toBe(61.5);
+      expect(result.markPx).toBe(62.0);
+      expect(result.fundingEarned).toBe(0.5);
+      expect(result.realizedPnl).toBeNull();
     });
   });
 

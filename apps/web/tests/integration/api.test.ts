@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 
 import {
   ApiError,
@@ -20,11 +20,11 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-async function captureError<T>(promise: Promise<T>): Promise<unknown> {
+async function captureError<T>(promise: Promise<T>): Promise<Error> {
   try {
     await promise;
   } catch (error) {
-    return error;
+    return error instanceof Error ? error : new Error(String(error));
   }
 
   throw new Error("Expected promise to reject");
@@ -36,13 +36,41 @@ function getRequestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
+function isRequestInfoOrUrl(value: unknown): value is RequestInfo | URL {
+  return typeof value === "string" || value instanceof URL || value instanceof Request;
+}
+
+function isRequestInit(value: unknown): value is RequestInit {
+  return value !== null && typeof value === "object";
+}
+
+function createFetchMock(
+  handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+): typeof fetch {
+  return new Proxy(originalFetch, {
+    apply(_target, _thisArg, argArray) {
+      const [input, init] = argArray;
+      if (!isRequestInfoOrUrl(input)) {
+        throw new TypeError("Unsupported fetch input");
+      }
+
+      return Promise.resolve(handler(getRequestUrl(input), isRequestInit(init) ? init : undefined));
+    },
+  });
+}
+
 function mockFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): void {
-  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = getRequestUrl(input);
-    return Promise.resolve(handler(url, init));
-  }) as unknown as typeof fetch;
+  globalThis.fetch = createFetchMock(handler);
+}
+
+function createRejectedFetch(message: string): typeof fetch {
+  return new Proxy(originalFetch, {
+    apply() {
+      return Promise.reject(new TypeError(message));
+    },
+  });
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -143,13 +171,11 @@ const taxTransaction: TaxTransaction = {
 
 describe("API client", () => {
   it("propagates network failures when fetch rejects", async () => {
-    globalThis.fetch = mock(() =>
-      Promise.reject(new TypeError("fetch failed")),
-    ) as unknown as typeof fetch;
+    globalThis.fetch = createRejectedFetch("fetch failed");
 
     const error = await captureError(getPositions());
     expect(error).toBeInstanceOf(TypeError);
-    expect((error as Error).message).toContain("fetch failed");
+    expect(error.message).toContain("fetch failed");
   });
 
   it("returns an empty positions list as valid data", async () => {
@@ -185,7 +211,7 @@ describe("API client", () => {
 
     const error = await captureError(getPositions());
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as Error).message).toContain("API response did not include positions.");
+    expect(error.message).toContain("API response did not include positions.");
   });
 
   it("throws when P&L response has malformed shape", async () => {
@@ -193,7 +219,7 @@ describe("API client", () => {
 
     const error = await captureError(getPnL());
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response did not include P&L positions.");
+    expect(error.message).toContain("API response did not include P&L positions.");
   });
 
   it("merges positions and P&L by tokenId", async () => {
@@ -352,7 +378,7 @@ describe("API client", () => {
 
     const error = await captureError(getTaxTransactions());
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response did not include tax transactions.");
+    expect(error.message).toContain("API response did not include tax transactions.");
   });
 
   it("throws when tax transactions contain missing id or hash", async () => {
@@ -360,7 +386,7 @@ describe("API client", () => {
 
     const error = await captureError(getTaxTransactions());
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response included malformed tax transactions.");
+    expect(error.message).toContain("API response included malformed tax transactions.");
   });
 
   it("propagates tax transactions non-JSON failures with generic status message", async () => {
@@ -401,12 +427,12 @@ describe("API client", () => {
     mockFetch(() => jsonResponse({ sync: null }));
     let error = await captureError(syncTaxTransactions());
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response did not include tax sync summary.");
+    expect(error.message).toContain("API response did not include tax sync summary.");
 
     mockFetch(() => jsonResponse({ sync: [] }));
     error = await captureError(syncTaxTransactions());
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response did not include tax sync summary.");
+    expect(error.message).toContain("API response did not include tax sync summary.");
   });
 
   it("propagates tax sync non-2xx JSON server errors", async () => {
@@ -509,13 +535,11 @@ describe("API client", () => {
   });
 
   it("propagates tax create network failures when fetch rejects", async () => {
-    globalThis.fetch = mock(() =>
-      Promise.reject(new TypeError("create fetch failed")),
-    ) as unknown as typeof fetch;
+    globalThis.fetch = createRejectedFetch("create fetch failed");
 
     const error = await captureError(createTaxTransaction({ hash: "manual:network" }));
     expect(error).toBeInstanceOf(TypeError);
-    expect((error as Error).message).toContain("create fetch failed");
+    expect(error.message).toContain("create fetch failed");
   });
 
   it("updates tax transaction metadata with PATCH", async () => {
@@ -568,12 +592,12 @@ describe("API client", () => {
     mockFetch(() => jsonResponse({ transaction: null }));
     let error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response did not include tax transaction.");
+    expect(error.message).toContain("API response did not include tax transaction.");
 
     mockFetch(() => jsonResponse({ transaction: [] }));
     error = await captureError(updateTaxTransaction(taxTransaction.id, { comment: "Manual" }));
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response did not include tax transaction.");
+    expect(error.message).toContain("API response did not include tax transaction.");
   });
 
   it("throws when tax update response transaction misses id or hash", async () => {
@@ -583,7 +607,7 @@ describe("API client", () => {
       updateTaxTransaction(taxTransaction.id, { comment: "Manual" }),
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("API response included malformed tax transaction.");
+    expect(error.message).toContain("API response included malformed tax transaction.");
   });
 
   it("propagates tax update non-2xx JSON server errors", async () => {

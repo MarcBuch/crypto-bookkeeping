@@ -32,6 +32,9 @@ import { QueryClient } from "@tanstack/react-query";
 import * as api from "../../src/api";
 import { queryKeys } from "../../src/hooks/useDashboardPositions";
 
+const realSetInterval = globalThis.setInterval;
+const realClearInterval = globalThis.clearInterval;
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -100,6 +103,32 @@ function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+type TimerCallback = Extract<Parameters<typeof setInterval>[0], (...args: unknown[]) => void>;
+
+function isTimerCallback(handler: Parameters<typeof setInterval>[0]): handler is TimerCallback {
+  return typeof handler === "function";
+}
+
+function createSetIntervalInterceptor(
+  onSchedule: (callback: () => void) => void,
+): typeof setInterval {
+  return new Proxy(realSetInterval, {
+    apply(target, thisArg, argArray) {
+      const [handler] = argArray;
+      if (!isTimerCallback(handler)) {
+        throw new TypeError("String timer handlers are not supported in tests.");
+      }
+
+      const intervalId = Reflect.apply(target, thisArg, [() => undefined, 60_000]);
+      realClearInterval(intervalId);
+      onSchedule(() => {
+        handler();
+      });
+      return intervalId;
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Suite
 // ---------------------------------------------------------------------------
@@ -113,17 +142,17 @@ describe("useSyncPositions polling logic", () => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     capturedIntervalCallback = null;
 
-    // Override setInterval to capture the callback without actually scheduling
-    globalThis.setInterval = ((cb: () => void, _ms: number) => {
-      capturedIntervalCallback = cb;
-      return 999 as unknown as ReturnType<typeof setInterval>;
-    }) as typeof setInterval;
+    // Capture the callback while returning a real cleared interval handle.
+    globalThis.setInterval = createSetIntervalInterceptor((callback) => {
+      capturedIntervalCallback = callback;
+    });
 
     // Spy on clearInterval
     clearIntervalSpy = spyOn(globalThis, "clearInterval");
   });
 
   afterEach(() => {
+    globalThis.setInterval = realSetInterval;
     queryClient.clear();
     mock.restore();
   });
@@ -313,7 +342,14 @@ describe("useSyncPositions polling logic", () => {
     const syncMock = mock(async () => {
       throw new Error("RPC rate limited");
     });
-    const statusMock = mock(async () => ({ status: "idle" }) as api.SyncStatus);
+    const idleStatus: api.SyncStatus = {
+      status: "idle",
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      positionCount: null,
+    };
+    const statusMock = mock(async () => idleStatus);
 
     const poller = buildPoller({
       queryClient,

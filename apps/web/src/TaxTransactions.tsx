@@ -85,6 +85,8 @@ type CreateManualTaxTransaction = (
   options?: { onSuccess?: () => void },
 ) => void;
 
+type EditableTaxTransactionLabel = "" | NonNullable<TaxTransactionLabel>;
+
 const idleTaxSyncMutation = {
   mutate: () => undefined,
   isError: false,
@@ -111,7 +113,7 @@ export interface ManualTaxTransactionFormState {
   token_decimal: string;
   token_name: string;
   is_error: string;
-  label: "" | NonNullable<TaxTransactionLabel>;
+  label: EditableTaxTransactionLabel;
   incoming_quantity: string;
   incoming_asset: string;
   outgoing_quantity: string;
@@ -176,7 +178,7 @@ export function buildManualTaxTransactionCreateInput(form: ManualTaxTransactionF
     if (field === "holding_duration_days" || form[field].trim() === "") continue;
     const parsed = parseManualIntegerField(field, form[field]);
     if (parsed.error) return { error: parsed.error };
-    input[field] = parsed.value as never;
+    assignField(input, field, parsed.value);
   }
 
   if (Object.keys(input).length === 0) {
@@ -238,6 +240,12 @@ const editableManualTaxTransactionIntegerFields = [
   keyof TaxTransactionUpdate & keyof ManualTaxTransactionFormState
 >;
 
+type EditableManualTaxTransactionStringField =
+  (typeof editableManualTaxTransactionStringFields)[number];
+type EditableManualTaxTransactionIntegerField =
+  (typeof editableManualTaxTransactionIntegerFields)[number];
+type ManualTaxTransactionCreateStringField = "id" | EditableManualTaxTransactionStringField;
+
 export function manualTransactionFormFromTransaction(
   transaction: TaxTransaction,
 ): ManualTaxTransactionFormState {
@@ -283,7 +291,7 @@ export function buildManualTaxTransactionUpdate(
   for (const field of editableManualTaxTransactionStringFields) {
     if (form[field] !== original[field]) {
       const trimmed = form[field].trim();
-      update[field] = (trimmed === "" ? null : trimmed) as never;
+      assignField(update, field, trimmed === "" ? null : trimmed);
     }
   }
 
@@ -291,7 +299,7 @@ export function buildManualTaxTransactionUpdate(
     if (form[field] !== original[field]) {
       const parsed = parseManualIntegerField(field, form[field]);
       if (parsed.error) return { error: parsed.error };
-      update[field] = parsed.value as never;
+      assignField(update, field, parsed.value);
     }
   }
 
@@ -315,7 +323,7 @@ function formatNullableNumber(value: number | null): string {
 }
 
 function parseManualIntegerField(
-  field: (typeof editableManualTaxTransactionIntegerFields)[number],
+  field: EditableManualTaxTransactionIntegerField,
   value: string,
 ): { value: number | null; error?: string } {
   const trimmed = value.trim();
@@ -366,13 +374,21 @@ export function submitManualTaxTransactionForm({
 
 function addTrimmedField(
   input: ManualTaxTransactionCreateInput,
-  field: keyof ManualTaxTransactionCreateInput,
+  field: ManualTaxTransactionCreateStringField,
   value: string,
 ) {
   const trimmed = value.trim();
   if (trimmed !== "") {
-    input[field] = trimmed as never;
+    assignField(input, field, trimmed);
   }
+}
+
+function assignField<T extends object, K extends keyof T>(target: T, field: K, value: T[K]) {
+  Object.assign(target, { [field]: value });
+}
+
+function isEditableTaxTransactionLabel(value: string): value is EditableTaxTransactionLabel {
+  return value === "" || value === "Trade" || value === "Transfer" || value === "Approval";
 }
 
 export function isManualTaxTransaction(transaction: TaxTransaction): boolean {
@@ -1222,7 +1238,11 @@ export function LabelSelect({
       disabled={disabled}
       value={value}
       onChange={(event) => {
-        const selectedLabel = event.currentTarget.value as "" | NonNullable<TaxTransactionLabel>;
+        const selectedLabel = event.currentTarget.value;
+        if (!isEditableTaxTransactionLabel(selectedLabel)) {
+          return;
+        }
+
         updateTransaction(transaction.id, { label: selectedLabel === "" ? null : selectedLabel });
       }}
     >

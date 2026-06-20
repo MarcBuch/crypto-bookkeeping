@@ -24,6 +24,23 @@ export interface TableMeta {
   isUpdating?: boolean;
 }
 
+function isTableMeta(value: unknown): value is TableMeta {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "updateTransaction" in value &&
+    typeof value.updateTransaction === "function"
+  );
+}
+
+function getTableMeta(value: unknown): TableMeta {
+  if (!isTableMeta(value)) {
+    throw new Error("Tax table metadata is required.");
+  }
+
+  return value;
+}
+
 function parseSortableNumber(value: unknown): number {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : 0;
@@ -137,7 +154,7 @@ export const taxTableColumns = [
     size: 9,
     enableSorting: true,
     cell: ({ row, table }) => {
-      const meta = table.options.meta as TableMeta;
+      const meta = getTableMeta(table.options.meta);
       const groupData: TaxTransactionGroup | undefined = row.original.groupData;
 
       if (groupData) {
@@ -327,7 +344,7 @@ export const taxTableColumns = [
     size: 8,
     enableSorting: false,
     cell: ({ row, table }) => {
-      const meta = table.options.meta as TableMeta;
+      const meta = getTableMeta(table.options.meta);
       const groupData: TaxTransactionGroup | undefined = row.original.groupData;
 
       if (groupData) {

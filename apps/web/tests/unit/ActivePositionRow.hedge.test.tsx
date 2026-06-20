@@ -136,7 +136,7 @@ function renderHedgeSubPanel(hedgeData: HedgeView | undefined, position: Dashboa
     html += `<div class="mt-2 pt-2 border-t border-neutral-300 flex justify-between text-xs">`;
     html += `<span class="text-neutral-600">Net hedged P&L</span>`;
     html += `<span class="${toneClass(combinedPnl)}">`;
-    html += `${formatUsd(combinedPnl)}`;
+    html += formatUsd(combinedPnl);
     html += `<span class="text-neutral-500 ml-1">LP ${formatUsd(lpAbsPnl)} + hedge ${formatUsd(hedgePnl)}</span>`;
     html += `</span>`;
     html += `</div>`;

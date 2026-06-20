@@ -219,6 +219,10 @@ interface FetchJsonOptions {
   body?: unknown;
 }
 
+async function readJson<T>(response: Response): Promise<T> {
+  return await response.json();
+}
+
 async function fetchJson<T>(path: string, options: FetchJsonOptions = {}): Promise<T> {
   const init: RequestInit = {};
 
@@ -238,7 +242,7 @@ async function fetchJson<T>(path: string, options: FetchJsonOptions = {}): Promi
     throw new ApiError(errorMessage, response.status);
   }
 
-  return response.json() as Promise<T>;
+  return await readJson<T>(response);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -251,8 +255,8 @@ function isTaxTransaction(value: unknown): value is TaxTransaction {
 
 async function readErrorMessage(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as { error?: unknown };
-    if (typeof body.error === "string" && body.error.length > 0) {
+    const body = await readJson<unknown>(response);
+    if (isObject(body) && typeof body.error === "string" && body.error.length > 0) {
       return body.error;
     }
   } catch {
@@ -363,7 +367,7 @@ export async function getTaxTransactions(
     throw new ApiError("API response included malformed tax transactions.");
   }
 
-  return data.transactions as TaxTransaction[];
+  return data.transactions;
 }
 
 export async function syncTaxTransactions(): Promise<TaxSyncSummary> {
@@ -392,7 +396,7 @@ export async function createTaxTransaction(
     throw new ApiError("API response included malformed tax transaction.");
   }
 
-  return data.transaction as unknown as TaxTransaction;
+  return data.transaction;
 }
 
 export async function updateTaxTransaction(
@@ -412,7 +416,7 @@ export async function updateTaxTransaction(
     throw new ApiError("API response included malformed tax transaction.");
   }
 
-  return data.transaction as unknown as TaxTransaction;
+  return data.transaction;
 }
 
 export async function getHedge(tokenId: string): Promise<HedgeView> {

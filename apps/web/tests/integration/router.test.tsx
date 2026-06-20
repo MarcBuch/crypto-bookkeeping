@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
-import { isValidElement, type ReactElement } from "react";
+import { isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { AppProviders } from "../../src/app-providers";
@@ -37,9 +37,12 @@ describe("router shell", () => {
 
     const child = element.props.children;
     expect(isValidElement(child)).toBe(true);
-    const routerElement = child as ReactElement<{ router: typeof router }>;
-    expect(routerElement.type).toBe(RouterProvider);
-    expect(routerElement.props.router).toBe(router);
+    if (!isValidElement<{ router: typeof router }>(child)) {
+      throw new Error("Expected RouterProvider child element");
+    }
+
+    expect(child.type).toBe(RouterProvider);
+    expect(child.props.router).toBe(router);
   });
 
   it("renders a stable not-found fallback for unknown routes", () => {

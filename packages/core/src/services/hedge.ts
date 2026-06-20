@@ -56,10 +56,6 @@ interface HyperliquidPosition {
   type: string;
 }
 
-interface HyperliquidClearinghouseState {
-  assetPositions: HyperliquidPosition[];
-}
-
 interface HyperliquidFill {
   coin: string;
   px: string;
@@ -76,11 +72,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function postHyperliquid<T>(
+async function postHyperliquid(
   config: Config,
   payload: Record<string, unknown>,
   context: string,
-): Promise<T> {
+): Promise<unknown> {
   let response: Response;
 
   try {
@@ -105,7 +101,7 @@ async function postHyperliquid<T>(
   }
 
   try {
-    return (await response.json()) as T;
+    return await response.json();
   } catch (error) {
     throw new HyperliquidApiError(
       `Hyperliquid API returned invalid JSON when ${context} for wallet ${config.wallet}: ${errorMessage(error)}`,
@@ -202,7 +198,7 @@ export async function getHedgeView(config: Config, tokenId: string): Promise<Hed
   const coin = hedgeConfig.coin;
 
   try {
-    const data = await postHyperliquid<HyperliquidClearinghouseState>(
+    const data = await postHyperliquid(
       config,
       {
         type: "clearinghouseState",
@@ -383,7 +379,7 @@ async function resolveAbsentPosition(
   }
 
   // Fetch all fills for this wallet (no startTime filter — no local open event to anchor to)
-  const fills = await postHyperliquid<HyperliquidFill[]>(
+  const fillsJson = await postHyperliquid(
     config,
     {
       type: "userFillsByTime",
@@ -392,6 +388,7 @@ async function resolveAbsentPosition(
     },
     "fetching fills for absent hedge resolution",
   );
+  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
   const coinFills = fills.filter((f) => f.coin === coin);
   if (coinFills.length === 0) return null;
 
@@ -537,7 +534,7 @@ export async function resolveHedgeClose(
   const fundingEarned = mostRecentSnapshot?.funding_earned ?? 0;
 
   // Step 4: Fetch fills from Hyperliquid userFillsByTime API
-  const fills = await postHyperliquid<HyperliquidFill[]>(
+  const fillsJson = await postHyperliquid(
     config,
     {
       type: "userFillsByTime",
@@ -546,6 +543,7 @@ export async function resolveHedgeClose(
     },
     "fetching userFillsByTime",
   );
+  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
 
   // Step 5: Filter fills to find closing fills for this coin.
   // Include both voluntary closes ("Close Short", "Close Long") and

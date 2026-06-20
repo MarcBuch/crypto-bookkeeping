@@ -905,19 +905,20 @@ function formatSignedPercent(value: number): string {
   }).format(value);
 }
 
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function currentBalanceUsd(position: DashboardPosition): number | null {
   const token0Usd = position.pnl?.token0UsdPrice;
   const token1Usd = position.pnl?.token1UsdPrice;
   const currentPrice = position.currentPrice;
 
-  const hasFiniteNumber = (value: number | null | undefined): value is number =>
-    typeof value === "number" && Number.isFinite(value);
-
-  if (hasFiniteNumber(token0Usd) && hasFiniteNumber(token1Usd)) {
+  if (isFiniteNumber(token0Usd) && isFiniteNumber(token1Usd)) {
     return position.currentAmount0 * token0Usd + position.currentAmount1 * token1Usd;
   }
 
-  if (hasFiniteNumber(token0Usd)) {
+  if (isFiniteNumber(token0Usd)) {
     const token0Balance = position.currentAmount0 * token0Usd;
     if (position.currentAmount1 === 0) return token0Balance;
     if (Number.isFinite(currentPrice) && currentPrice > 0) {
@@ -925,7 +926,7 @@ function currentBalanceUsd(position: DashboardPosition): number | null {
     }
   }
 
-  if (hasFiniteNumber(token1Usd)) {
+  if (isFiniteNumber(token1Usd)) {
     const token1Balance = position.currentAmount1 * token1Usd;
     if (position.currentAmount0 === 0) return token1Balance;
     if (Number.isFinite(currentPrice) && currentPrice > 0) {

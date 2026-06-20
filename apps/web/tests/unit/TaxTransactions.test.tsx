@@ -106,7 +106,7 @@ describe("tax transactions rendering", () => {
 
     const html = renderTaxScreen(queryClient);
 
-    expect(html).toContain("Transaction Labeling Ledger");
+    expect(html).toContain("Synced Transactions");
     expect(html).toContain("Add manual transaction");
     expect(html).toContain("Sync blockchain data");
     expect(html).toContain("No tax transactions synced");

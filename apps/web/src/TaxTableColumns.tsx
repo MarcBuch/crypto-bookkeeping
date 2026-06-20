@@ -24,10 +24,22 @@ export interface TableMeta {
   isUpdating?: boolean;
 }
 
+function parseSortableNumber(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === "string") {
+    return parseFloat(value) || 0;
+  }
+
+  return 0;
+}
+
 // Custom numeric sort for string-encoded numbers (e.g. "100.00" > "9.00")
 const numericStringSortingFn: SortingFn<TaxTableRow> = (rowA, rowB, columnId) => {
-  const a = parseFloat(String(rowA.getValue(columnId) ?? "0")) || 0;
-  const b = parseFloat(String(rowB.getValue(columnId) ?? "0")) || 0;
+  const a = parseSortableNumber(rowA.getValue(columnId));
+  const b = parseSortableNumber(rowB.getValue(columnId));
   return a - b;
 };
 
@@ -35,9 +47,17 @@ const numericStringSortingFn: SortingFn<TaxTableRow> = (rowA, rowB, columnId) =>
 // and legacy Unix epoch-second strings ("1760000000").
 function parseTimestamp(v: unknown): number {
   if (v == null || v === "") return Number.NEGATIVE_INFINITY;
-  const s = String(v);
-  const n = Number(s);
-  const ms = Number.isFinite(n) ? n * 1000 : new Date(s).getTime();
+
+  if (typeof v === "number") {
+    return Number.isFinite(v) ? v * 1000 : Number.NEGATIVE_INFINITY;
+  }
+
+  if (typeof v !== "string") {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const n = Number(v);
+  const ms = Number.isFinite(n) ? n * 1000 : new Date(v).getTime();
   return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
 }
 

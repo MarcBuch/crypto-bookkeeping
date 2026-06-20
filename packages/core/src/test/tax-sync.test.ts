@@ -33,6 +33,12 @@ type RequestRecord = {
   params: URLSearchParams;
 };
 
+function getRequestUrl(url: string | URL | Request): string {
+  if (typeof url === "string") return url;
+  if (url instanceof URL) return url.href;
+  return url.url;
+}
+
 const STUB_CONTRACTS = {
   factory: "0x0000000000000000000000000000000000000001" as `0x${string}`,
   positionManager: "0x0000000000000000000000000000000000000002" as `0x${string}`,
@@ -824,7 +830,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   it("null time_stamp → EUR fields stay null", async () => {
     let cgCallCount = 0;
     globalThis.fetch = (async (url: string | URL | Request) => {
-      if (String(url).includes("coingecko.com")) {
+      if (getRequestUrl(url).includes("coingecko.com")) {
         cgCallCount++;
       }
       return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
@@ -878,7 +884,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   it("null incoming_asset AND null outgoing_asset → EUR fields stay null", async () => {
     let cgCallCount = 0;
     globalThis.fetch = (async (url: string | URL | Request) => {
-      if (String(url).includes("coingecko.com")) {
+      if (getRequestUrl(url).includes("coingecko.com")) {
         cgCallCount++;
       }
       return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
@@ -926,7 +932,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   it("incoming-only transfer (received HYPE) → proceeds_eur set, cost_eur null, gain_eur = proceeds", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
         return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), {
           status: 200,
@@ -972,7 +978,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   it("outgoing-only transfer (sent HYPE) → cost_eur set, proceeds_eur null, gain_eur = -cost", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("hyperliquid")) {
         return new Response(JSON.stringify({ market_data: { current_price: { eur: 20.0 } } }), {
           status: 200,
@@ -1019,7 +1025,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
   it("asset without coingeckoId mapping → EUR fields stay null", async () => {
     let cgCallCount = 0;
     globalThis.fetch = (async (url: string | URL | Request) => {
-      if (String(url).includes("coingecko.com")) {
+      if (getRequestUrl(url).includes("coingecko.com")) {
         cgCallCount++;
       }
       return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
@@ -1069,7 +1075,7 @@ describe("syncTaxTransactions — EUR enrichment (transaction shape)", () => {
 
   it("USDC token transfer out → correct decimal handling", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("usd-coin")) {
         return new Response(JSON.stringify({ market_data: { current_price: { eur: 0.92 } } }), {
           status: 200,
@@ -1129,7 +1135,7 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
 
   it("CoinGecko unavailable → sync completes, EUR fields all null", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         throw new Error("network down");
       }
@@ -1173,7 +1179,7 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
 
   it("API failure for asset A, success for asset B → partial enrichment", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         if (urlStr.includes("resilience-hype")) throw new Error("network down");
         if (urlStr.includes("resilience-usdc")) {
@@ -1244,7 +1250,7 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
   it("re-sync preserves existing cost_eur (upsert does NOT overwrite EUR values)", async () => {
     // First sync: CoinGecko returns price 10.0
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         return {
           ok: true,
@@ -1287,7 +1293,7 @@ describe("syncTaxTransactions — EUR enrichment (resilience and value preservat
 
     // Second sync: CoinGecko would return 99.0 but upsert should NOT overwrite
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         return {
           ok: true,
@@ -1697,7 +1703,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
   // Test 4 — CoinGecko returns HTTP 500 → row is skipped, EUR fields remain null
   it("CoinGecko HTTP 500 → row is skipped, EUR fields remain null", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com")) {
         return new Response("{}", { status: 500 });
       }
@@ -1728,7 +1734,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
   // Test 5 — successful enrichment: incoming-only (BACKFILL_TOK transfer)
   it("incoming-only row is enriched: proceeds_eur = qty * price, cost_eur null, gain_eur = proceeds_eur", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
         return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
           status: 200,
@@ -1763,7 +1769,7 @@ describe("enrichTaxTransactionsEurValues — backfill service", () => {
   // Test 6 — partial failure: one row succeeds, one fails CoinGecko lookup
   it("partial failure: enriched === 1, skipped === 1 when one CoinGecko lookup fails", async () => {
     globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr = String(url);
+      const urlStr = getRequestUrl(url);
       if (urlStr.includes("coingecko.com") && urlStr.includes("backfill-token")) {
         return new Response(JSON.stringify({ market_data: { current_price: { eur: 10.0 } } }), {
           status: 200,

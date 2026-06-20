@@ -32,11 +32,17 @@ type FetchCall = {
   body: string;
 };
 
+function getRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 function mockFetchJson(data: unknown, responseInit: ResponseInit = {}): FetchCall[] {
   const calls: FetchCall[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, requestInit?: RequestInit) => {
     const bodyStr = requestInit?.body as string;
-    calls.push({ url: String(input), body: bodyStr });
+    calls.push({ url: getRequestUrl(input), body: bodyStr });
     const status = responseInit.status ?? 200;
     // For the secondary userFillsByTime call (triggered when position is absent),
     // return an empty array so resolveAbsentPosition finds no fills and falls

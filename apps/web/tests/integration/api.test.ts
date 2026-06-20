@@ -30,11 +30,17 @@ async function captureError<T>(promise: Promise<T>): Promise<unknown> {
   throw new Error("Expected promise to reject");
 }
 
+function getRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 function mockFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): void {
   globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = input.toString();
+    const url = getRequestUrl(input);
     return Promise.resolve(handler(url, init));
   }) as unknown as typeof fetch;
 }

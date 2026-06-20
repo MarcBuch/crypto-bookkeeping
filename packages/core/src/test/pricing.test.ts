@@ -9,10 +9,16 @@ type FetchCall = {
   url: string;
 };
 
+function getRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 function mockFetchJson(data: unknown, init: ResponseInit = {}): FetchCall[] {
   const calls: FetchCall[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push({ url: String(input) });
+    calls.push({ url: getRequestUrl(input) });
     const status = init.status ?? 200;
     return {
       ok: status >= 200 && status < 300,
@@ -25,7 +31,7 @@ function mockFetchJson(data: unknown, init: ResponseInit = {}): FetchCall[] {
 function mockFetchReject(error = new Error("network down")): FetchCall[] {
   const calls: FetchCall[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push({ url: String(input) });
+    calls.push({ url: getRequestUrl(input) });
     throw error;
   }) as unknown as typeof fetch;
   return calls;
@@ -158,7 +164,7 @@ describe("getUsdPrices", () => {
     let price = 10;
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ positive_cache_token: { usd: price } }),
@@ -192,7 +198,7 @@ describe("getUsdPrices", () => {
     const calls = mockFetchJson(data);
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => data,
@@ -298,7 +304,7 @@ describe("getHistoricalPrice — EUR — unknown assets and invalid inputs", () 
   it("resolves case-insensitively: config has HYPE_CASE_TEST, call uses hype_case_test", async () => {
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ market_data: { current_price: { eur: 42.5 } } }),
@@ -498,7 +504,7 @@ describe("getHistoricalPrice — EUR — caching", () => {
     let price = 100;
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ market_data: { current_price: { eur: price } } }),
@@ -531,7 +537,7 @@ describe("getHistoricalPrice — EUR — caching", () => {
     let responseData: unknown = { error: "not found" };
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: responseOk,
         json: async () => responseData,
@@ -851,7 +857,7 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
     const calls: FetchCall[] = [];
     let responseData: unknown = { market_data: { current_price: { usd: 50 } } };
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => responseData,
@@ -897,7 +903,7 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
     let responseData: unknown = { error: "not found" };
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: responseOk,
         json: async () => responseData,
@@ -926,7 +932,7 @@ describe("getHistoricalPrice — USD — cache behaviour", () => {
   it("EUR/USD cache isolation — EUR and USD use different cache keys for same symbol+date", async () => {
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ market_data: { current_price: { eur: 35, usd: 42 } } }),
@@ -963,7 +969,7 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
   it("EUR and USD for same coin+date are stored under different cache keys — EUR fetch does NOT warm USD cache", async () => {
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ market_data: { current_price: { eur: 35, usd: 42 } } }),
@@ -987,7 +993,7 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
   it("after fetching EUR, calling getHistoricalPrice for USD for same coin+date triggers a NEW fetch", async () => {
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ market_data: { current_price: { eur: 50, usd: 60 } } }),
@@ -1011,7 +1017,7 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
   it("after fetching USD, calling getHistoricalPrice for EUR for same coin+date triggers a NEW fetch", async () => {
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({ market_data: { current_price: { eur: 25, usd: 30 } } }),
@@ -1035,7 +1041,7 @@ describe("getHistoricalPrice — currency key isolation (Cluster A)", () => {
   it("EUR price is read from current_price.eur, USD from current_price.usd — they can differ and must not cross-contaminate", async () => {
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls.push({ url: String(input) });
+      calls.push({ url: getRequestUrl(input) });
       return {
         ok: true,
         json: async () => ({

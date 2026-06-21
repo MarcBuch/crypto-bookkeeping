@@ -46,6 +46,10 @@ let mockEnrichTaxTransactionsEurValues: (...args: unknown[]) => unknown = () => 
   skipped: 0,
 });
 
+function expectJson(response: { json(): unknown }) {
+  return expect(response.json());
+}
+
 await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
@@ -148,7 +152,7 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transactions: [fakeTransaction] });
+    expectJson(res).toEqual({ transactions: [fakeTransaction] });
     expect(lastListArgs).toEqual([50, 0, undefined]);
     expect(lastSyncArgs).toEqual([]);
   });
@@ -259,7 +263,7 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transactions: [] });
+    expectJson(res).toEqual({ transactions: [] });
   });
 
   it("passes malformed transaction rows through without crashing", async () => {
@@ -272,7 +276,7 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transactions: malformedRows });
+    expectJson(res).toEqual({ transactions: malformedRows });
   });
 
   it("returns 404 for unknown nested transaction routes", async () => {
@@ -290,7 +294,7 @@ describe("POST /tax/transactions/sync", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions/sync" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ sync: summary });
+    expectJson(res).toEqual({ sync: summary });
     expect(lastSyncArgs).toEqual([fakeConfig]);
   });
 
@@ -302,7 +306,7 @@ describe("POST /tax/transactions/sync", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions/sync" });
 
     expect(res.statusCode).toBe(503);
-    expect(res.json()).toEqual({ error: "Failed to sync tax transactions" });
+    expectJson(res).toEqual({ error: "Failed to sync tax transactions" });
     expect(allSyncArgs).toEqual([[fakeConfig]]);
     expect(allListArgs).toEqual([]);
     expect(lastListArgs).toEqual([]);
@@ -316,7 +320,7 @@ describe("POST /tax/transactions/sync", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions/sync" });
 
     expect(res.statusCode).toBe(503);
-    expect(res.json()).toEqual({ error: "Failed to sync tax transactions" });
+    expectJson(res).toEqual({ error: "Failed to sync tax transactions" });
     expect(allSyncArgs).toEqual([[fakeConfig]]);
     expect(allListArgs).toEqual([]);
     expect(lastListArgs).toEqual([]);
@@ -335,7 +339,7 @@ describe("POST /tax/transactions/sync", () => {
     const getRes = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(getRes.statusCode).toBe(200);
-    expect(getRes.json()).toEqual({ transactions: [fakeTransaction] });
+    expectJson(getRes).toEqual({ transactions: [fakeTransaction] });
     expect(allSyncArgs).toEqual([[fakeConfig]]);
     expect(allListArgs).toEqual([[50, 0, undefined]]);
   });
@@ -344,7 +348,7 @@ describe("POST /tax/transactions/sync", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions/sync" });
 
     expect(res.statusCode).toBe(404);
-    expect(res.json()).toEqual({
+    expectJson(res).toEqual({
       error: "Route not found",
       path: "/tax/transactions/sync",
     });
@@ -366,8 +370,8 @@ describe("POST /tax/transactions/sync", () => {
 
     expect(firstRes.statusCode).toBe(200);
     expect(secondRes.statusCode).toBe(200);
-    expect(firstRes.json()).toEqual({ sync: firstSummary });
-    expect(secondRes.json()).toEqual({ sync: secondSummary });
+    expectJson(firstRes).toEqual({ sync: firstSummary });
+    expectJson(secondRes).toEqual({ sync: secondSummary });
     expect(syncCount).toBe(2);
     expect(allSyncArgs).toEqual([[fakeConfig], [fakeConfig]]);
     expect(allListArgs).toEqual([]);
@@ -388,7 +392,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "request body must be an object" });
+    expectJson(res).toEqual({ error: "request body must be an object" });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -415,7 +419,7 @@ describe("POST /tax/transactions", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions", payload });
 
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expectJson(res).toEqual({ transaction: createdTransaction });
     expect(lastCreateArgs).toEqual([payload]);
     expect(allListArgs).toEqual([]);
     expect(allSyncArgs).toEqual([]);
@@ -437,7 +441,7 @@ describe("POST /tax/transactions", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions", payload });
 
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expectJson(res).toEqual({ transaction: createdTransaction });
     expect(allCreateArgs).toEqual([[payload]]);
   });
 
@@ -449,7 +453,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: `unknown field: ${field}` });
+    expectJson(res).toEqual({ error: `unknown field: ${field}` });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -461,7 +465,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "unknown field: category" });
+    expectJson(res).toEqual({ error: "unknown field: category" });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -479,7 +483,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
+    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -494,7 +498,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expectJson(res).toEqual({ transaction: createdTransaction });
     expect(allCreateArgs).toEqual([[{ label: "Approval" }]]);
   });
 
@@ -510,7 +514,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "comment must be a string or null" });
+    expectJson(res).toEqual({ error: "comment must be a string or null" });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -522,7 +526,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "comment must be at most 1000 characters" });
+    expectJson(res).toEqual({ error: "comment must be at most 1000 characters" });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -535,7 +539,7 @@ describe("POST /tax/transactions", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions", payload });
 
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toEqual({ transaction: createdTransaction });
+    expectJson(res).toEqual({ transaction: createdTransaction });
     expect(allCreateArgs).toEqual([[payload]]);
   });
 
@@ -551,7 +555,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error });
+    expectJson(res).toEqual({ error });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -568,7 +572,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error });
+    expectJson(res).toEqual({ error });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -585,7 +589,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error });
+    expectJson(res).toEqual({ error });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -606,9 +610,9 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(getRes.statusCode).toBe(200);
-    expect(getRes.json()).toEqual({ transactions: [fakeTransaction] });
+    expectJson(getRes).toEqual({ transactions: [fakeTransaction] });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({
+    expectJson(patchRes).toEqual({
       transaction: { ...fakeTransaction, comment: "Updated comment" },
     });
     expect(allCreateArgs).toEqual([]);
@@ -628,7 +632,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(500);
-    expect(res.json()).toEqual({ error: "Failed to create tax transaction" });
+    expectJson(res).toEqual({ error: "Failed to create tax transaction" });
     expect(allCreateArgs).toEqual([[{ comment: "Valid manual entry" }]]);
   });
 
@@ -644,7 +648,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({
+    expectJson(res).toEqual({
       error: "Manual tax transaction id must contain at least one safe character",
     });
     expect(allCreateArgs).toEqual([[{ id: " -- !! ", comment: "Invalid id" }]]);
@@ -662,7 +666,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(409);
-    expect(res.json()).toEqual({ error: "Manual tax transaction already exists: manual:deposit" });
+    expectJson(res).toEqual({ error: "Manual tax transaction already exists: manual:deposit" });
     expect(allCreateArgs).toEqual([[{ id: "deposit", comment: "Duplicate id" }]]);
   });
 });
@@ -681,7 +685,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "request body must be an object" });
+    expectJson(res).toEqual({ error: "request body must be an object" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -700,7 +704,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(lastUpdateArgs).toEqual([
       "tx-1:external#fee",
       { label: "Transfer", comment: "Manual classification" },
@@ -720,7 +724,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(lastUpdateArgs).toEqual([id, { label: "Trade" }]);
   });
 
@@ -735,7 +739,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Transfer" }]]);
   });
 
@@ -750,7 +754,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { comment: "Only comment" }]]);
   });
 
@@ -779,7 +783,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(lastUpdateArgs).toEqual([
       "manual:editable",
       {
@@ -804,7 +808,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({
+    expectJson(res).toEqual({
       error: "Only manual tax transactions can update ledger properties",
     });
     expect(allUpdateArgs).toEqual([["tx-1:external", { incoming_quantity: "2" }]]);
@@ -820,7 +824,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(404);
-    expect(res.json()).toEqual({ error: "Tax transaction not found", id: "missing:id" });
+    expectJson(res).toEqual({ error: "Tax transaction not found", id: "missing:id" });
     expect(lastUpdateArgs).toEqual(["missing:id", { comment: "Does not exist" }]);
   });
 
@@ -834,7 +838,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(404);
-    expect(res.json()).toEqual({ error: "Tax transaction not found", id: "missing/slash:id" });
+    expectJson(res).toEqual({ error: "Tax transaction not found", id: "missing/slash:id" });
     expect(lastUpdateArgs).toEqual(["missing/slash:id", { comment: "Does not exist" }]);
   });
 
@@ -846,7 +850,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
+    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -863,7 +867,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
+    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -878,7 +882,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Approval" }]]);
   });
 
@@ -894,7 +898,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "comment must be a string or null" });
+    expectJson(res).toEqual({ error: "comment must be a string or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -909,7 +913,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(lastUpdateArgs).toEqual(["tx-1:external", { label: null, comment: null }]);
   });
 
@@ -921,7 +925,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "unknown field: category" });
+    expectJson(res).toEqual({ error: "unknown field: category" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -933,7 +937,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "request body must include at least one editable field" });
+    expectJson(res).toEqual({ error: "request body must include at least one editable field" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -945,7 +949,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "holding_duration_days must be non-negative or null" });
+    expectJson(res).toEqual({ error: "holding_duration_days must be non-negative or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -957,7 +961,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "comment must be at most 1000 characters" });
+    expectJson(res).toEqual({ error: "comment must be at most 1000 characters" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -973,7 +977,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ transaction: updatedTransaction });
+    expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { comment }]]);
   });
 
@@ -989,7 +993,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(500);
-    expect(res.json()).toEqual({ error: "Failed to update tax transaction" });
+    expectJson(res).toEqual({ error: "Failed to update tax transaction" });
     expect(allUpdateArgs).toEqual([["tx-1:external", { comment: "Valid comment" }]]);
   });
 });
@@ -1001,7 +1005,7 @@ describe("POST /tax/transactions/enrich", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ enriched: 0, skipped: 0 });
+    expectJson(res).toEqual({ enriched: 0, skipped: 0 });
   });
 
   it("response body has exactly enriched (number) and skipped (number) fields", async () => {
@@ -1022,7 +1026,7 @@ describe("POST /tax/transactions/enrich", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ enriched: 5, skipped: 2 });
+    expectJson(res).toEqual({ enriched: 5, skipped: 2 });
   });
 
   it("returns skipped > 0 when service cannot fetch prices (simulated fetch failure)", async () => {
@@ -1064,7 +1068,7 @@ describe("POST /tax/transactions/enrich", () => {
 
     const getRes = await server.inject({ method: "GET", url: "/tax/transactions" });
     expect(getRes.statusCode).toBe(200);
-    expect(getRes.json()).toEqual({ transactions: [fakeTransaction] });
+    expectJson(getRes).toEqual({ transactions: [fakeTransaction] });
   });
 
   it("returns a controlled 503 error response when enrich throws", async () => {
@@ -1075,6 +1079,6 @@ describe("POST /tax/transactions/enrich", () => {
     const res = await server.inject({ method: "POST", url: "/tax/transactions/enrich" });
 
     expect(res.statusCode).toBe(503);
-    expect(res.json()).toEqual({ error: "Failed to enrich tax transactions" });
+    expectJson(res).toEqual({ error: "Failed to enrich tax transactions" });
   });
 });

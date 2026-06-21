@@ -71,6 +71,10 @@ let mockSyncSinglePosition: (config: unknown, tokenId: string) => Promise<unknow
   syncedAt: new Date().toISOString(),
 });
 
+function expectJson(response: { json(): unknown }) {
+  return expect(response.json());
+}
+
 // --- Mock @lp-tracker/core BEFORE importing server ---
 await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
@@ -272,7 +276,7 @@ describe("GET /positions/sync/status", () => {
   it("idle shape: all fields null, status = 'idle' (before any sync runs)", async () => {
     const res = await server.inject({ method: "GET", url: "/positions/sync/status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({
+    expectJson(res).toEqual({
       status: "idle",
       startedAt: null,
       finishedAt: null,
@@ -531,7 +535,7 @@ describe("GET /positions/:tokenId/sync/status", () => {
   it("returns 200 with idle status for position that has never synced", async () => {
     const res = await server.inject({ method: "GET", url: "/positions/999/sync/status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({
+    expectJson(res).toEqual({
       status: "idle",
       startedAt: null,
       finishedAt: null,
@@ -598,7 +602,7 @@ describe("GET /positions/:tokenId/sync/status — status contract and isolation"
   it("never-synced tokenId returns idle (not 404)", async () => {
     const res = await server.inject({ method: "GET", url: "/positions/777/sync/status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({
+    expectJson(res).toEqual({
       status: "idle",
       startedAt: null,
       finishedAt: null,
@@ -631,7 +635,7 @@ describe("GET /positions/:tokenId/sync/status — status contract and isolation"
     // Check tokenId "22" (never synced) — should return idle, not "running"
     const status22 = await server.inject({ method: "GET", url: "/positions/22/sync/status" });
     expect(status22.statusCode).toBe(200);
-    expect(status22.json()).toEqual({
+    expectJson(status22).toEqual({
       status: "idle",
       startedAt: null,
       finishedAt: null,
@@ -669,7 +673,7 @@ describe("GET /positions/:tokenId/sync/status — status contract and isolation"
 
   it("failed state is surfaced", async () => {
     // Set up tokenId "44" to fail
-    let rejectFn: ((e: unknown) => void) | null = null;
+    let rejectFn!: (e: unknown) => void;
     mockSyncSinglePosition = () =>
       new Promise<never>((_resolve, reject) => {
         rejectFn = reject;
@@ -679,9 +683,7 @@ describe("GET /positions/:tokenId/sync/status — status contract and isolation"
     await server.inject({ method: "POST", url: "/positions/44/sync" });
 
     // Reject the promise to simulate failure
-    if (rejectFn) {
-      rejectFn(new Error("Simulated sync failure"));
-    }
+    rejectFn(new Error("Simulated sync failure"));
     await new Promise((r) => setTimeout(r, 20));
 
     // Check status
@@ -774,7 +776,7 @@ describe("POST /positions/:tokenId/sync — concurrency and state isolation", ()
 
   it("failed state for one tokenId doesn't block another → 202", async () => {
     // Pre-configure tokenId "777" to have a "failed" status by triggering a failure
-    let rejectFn: ((e: unknown) => void) | null = null;
+    let rejectFn!: (e: unknown) => void;
     mockSyncSinglePosition = () =>
       new Promise<never>((_resolve, reject) => {
         rejectFn = reject;
@@ -785,9 +787,7 @@ describe("POST /positions/:tokenId/sync — concurrency and state isolation", ()
     expect(firstReq.statusCode).toBe(202);
 
     // Now reject the promise
-    if (rejectFn) {
-      rejectFn(new Error("Simulated failure"));
-    }
+    rejectFn(new Error("Simulated failure"));
     await new Promise((r) => setTimeout(r, 20));
 
     // Verify tokenId "777" is in failed state

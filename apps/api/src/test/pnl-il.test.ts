@@ -41,6 +41,10 @@ class MockValidationError extends Error {
   }
 }
 
+function expectJson(response: { json(): unknown }) {
+  return expect(response.json());
+}
+
 // --- Minimal fake PnLView object ---
 const fakePnLView = {
   tokenId: "123",
@@ -311,7 +315,7 @@ describe("GET /il", () => {
 
     const res = await server.inject({ method: "GET", url: "/il" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ positions: [] });
+    expectJson(res).toEqual({ positions: [] });
   });
 });
 

@@ -1,7 +1,9 @@
-const commands = [
+import process from "node:process";
+
+const commands: Array<{ name: string; cmd: string[] }> = [
   { name: "api", cmd: ["bun", "run", "api:dev"] },
   { name: "web", cmd: ["bun", "run", "web"] },
-] as const;
+];
 
 const processes = commands.map(({ name, cmd }) => {
   const child = Bun.spawn(cmd, {

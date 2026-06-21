@@ -269,7 +269,6 @@ describe("GET /positions/:tokenId/hedge", () => {
 
     it("returns 502 when getHedgeView throws non-Error object", async () => {
       mockGetHedgeView = async () => {
-        // eslint-disable-next-line no-throw-literal
         throw "string error";
       };
 
@@ -282,7 +281,6 @@ describe("GET /positions/:tokenId/hedge", () => {
 
     it("returns 502 when getHedgeView throws null", async () => {
       mockGetHedgeView = async () => {
-        // eslint-disable-next-line no-throw-literal
         throw null;
       };
 
@@ -295,7 +293,6 @@ describe("GET /positions/:tokenId/hedge", () => {
 
     it("returns 502 when getHedgeView throws object without message", async () => {
       mockGetHedgeView = async () => {
-        // eslint-disable-next-line no-throw-literal
         throw { code: "ECONNREFUSED" };
       };
 
@@ -859,7 +856,6 @@ describe("GET /positions/:tokenId/hedge/events", () => {
 
     it("returns 500 when getHedgeEvents throws non-Error object", async () => {
       mockGetHedgeEvents = async () => {
-        // eslint-disable-next-line no-throw-literal
         throw "string error";
       };
 

@@ -15,11 +15,13 @@
     "web": "bun run --filter @lp-tracker/web dev",
     "web:build": "bun run --filter @lp-tracker/web build",
     "web:preview": "bun run --filter @lp-tracker/web preview",
-    "lint": "oxlint apps packages scripts",
-    "lint:fix": "oxlint apps packages scripts --fix",
+    "lint": "oxlint apps packages scripts --report-unused-disable-directives --deny-warnings",
+    "lint:fix": "oxlint apps packages scripts --fix --report-unused-disable-directives --deny-warnings",
     "format": "oxfmt apps packages scripts README.md package.json",
     "format:check": "oxfmt --check apps packages scripts README.md package.json",
-    "check": "bun run lint && bun run format && bun run --filter @lp-tracker/core check && bun run --filter @lp-tracker/web check"
+    "scripts:check": "bun run tsc -p tsconfig.scripts.json --noEmit",
+    "typecheck": "bun run scripts:check && bun run --filter @lp-tracker/core check && bun run --filter @lp-tracker/api check && bun run --filter @lp-tracker/cli check && bun run --filter @lp-tracker/web check",
+    "check": "bun run lint && bun run format:check && bun run typecheck"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -250,7 +250,7 @@ export function Dashboard({
                 <th className="px-5 py-3">
                   <FeesHeaderTooltip />
                 </th>
-                <th className="px-5 py-3" aria-label="Actions"></th>
+                <th className="px-5 py-3" aria-label="Actions" />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">

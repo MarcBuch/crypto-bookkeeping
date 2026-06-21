@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
+    "check": "bun run tsc --noEmit",
     "positions": "bun run src/index.ts positions",
     "snapshot": "bun run src/index.ts snapshot",
     "il": "bun run src/index.ts il",

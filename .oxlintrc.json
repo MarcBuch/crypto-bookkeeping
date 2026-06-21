@@ -7,7 +7,17 @@
     "correctness": "error",
     "suspicious": "warn"
   },
-  "plugins": ["eslint", "typescript", "oxc", "unicorn", "import", "promise", "node"],
+  "plugins": [
+    "eslint",
+    "typescript",
+    "oxc",
+    "unicorn",
+    "import",
+    "promise",
+    "node",
+    "react",
+    "jsx-a11y"
+  ],
   "env": {
     "builtin": true,
     "node": true
@@ -19,6 +29,15 @@
     "react": {
       "version": "19.2.6"
     }
+  },
+  "rules": {
+    "import/newline-after-import": "warn",
+    "react/jsx-boolean-value": "warn",
+    "react/self-closing-comp": "warn",
+    "typescript/consistent-type-exports": "warn",
+    "typescript/no-import-type-side-effects": "warn",
+    "typescript/prefer-as-const": "warn",
+    "typescript/prefer-find": "warn"
   },
   "ignorePatterns": [
     ".opencode/**",

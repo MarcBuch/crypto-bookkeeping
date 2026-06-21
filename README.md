@@ -354,11 +354,14 @@ Snapshots and cached entry data are stored in `data/lp-tracker.db` (SQLite, giti
 ## Testing
 
 ```bash
-# Lint, format check, and TypeScript checks
+# Duplicate-code, lint, format check, and TypeScript checks
 bun run check
 
 # TypeScript checks across workspaces
 bun run typecheck
+
+# Duplicate-code check only (includes tests)
+bun run jscpd
 
 # Fast lint only
 bun run lint

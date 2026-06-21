@@ -19,12 +19,14 @@
     "lint:fix": "oxlint apps packages scripts --fix --report-unused-disable-directives --deny-warnings",
     "format": "oxfmt apps packages scripts README.md package.json",
     "format:check": "oxfmt --check apps packages scripts README.md package.json",
+    "jscpd": "jscpd apps packages scripts --format typescript,tsx --threshold 13 --no-tips",
     "scripts:check": "bun run tsc -p tsconfig.scripts.json --noEmit",
     "typecheck": "bun run scripts:check && bun run --filter @lp-tracker/core check && bun run --filter @lp-tracker/api check && bun run --filter @lp-tracker/cli check && bun run --filter @lp-tracker/web check",
-    "check": "bun run lint && bun run format:check && bun run typecheck"
+    "check": "bun run jscpd && bun run lint && bun run format:check && bun run typecheck"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "jscpd": "^5.0.11",
     "oxfmt": "^0.52.0",
     "oxlint": "^1.67.0",
     "oxlint-tsgolint": "^0.23.0",

@@ -6,6 +6,7 @@
       "name": "lp-tracker-monorepo",
       "devDependencies": {
         "@types/bun": "latest",
+        "jscpd": "^5.0.11",
         "oxfmt": "^0.52.0",
         "oxlint": "^1.67.0",
         "oxlint-tsgolint": "^0.23.0",
@@ -350,6 +351,18 @@
 
     "cookie-es": ["cookie-es@3.1.1", "", {}, "sha512-UaXxwISYJPTr9hwQxMFYZ7kNhSXboMXP+Z3TRX6f1/NyaGPfuNUZOWP1pUEb75B2HjfklIYLVRfWiFZJyC6Npg=="],
 
+    "cpd-darwin-arm64": ["cpd-darwin-arm64@5.0.11", "", { "os": "darwin", "cpu": "arm64" }, "sha512-3QvH+4Dv7A7esVFM2tsRVWN3kn9EDu8dMYog6gYAVsCtxEf4xyxAwS/ef6LjC7/dh4+ATADFbg3H09A2fD//Qw=="],
+
+    "cpd-darwin-x64": ["cpd-darwin-x64@5.0.11", "", { "os": "darwin", "cpu": "x64" }, "sha512-OvgM2ps0OFR5jUzx7+FK9URdJGxUzzM5KKk2F1V3vf1LooGDKwkivfIDyKsqEwp37zcbyUo7COvBpJXOT0dZmQ=="],
+
+    "cpd-linux-arm64-gnu": ["cpd-linux-arm64-gnu@5.0.11", "", { "os": "linux", "cpu": "arm64" }, "sha512-pXMINibAeruglni8ZajlXEefZHDs7QFSG+vPtkBDu7uiIMpNU8aoktgO2vP+PbIRFD0vHkqTMb64kDtIOqQcwQ=="],
+
+    "cpd-linux-x64-gnu": ["cpd-linux-x64-gnu@5.0.11", "", { "os": "linux", "cpu": "x64" }, "sha512-rQ7DuF0lH1HLzjGxlE0aEP2ycfhXgZH/CLSeS7FXNJ38lRVp+iXkrlcrrY6mC4WW/NgbL+DkF7/0lv3tFvGmvg=="],
+
+    "cpd-linux-x64-musl": ["cpd-linux-x64-musl@5.0.11", "", { "os": "linux", "cpu": "x64" }, "sha512-Yh+7Go5+fA++I5ssAZg7gUkDCT5CxnzCPvrspbwDrfnwaY6nNM5g1C6Vs0+GJhsspuAKwydJl4nf7jkxzMwRQw=="],
+
+    "cpd-windows-x64-msvc": ["cpd-windows-x64-msvc@5.0.11", "", { "os": "win32", "cpu": "x64" }, "sha512-uV6w85qdfE0WJsrLcGw9A4Kv9ovSnlXZCybMK0esvuiJ7clgaZmDiDPozt5PvrOOShkK/NxzTZSORBSdVnquHA=="],
+
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
     "dequal": ["dequal@2.0.3", "", {}, "sha512-0je+qPKHEMohvfRTCEo3CrPG6cAzAYgmzKyxRiYSSDkS6eGJdyVJm7WaYA5ECaAD9wLB2T4EEeymA5aFVcYXCA=="],
@@ -395,6 +408,8 @@
     "isows": ["isows@1.0.7", "", { "peerDependencies": { "ws": "*" } }, "sha512-I1fSfDCZL5P0v33sVqeTDSpcstAg/N+wF5HS033mogOVIp4B+oHC7oOCsA3axAbBSGTJ8QubbNmnIRN/h8U7hg=="],
 
     "jiti": ["jiti@2.7.0", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
+
+    "jscpd": ["jscpd@5.0.11", "", { "optionalDependencies": { "cpd-darwin-arm64": "5.0.11", "cpd-darwin-x64": "5.0.11", "cpd-linux-arm64-gnu": "5.0.11", "cpd-linux-x64-gnu": "5.0.11", "cpd-linux-x64-musl": "5.0.11", "cpd-windows-x64-msvc": "5.0.11" }, "bin": { "jscpd": "run-jscpd.js" } }, "sha512-NfLrFJHRM6rIf3oVcdZ4sfhMVop1qxi5r8aC99lpj55YC8hiWaN4VmzU2wcXTwoAo+NS4npXPs9EVEQJ6jyRlg=="],
 
     "json-schema-ref-resolver": ["json-schema-ref-resolver@3.0.0", "", { "dependencies": { "dequal": "^2.0.3" } }, "sha512-hOrZIVL5jyYFjzk7+y7n5JDzGlU8rfWDuYyHwGa2WA8/pcmMHezp2xsVwxrebD/Q9t8Nc5DboieySDpCp4WG4A=="],
 

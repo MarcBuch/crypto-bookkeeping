@@ -1,8 +1,6 @@
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 
-import type { HedgeView } from "../api";
-
-import { getHedge } from "../api";
+import { getHedge, type HedgeView } from "../api";
 
 export function useHedge(tokenId: string | undefined, enabled = true) {
   return useQuery<HedgeView>({

@@ -1,22 +1,21 @@
 /**
  * m2t3 — Adversarial tests: P&L / IL math edge cases
  *
- * Tests pure math functions directly from packages/core/src/math/divergence-loss.ts.
+ * Tests pure math functions directly from packages/core/src/math/divergence-loss.ts
+ * and LP Economics projections from packages/core/src/services/lp-economics.ts.
  * No network calls; no DB access.
  */
 
 import { describe, it, expect } from "bun:test";
 
 import {
-  calculateDivergenceLoss,
   sqrtPriceX96ToPrice,
   getTokenAmounts,
-  calculateFullPnL,
   calculateUnclaimedFees,
   tickToSqrtPrice,
   tickToPrice,
-  type FullPnLResult,
 } from "../math/divergence-loss.js";
+import { calculateLpEconomics, type LpEconomicsResult } from "../services/lp-economics.js";
 
 // Useful constants
 const Q96 = 2n ** 96n;
@@ -34,62 +33,62 @@ const TICK_UPPER = 100;
 // A realistic liquidity value
 const LIQUIDITY = 1_000_000_000n;
 
-type FullPnlNumericField = {
-  [K in keyof FullPnLResult]: FullPnLResult[K] extends number ? K : never;
-}[keyof FullPnLResult];
+type LpEconomicsNumericField = {
+  [K in keyof LpEconomicsResult]: LpEconomicsResult[K] extends number ? K : never;
+}[keyof LpEconomicsResult];
 
 // ───────────────────────────────────────────────────────────────────────────
-// 1. calculateDivergenceLoss — holdValue = 0 → divergenceLoss = 0, not NaN
+// 1. calculateLpEconomics — holdValue = 0 → divergenceLoss = 0, not NaN
 // ───────────────────────────────────────────────────────────────────────────
 
-describe("calculateDivergenceLoss — holdValue = 0 edge case", () => {
+describe("calculateLpEconomics — holdValue = 0 edge case", () => {
   it("returns divergenceLoss = 0 (not NaN/Infinity) when entry amounts produce valueHold = 0", () => {
-    // Force valueHold = 0: set both entry amounts to 0 by using 0 liquidity.
-    // With liquidity = 0, all getTokenAmounts calls return {amount0: 0n, amount1: 0n}.
-    const result = calculateDivergenceLoss(
-      0n, // liquidity = 0 → both entry & current amounts are 0
-      TICK_LOWER,
-      TICK_UPPER,
-      SQRT_PRICE_1_0,
-      SQRT_PRICE_2_0,
-      18,
-      18,
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 0n,
+        entryAmount1: 0n,
+        entryLiquidity: 0n,
+        exitAmount0: 0n,
+        exitAmount1: 0n,
+        exitSqrtPriceX96: SQRT_PRICE_2_0,
+      }),
     );
 
-    expect(result.divergenceLoss).toBe(0);
-    expect(isNaN(result.divergenceLoss)).toBe(false);
-    expect(isFinite(result.divergenceLoss)).toBe(true);
+    expect(result.divergenceLossPercent).toBe(0);
+    expect(isNaN(result.divergenceLossPercent)).toBe(false);
+    expect(isFinite(result.divergenceLossPercent)).toBe(true);
   });
 
-  it("divergenceLossPercent string is parseable even with 0 liquidity", () => {
-    const result = calculateDivergenceLoss(
-      0n,
-      TICK_LOWER,
-      TICK_UPPER,
-      SQRT_PRICE_1_0,
-      SQRT_PRICE_2_0,
-      18,
-      18,
+  it("divergenceLossPercent is finite even with 0 liquidity", () => {
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 0n,
+        entryAmount1: 0n,
+        entryLiquidity: 0n,
+        exitAmount0: 0n,
+        exitAmount1: 0n,
+        exitSqrtPriceX96: SQRT_PRICE_2_0,
+      }),
     );
-    const pct = parseFloat(result.divergenceLossPercent);
-    expect(isNaN(pct)).toBe(false);
-    expect(isFinite(pct)).toBe(true);
+
+    expect(isNaN(result.divergenceLossPercent)).toBe(false);
+    expect(isFinite(result.divergenceLossPercent)).toBe(true);
   });
 
   it("valueHold guard: formula (valueLp - valueHold) / valueHold is not evaluated when valueHold = 0", () => {
-    // Direct code path: when valueHold = 0 the guard returns 0, not a division
-    const result = calculateDivergenceLoss(
-      0n,
-      TICK_LOWER,
-      TICK_UPPER,
-      SQRT_PRICE_1_0,
-      SQRT_PRICE_1_0,
-      18,
-      18,
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 0n,
+        entryAmount1: 0n,
+        entryLiquidity: 0n,
+        exitAmount0: 0n,
+        exitAmount1: 0n,
+      }),
     );
-    expect(result.divergenceLoss).not.toBeNaN();
-    expect(result.divergenceLoss).not.toBe(Infinity);
-    expect(result.divergenceLoss).not.toBe(-Infinity);
+
+    expect(result.divergenceLossPercent).not.toBeNaN();
+    expect(result.divergenceLossPercent).not.toBe(Infinity);
+    expect(result.divergenceLossPercent).not.toBe(-Infinity);
   });
 });
 
@@ -212,10 +211,10 @@ describe("tickToSqrtPrice / tickToPrice — extreme tick values", () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// 5. calculateFullPnL — equal entry/exit prices
+// 5. calculateLpEconomics — equal entry/exit prices
 // ───────────────────────────────────────────────────────────────────────────
 
-describe("calculateFullPnL — equal entry/exit prices", () => {
+describe("calculateLpEconomics — equal entry/exit prices", () => {
   // Strategy: derive entry/exit amounts from actual V3 math at a fixed price
   // so that deriveEntryPriceFromAmounts() recovers the same price.
   // This ensures entryPrice ≈ exitPrice and divergenceLoss = 0.
@@ -247,164 +246,183 @@ describe("calculateFullPnL — equal entry/exit prices", () => {
   const feesCollected1Raw = 500_000_000_000n;
 
   it("divergenceLoss = 0 when entry amounts match exit amounts at same price", () => {
-    const result = calculateFullPnL({
-      entryAmount0Raw,
-      entryAmount1Raw,
-      exitAmount0Raw,
-      exitAmount1Raw,
-      feesCollected0Raw,
-      feesCollected1Raw,
-      exitSqrtPriceX96,
-      tickLower,
-      tickUpper,
-      liquidity: liq,
-      decimals0: dec0,
-      decimals1: dec1,
-    });
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: entryAmount0Raw,
+        entryAmount1: entryAmount1Raw,
+        exitAmount0: exitAmount0Raw,
+        exitAmount1: exitAmount1Raw,
+        totalFees0: feesCollected0Raw,
+        totalFees1: feesCollected1Raw,
+        exitSqrtPriceX96,
+        tickLower,
+        tickUpper,
+        entryLiquidity: liq,
+        decimals0: dec0,
+        decimals1: dec1,
+      }),
+    );
 
-    expect(result.divergenceLoss).toBe(0);
+    expect(result.divergenceLossPercent).toBe(0);
   });
 
-  it("absolutePnl ≈ feesValue when position value is unchanged", () => {
-    const result = calculateFullPnL({
-      entryAmount0Raw,
-      entryAmount1Raw,
-      exitAmount0Raw,
-      exitAmount1Raw,
-      feesCollected0Raw,
-      feesCollected1Raw,
-      exitSqrtPriceX96,
-      tickLower,
-      tickUpper,
-      liquidity: liq,
-      decimals0: dec0,
-      decimals1: dec1,
-    });
+  it("absolutePnl ≈ totalFeesValue when position value is unchanged", () => {
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: entryAmount0Raw,
+        entryAmount1: entryAmount1Raw,
+        exitAmount0: exitAmount0Raw,
+        exitAmount1: exitAmount1Raw,
+        totalFees0: feesCollected0Raw,
+        totalFees1: feesCollected1Raw,
+        exitSqrtPriceX96,
+        tickLower,
+        tickUpper,
+        entryLiquidity: liq,
+        decimals0: dec0,
+        decimals1: dec1,
+      }),
+    );
 
-    // absolutePnl = exitValue + feesValue - entryValue
+    // absolutePnl = exitValue + totalFeesValue - entryValue
     // Since exitValue ≈ entryValue (same amounts, derived price ≈ exit price),
-    // absolutePnl ≈ feesValue (within floating-point tolerance).
-    expect(Math.abs(result.absolutePnl - result.feesValue)).toBeLessThan(1e-9);
+    // absolutePnl ≈ totalFeesValue (within floating-point tolerance).
+    expect(Math.abs(result.absolutePnlInToken1 - result.totalFeesValueInToken1)).toBeLessThan(1e-9);
   });
 
   it("opportunityCost ≈ 0 when exit == HODL (no price change)", () => {
     // When prices and amounts don't change, HODL value = LP value
-    const result = calculateFullPnL({
-      entryAmount0Raw,
-      entryAmount1Raw,
-      exitAmount0Raw,
-      exitAmount1Raw,
-      feesCollected0Raw,
-      feesCollected1Raw,
-      exitSqrtPriceX96,
-      tickLower,
-      tickUpper,
-      liquidity: liq,
-      decimals0: dec0,
-      decimals1: dec1,
-    });
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: entryAmount0Raw,
+        entryAmount1: entryAmount1Raw,
+        exitAmount0: exitAmount0Raw,
+        exitAmount1: exitAmount1Raw,
+        totalFees0: feesCollected0Raw,
+        totalFees1: feesCollected1Raw,
+        exitSqrtPriceX96,
+        tickLower,
+        tickUpper,
+        entryLiquidity: liq,
+        decimals0: dec0,
+        decimals1: dec1,
+      }),
+    );
 
-    expect(Math.abs(result.opportunityCost)).toBeLessThan(1e-9);
+    expect(Math.abs(result.opportunityCostInToken1)).toBeLessThan(1e-9);
   });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// 6. calculateFullPnL — all-zero raw amounts
+// 6. calculateLpEconomics — all-zero raw amounts
 // ───────────────────────────────────────────────────────────────────────────
 
-describe("calculateFullPnL — all-zero raw amounts", () => {
+describe("calculateLpEconomics — all-zero raw amounts", () => {
   it("does not throw with all-zero amounts", () => {
     expect(() =>
-      calculateFullPnL({
-        entryAmount0Raw: 0n,
-        entryAmount1Raw: 0n,
-        exitAmount0Raw: 0n,
-        exitAmount1Raw: 0n,
-        feesCollected0Raw: 0n,
-        feesCollected1Raw: 0n,
-        exitSqrtPriceX96: SQRT_PRICE_1_0,
-        tickLower: TICK_LOWER,
-        tickUpper: TICK_UPPER,
-        liquidity: 1n,
-        decimals0: 18,
-        decimals1: 18,
-      }),
+      calculateLpEconomics(
+        buildEconomicsFacts({
+          entryAmount0: 0n,
+          entryAmount1: 0n,
+          exitAmount0: 0n,
+          exitAmount1: 0n,
+          totalFees0: 0n,
+          totalFees1: 0n,
+          exitSqrtPriceX96: SQRT_PRICE_1_0,
+          tickLower: TICK_LOWER,
+          tickUpper: TICK_UPPER,
+          entryLiquidity: 1n,
+          decimals0: 18,
+          decimals1: 18,
+        }),
+      ),
     ).not.toThrow();
   });
 
   it("absolutePnl = 0 when all amounts are zero", () => {
-    const result = calculateFullPnL({
-      entryAmount0Raw: 0n,
-      entryAmount1Raw: 0n,
-      exitAmount0Raw: 0n,
-      exitAmount1Raw: 0n,
-      feesCollected0Raw: 0n,
-      feesCollected1Raw: 0n,
-      exitSqrtPriceX96: SQRT_PRICE_1_0,
-      tickLower: TICK_LOWER,
-      tickUpper: TICK_UPPER,
-      liquidity: 1n,
-      decimals0: 18,
-      decimals1: 18,
-    });
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 0n,
+        entryAmount1: 0n,
+        exitAmount0: 0n,
+        exitAmount1: 0n,
+        totalFees0: 0n,
+        totalFees1: 0n,
+        exitSqrtPriceX96: SQRT_PRICE_1_0,
+        tickLower: TICK_LOWER,
+        tickUpper: TICK_UPPER,
+        entryLiquidity: 1n,
+        decimals0: 18,
+        decimals1: 18,
+      }),
+    );
 
-    expect(result.absolutePnl).toBe(0);
+    expect(result.absolutePnlInToken1).toBe(0);
   });
 
   it("divergenceLoss = 0 (not NaN) when all amounts are zero", () => {
-    const result = calculateFullPnL({
-      entryAmount0Raw: 0n,
-      entryAmount1Raw: 0n,
-      exitAmount0Raw: 0n,
-      exitAmount1Raw: 0n,
-      feesCollected0Raw: 0n,
-      feesCollected1Raw: 0n,
-      exitSqrtPriceX96: SQRT_PRICE_1_0,
-      tickLower: TICK_LOWER,
-      tickUpper: TICK_UPPER,
-      liquidity: 1n,
-      decimals0: 18,
-      decimals1: 18,
-    });
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 0n,
+        entryAmount1: 0n,
+        exitAmount0: 0n,
+        exitAmount1: 0n,
+        totalFees0: 0n,
+        totalFees1: 0n,
+        exitSqrtPriceX96: SQRT_PRICE_1_0,
+        tickLower: TICK_LOWER,
+        tickUpper: TICK_UPPER,
+        entryLiquidity: 1n,
+        decimals0: 18,
+        decimals1: 18,
+      }),
+    );
 
-    expect(result.divergenceLoss).toBe(0);
-    expect(isNaN(result.divergenceLoss)).toBe(false);
+    expect(result.divergenceLossPercent).toBe(0);
+    expect(isNaN(result.divergenceLossPercent)).toBe(false);
   });
 
   it("returns numeric (not NaN) values for all fields when amounts are zero", () => {
-    const result = calculateFullPnL({
-      entryAmount0Raw: 0n,
-      entryAmount1Raw: 0n,
-      exitAmount0Raw: 0n,
-      exitAmount1Raw: 0n,
-      feesCollected0Raw: 0n,
-      feesCollected1Raw: 0n,
-      exitSqrtPriceX96: SQRT_PRICE_1_0,
-      tickLower: TICK_LOWER,
-      tickUpper: TICK_UPPER,
-      liquidity: 1n,
-      decimals0: 18,
-      decimals1: 18,
-    });
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 0n,
+        entryAmount1: 0n,
+        exitAmount0: 0n,
+        exitAmount1: 0n,
+        totalFees0: 0n,
+        totalFees1: 0n,
+        exitSqrtPriceX96: SQRT_PRICE_1_0,
+        tickLower: TICK_LOWER,
+        tickUpper: TICK_UPPER,
+        entryLiquidity: 1n,
+        decimals0: 18,
+        decimals1: 18,
+      }),
+    );
 
-    const numericFields: FullPnlNumericField[] = [
+    const numericFields: LpEconomicsNumericField[] = [
       "entryAmount0",
       "entryAmount1",
       "exitAmount0",
       "exitAmount1",
+      "pendingFees0",
+      "pendingFees1",
+      "totalFees0",
+      "totalFees1",
       "entryPrice",
       "exitPrice",
-      "entryValue",
-      "exitValue",
-      "holdValue",
-      "feesCollected0",
-      "feesCollected1",
-      "feesValue",
-      "absolutePnl",
+      "priceChangePercent",
+      "entryValueInToken1",
+      "exitValueInToken1",
+      "holdValueInToken1",
+      "pendingFeesValueInToken1",
+      "totalFeesValueInToken1",
+      "absolutePnlInToken1",
       "absolutePnlPercent",
-      "divergenceLoss",
-      "opportunityCost",
-      "netVsHodl",
+      "divergenceLossPercent",
+      "opportunityCostInToken1",
+      "netVsHodlInToken1",
+      "netVsHodlPercent",
       "priceLower",
       "priceUpper",
     ];
@@ -414,6 +432,31 @@ describe("calculateFullPnL — all-zero raw amounts", () => {
       expect(typeof v).toBe("number");
       expect(isNaN(v)).toBe(false);
     }
+  });
+});
+
+describe("calculateLpEconomics — canonical fee and exit amount semantics", () => {
+  it("uses exit amounts and total fees for canonical performance facts", () => {
+    const result = calculateLpEconomics(
+      buildEconomicsFacts({
+        entryAmount0: 10n,
+        entryAmount1: 10n,
+        exitAmount0: 12n,
+        exitAmount1: 9n,
+        pendingFees0: 1n,
+        pendingFees1: 2n,
+        totalFees0: 4n,
+        totalFees1: 5n,
+        decimals0: 0,
+        decimals1: 0,
+      }),
+    );
+
+    expect(result.exitValueInToken1).toBe(21);
+    expect(result.pendingFeesValueInToken1).toBe(3);
+    expect(result.totalFeesValueInToken1).toBe(9);
+    expect(result.absolutePnlInToken1).toBe(10);
+    expect(result.netVsHodlInToken1).toBe(10);
   });
 });
 
@@ -465,3 +508,38 @@ describe("calculateUnclaimedFees — 0 liquidity", () => {
     expect(result.fees1).toBeGreaterThanOrEqual(0);
   });
 });
+
+function buildEconomicsFacts(
+  overrides: Partial<Parameters<typeof calculateLpEconomics>[0]> & {
+    tickLower?: number;
+    tickUpper?: number;
+    decimals0?: number;
+    decimals1?: number;
+  } = {},
+) {
+  const {
+    tickLower = TICK_LOWER,
+    tickUpper = TICK_UPPER,
+    decimals0 = 18,
+    decimals1 = 18,
+    ...factOverrides
+  } = overrides;
+
+  return {
+    pos: { tickLower, tickUpper },
+    token0Info: { decimals: decimals0 },
+    token1Info: { decimals: decimals1 },
+    entryAmount0: 1n,
+    entryAmount1: 1n,
+    entryLiquidity: LIQUIDITY,
+    entrySqrtPriceX96: SQRT_PRICE_1_0,
+    exitAmount0: 1n,
+    exitAmount1: 1n,
+    exitSqrtPriceX96: SQRT_PRICE_1_0,
+    pendingFees0: 0n,
+    pendingFees1: 0n,
+    totalFees0: 0n,
+    totalFees1: 0n,
+    ...factOverrides,
+  };
+}

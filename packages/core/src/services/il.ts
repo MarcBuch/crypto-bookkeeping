@@ -1,12 +1,9 @@
 import { createClient } from "../chain/client.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
-import { sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-import {
-  createPositionLifecycleContext,
-  resolvePositionLifecycle,
-} from "./position-lifecycle.js";
+import { calculateLpEconomics } from "./lp-economics.js";
+import { createPositionLifecycleContext, resolvePositionLifecycle } from "./position-lifecycle.js";
 
 export interface ILView {
   tokenId: string;
@@ -30,7 +27,9 @@ export interface ILView {
 
 export async function getILView(config: Config, tokenId?: string): Promise<ILView[]> {
   const client = createClient(config);
-  const lifecycleContext = await createPositionLifecycleContext(config, { includeLatestBlock: true });
+  const lifecycleContext = await createPositionLifecycleContext(config, {
+    includeLatestBlock: true,
+  });
 
   const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
@@ -66,36 +65,7 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
 
     const { facts } = lifecycle;
     const { token0Info, token1Info } = facts;
-    const entrySqrtPriceX96 = facts.entrySqrtPriceX96;
-
-    if (entrySqrtPriceX96 == null) {
-      continue;
-    }
-
-    const exitPrice = sqrtPriceX96ToPrice(
-      facts.exitSqrtPriceX96,
-      token0Info.decimals,
-      token1Info.decimals,
-    );
-    const entryAmt0H = Number(facts.entryAmount0) / 10 ** token0Info.decimals;
-    const entryAmt1H = Number(facts.entryAmount1) / 10 ** token1Info.decimals;
-    const exitAmt0H = Number(facts.currentAmount0) / 10 ** token0Info.decimals;
-    const exitAmt1H = Number(facts.currentAmount1) / 10 ** token1Info.decimals;
-
-    const valueLp = exitAmt0H * exitPrice + exitAmt1H;
-    const valueHold = entryAmt0H * exitPrice + entryAmt1H;
-
-    const divergenceLoss = valueHold > 0 ? (valueLp - valueHold) / valueHold : 0;
-
-    // Calculate fees
-    const fees0 = Number(facts.pendingFees0) / 10 ** token0Info.decimals;
-    const fees1 = Number(facts.pendingFees1) / 10 ** token1Info.decimals;
-
-    const feesValue = fees0 * exitPrice + fees1;
-    const netVsHodl = valueHold > 0 ? (valueLp + feesValue - valueHold) / valueHold : 0;
-
-    const priceLower = 1.0001 ** pos.tickLower * 10 ** (token0Info.decimals - token1Info.decimals);
-    const priceUpper = 1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
+    const economics = calculateLpEconomics(facts);
 
     result.push({
       tokenId: pos.tokenId.toString(),
@@ -103,18 +73,18 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
       token0Symbol: token0Info.symbol,
       token1Symbol: token1Info.symbol,
       status: facts.status,
-      entryPrice: sqrtPriceX96ToPrice(entrySqrtPriceX96, token0Info.decimals, token1Info.decimals),
-      currentPrice: exitPrice,
-      priceLower,
-      priceUpper,
-      divergenceLossPercent: divergenceLoss,
-      valueLpInToken1: valueLp,
-      valueHoldInToken1: valueHold,
-      fees0,
-      fees1,
-      feesValueInToken1: feesValue,
-      netVsHodlPercent: netVsHodl,
-      netVsHodlInToken1: valueLp + feesValue - valueHold,
+      entryPrice: economics.entryPrice,
+      currentPrice: economics.exitPrice,
+      priceLower: economics.priceLower,
+      priceUpper: economics.priceUpper,
+      divergenceLossPercent: economics.divergenceLossPercent,
+      valueLpInToken1: economics.exitValueInToken1,
+      valueHoldInToken1: economics.holdValueInToken1,
+      fees0: economics.totalFees0,
+      fees1: economics.totalFees1,
+      feesValueInToken1: economics.totalFeesValueInToken1,
+      netVsHodlPercent: economics.netVsHodlPercent,
+      netVsHodlInToken1: economics.netVsHodlInToken1,
     });
   }
 

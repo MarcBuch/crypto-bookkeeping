@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { calculateFullPnL } from "../math/divergence-loss.js";
+import { calculateLpEconomics } from "../services/lp-economics.js";
 import { calculateUsdFeeIncome } from "../services/pnl.js";
 
 describe("calculateUsdFeeIncome", () => {
@@ -69,38 +69,39 @@ describe("calculateUsdFeeIncome", () => {
   });
 
   it("does not alter token1-denominated fee and P&L calculations", () => {
-    const pnl = calculateFullPnL({
-      entryAmount0Raw: 1_000_000n,
-      entryAmount1Raw: 2_000_000n,
-      exitAmount0Raw: 1_000_000n,
-      exitAmount1Raw: 2_000_000n,
-      feesCollected0Raw: 100_000n,
-      feesCollected1Raw: 50_000n,
+    const economics = calculateLpEconomics({
+      pos: { tickLower: -100, tickUpper: 100 },
+      token0Info: { decimals: 6 },
+      token1Info: { decimals: 6 },
+      entryAmount0: 1_000_000n,
+      entryAmount1: 2_000_000n,
+      entryLiquidity: 1_000_000_000_000n,
+      exitAmount0: 1_000_000n,
+      exitAmount1: 2_000_000n,
+      pendingFees0: 0n,
+      pendingFees1: 0n,
+      totalFees0: 100_000n,
+      totalFees1: 50_000n,
       exitSqrtPriceX96: 2n ** 96n,
-      tickLower: -100,
-      tickUpper: 100,
-      liquidity: 1_000_000_000_000n,
-      decimals0: 6,
-      decimals1: 6,
     });
 
     const before = {
-      feesValue: pnl.feesValue,
-      absolutePnl: pnl.absolutePnl,
-      absolutePnlPercent: pnl.absolutePnlPercent,
+      feesValue: economics.totalFeesValueInToken1,
+      absolutePnl: economics.absolutePnlInToken1,
+      absolutePnlPercent: economics.absolutePnlPercent,
     };
 
     calculateUsdFeeIncome({
-      feesCollected0: pnl.feesCollected0,
-      feesCollected1: pnl.feesCollected1,
+      feesCollected0: economics.totalFees0,
+      feesCollected1: economics.totalFees1,
       token0UsdPrice: null,
       token1UsdPrice: 1,
     });
 
     expect({
-      feesValue: pnl.feesValue,
-      absolutePnl: pnl.absolutePnl,
-      absolutePnlPercent: pnl.absolutePnlPercent,
+      feesValue: economics.totalFeesValueInToken1,
+      absolutePnl: economics.absolutePnlInToken1,
+      absolutePnlPercent: economics.absolutePnlPercent,
     }).toEqual(before);
   });
 });

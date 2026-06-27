@@ -79,27 +79,6 @@ await mock.module("../math/divergence-loss.js", () => ({
     feeGrowthInside1X128: 0n,
   }),
   calculateUnclaimedFees: () => ({ fees0: 0, fees1: 0 }),
-  calculateFullPnL: () => ({
-    entryPrice: 1.0,
-    exitPrice: 1.0,
-    entryAmount0: 1.0,
-    entryAmount1: 1.0,
-    exitAmount0: 1.0,
-    exitAmount1: 1.0,
-    feesCollected0: 0,
-    feesCollected1: 0,
-    feesValue: 0,
-    entryValue: 2.0,
-    exitValue: 2.0,
-    holdValue: 2.0,
-    absolutePnl: 0,
-    absolutePnlPercent: 0,
-    divergenceLoss: 0,
-    opportunityCost: 0,
-    netVsHodl: 0,
-    priceLower: 0.5,
-    priceUpper: 2.0,
-  }),
 }));
 
 // ---------------------------------------------------------------------------

@@ -2,12 +2,9 @@ import { createClient } from "../chain/client.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import { sqlitePositionStore } from "../db/position-store.js";
-import { calculateFullPnL } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-import {
-  createPositionLifecycleContext,
-  resolvePositionLifecycle,
-} from "./position-lifecycle.js";
+import { calculateLpEconomics } from "./lp-economics.js";
+import { createPositionLifecycleContext, resolvePositionLifecycle } from "./position-lifecycle.js";
 import { getHistoricalPrice, getUsdPrices } from "./pricing.js";
 
 export interface PnLView {
@@ -87,7 +84,9 @@ export async function getPnLView(
   rawPositions?: PositionData[],
 ): Promise<PnLView[]> {
   const client = createClient(config);
-  const lifecycleContext = await createPositionLifecycleContext(config, { includeLatestBlock: true });
+  const lifecycleContext = await createPositionLifecycleContext(config, {
+    includeLatestBlock: true,
+  });
 
   const positions =
     rawPositions ??
@@ -131,22 +130,7 @@ export async function getPnLView(
     const { facts } = lifecycle;
     const { token0Info, token1Info, storedPos, closeBlock } = facts;
 
-    // Calculate full P&L
-    const pnl = calculateFullPnL({
-      entryAmount0Raw: facts.entryAmount0,
-      entryAmount1Raw: facts.entryAmount1,
-      exitAmount0Raw: facts.exitAmount0,
-      exitAmount1Raw: facts.exitAmount1,
-      feesCollected0Raw: facts.totalFees0,
-      feesCollected1Raw: facts.totalFees1,
-      entrySqrtPriceX96: facts.entrySqrtPriceX96,
-      exitSqrtPriceX96: facts.exitSqrtPriceX96,
-      tickLower: pos.tickLower,
-      tickUpper: pos.tickUpper,
-      liquidity: facts.entryLiquidity,
-      decimals0: token0Info.decimals,
-      decimals1: token1Info.decimals,
-    });
+    const economics = calculateLpEconomics(facts);
 
     const t0sym = token0Info.symbol;
     const t1sym = token1Info.symbol;
@@ -224,20 +208,14 @@ export async function getPnLView(
 
     const { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource } =
       calculateUsdFeeIncome({
-        feesCollected0: pnl.feesCollected0,
-        feesCollected1: pnl.feesCollected1,
+        feesCollected0: economics.totalFees0,
+        feesCollected1: economics.totalFees1,
         token0UsdPrice,
         token1UsdPrice,
       });
-
-    // Pending Earnings: only the currently uncollected fees (for active positions).
-    // For closed positions pendingFees0/1 stay 0n (nothing left to collect).
-    const pendingFees0Human = Number(facts.pendingFees0) / 10 ** token0Info.decimals;
-    const pendingFees1Human = Number(facts.pendingFees1) / 10 ** token1Info.decimals;
-    const pendingFeesValueInToken1 = pendingFees0Human * pnl.exitPrice + pendingFees1Human;
     const pendingFeesValueUsd =
       token0UsdPrice !== null && token1UsdPrice !== null
-        ? pendingFees0Human * token0UsdPrice + pendingFees1Human * token1UsdPrice
+        ? economics.pendingFees0 * token0UsdPrice + economics.pendingFees1 * token1UsdPrice
         : null;
 
     result.push({
@@ -246,34 +224,34 @@ export async function getPnLView(
       token0Symbol: t0sym,
       token1Symbol: t1sym,
       status: facts.status,
-      entryPrice: pnl.entryPrice,
-      exitPrice: pnl.exitPrice,
-      priceChangePercent: (pnl.exitPrice - pnl.entryPrice) / pnl.entryPrice,
-      entryAmount0: pnl.entryAmount0,
-      entryAmount1: pnl.entryAmount1,
-      exitAmount0: pnl.exitAmount0,
-      exitAmount1: pnl.exitAmount1,
-      feesCollected0: pnl.feesCollected0,
-      feesCollected1: pnl.feesCollected1,
+      entryPrice: economics.entryPrice,
+      exitPrice: economics.exitPrice,
+      priceChangePercent: economics.priceChangePercent,
+      entryAmount0: economics.entryAmount0,
+      entryAmount1: economics.entryAmount1,
+      exitAmount0: economics.exitAmount0,
+      exitAmount1: economics.exitAmount1,
+      feesCollected0: economics.totalFees0,
+      feesCollected1: economics.totalFees1,
       feesCollected0Usd,
       feesCollected1Usd,
       feesValueUsd,
       token0UsdPrice,
       token1UsdPrice,
       usdPriceSource,
-      feesValueInToken1: pnl.feesValue,
-      pendingFeesValueInToken1,
+      feesValueInToken1: economics.totalFeesValueInToken1,
+      pendingFeesValueInToken1: economics.pendingFeesValueInToken1,
       pendingFeesValueUsd,
-      entryValueInToken1: pnl.entryValue,
-      exitValueInToken1: pnl.exitValue,
-      holdValueInToken1: pnl.holdValue,
-      absolutePnlInToken1: pnl.absolutePnl,
-      absolutePnlPercent: pnl.absolutePnlPercent,
-      divergenceLossPercent: pnl.divergenceLoss,
-      opportunityCostInToken1: pnl.opportunityCost,
-      netVsHodlPercent: pnl.netVsHodl,
-      priceLower: pnl.priceLower,
-      priceUpper: pnl.priceUpper,
+      entryValueInToken1: economics.entryValueInToken1,
+      exitValueInToken1: economics.exitValueInToken1,
+      holdValueInToken1: economics.holdValueInToken1,
+      absolutePnlInToken1: economics.absolutePnlInToken1,
+      absolutePnlPercent: economics.absolutePnlPercent,
+      divergenceLossPercent: economics.divergenceLossPercent,
+      opportunityCostInToken1: economics.opportunityCostInToken1,
+      netVsHodlPercent: economics.netVsHodlPercent,
+      priceLower: economics.priceLower,
+      priceUpper: economics.priceUpper,
     });
   }
 

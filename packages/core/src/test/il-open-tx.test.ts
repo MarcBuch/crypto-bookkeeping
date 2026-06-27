@@ -63,13 +63,6 @@ await mock.module("../math/divergence-loss.js", () => ({
   deriveEntryPriceFromAmounts: () => 79228162514264337593543950336n,
   getTokenAmounts: () => ({ amount0: 500n, amount1: 500n }),
   sqrtPriceX96ToPrice: () => 1.0,
-  calculateDivergenceLoss: () => ({
-    entryPrice: 1.0,
-    currentPrice: 1.0,
-    divergenceLossPercent: 0,
-    valueLpInToken1: 1.0,
-    valueHoldInToken1: 1.0,
-  }),
 }));
 
 // ---------------------------------------------------------------------------

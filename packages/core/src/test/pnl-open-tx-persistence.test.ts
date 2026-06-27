@@ -18,9 +18,15 @@ let findOpenEventCallCount = 0;
 
 let mockFindCloseEvent: (..._args: unknown[]) => unknown = async () => ({ status: "not_found" });
 let findCloseEventCallCount = 0;
-let mockSumDecreaseLiquidityLogs: (..._args: unknown[]) => unknown = async () => ({ amount0: 0n, amount1: 0n });
-let mockSumCollectLogsPublic: (..._args: unknown[]) => unknown = async () => ({ amount0: 0n, amount1: 0n });
-let lastCalculateFullPnLParams: Record<string, unknown> | null = null;
+let mockSumDecreaseLiquidityLogs: (..._args: unknown[]) => unknown = async () => ({
+  amount0: 0n,
+  amount1: 0n,
+});
+let mockSumCollectLogsPublic: (..._args: unknown[]) => unknown = async () => ({
+  amount0: 0n,
+  amount1: 0n,
+});
+let lastCalculateLpEconomicsFacts: Record<string, unknown> | null = null;
 
 await mock.module("../chain/events.js", () => ({
   findOpenEvent: (...args: unknown[]) => {
@@ -49,7 +55,10 @@ await mock.module("../chain/rpc.js", () => ({
 
 let mockToken0Info = { symbol: "TOK", decimals: 18 };
 let mockToken1Info = { symbol: "TOK", decimals: 18 };
-let mockComputeUnclaimedFees: (..._args: unknown[]) => unknown = async () => ({ fees0: 0, fees1: 0 });
+let mockComputeUnclaimedFees: (..._args: unknown[]) => unknown = async () => ({
+  fees0: 0,
+  fees1: 0,
+});
 
 await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async (_client: unknown, token: string) =>
@@ -89,26 +98,34 @@ await mock.module("../math/divergence-loss.js", () => ({
     feeGrowthInside1X128: 0n,
   }),
   calculateUnclaimedFees: () => ({ fees0: 0, fees1: 0 }),
-  calculateFullPnL: (params: Record<string, unknown>) => {
-    lastCalculateFullPnLParams = params;
+}));
+
+await mock.module("../services/lp-economics.js", () => ({
+  calculateLpEconomics: (facts: Record<string, unknown>) => {
+    lastCalculateLpEconomicsFacts = facts;
     return {
       entryPrice: 1.0,
-      exitPrice: params.exitSqrtPriceX96 === 79228162514264337593543950336n ? 1.0 : 2.0,
+      exitPrice: facts.exitSqrtPriceX96 === 79228162514264337593543950336n ? 1.0 : 2.0,
+      priceChangePercent: 0,
       entryAmount0: 1.0,
       entryAmount1: 1.0,
       exitAmount0: 1.0,
       exitAmount1: 1.0,
-      feesCollected0: 0,
-      feesCollected1: 0,
-      feesValue: 0,
-      entryValue: 2.0,
-      exitValue: 2.0,
-      holdValue: 2.0,
-      absolutePnl: 0,
+      pendingFees0: Number(facts.pendingFees0 ?? 0n),
+      pendingFees1: Number(facts.pendingFees1 ?? 0n),
+      totalFees0: 0,
+      totalFees1: 0,
+      pendingFeesValueInToken1: Number(facts.pendingFees0 ?? 0n) + Number(facts.pendingFees1 ?? 0n),
+      totalFeesValueInToken1: 0,
+      entryValueInToken1: 2.0,
+      exitValueInToken1: 2.0,
+      holdValueInToken1: 2.0,
+      absolutePnlInToken1: 0,
       absolutePnlPercent: 0,
-      divergenceLoss: 0,
-      opportunityCost: 0,
-      netVsHodl: 0,
+      divergenceLossPercent: 0,
+      opportunityCostInToken1: 0,
+      netVsHodlInToken1: 0,
+      netVsHodlPercent: 0,
       priceLower: 0.5,
       priceUpper: 2.0,
     };
@@ -183,7 +200,7 @@ beforeEach(() => {
   mockToken1Info = { symbol: "TOK", decimals: 18 };
   mockComputeUnclaimedFees = async () => ({ fees0: 0, fees1: 0 });
   mockGetAllPositions = async () => [fakePos];
-  lastCalculateFullPnLParams = null;
+  lastCalculateLpEconomicsFacts = null;
 });
 
 afterAll(() => {
@@ -354,7 +371,7 @@ describe("open_tx persistence and fast-path", () => {
     await getPnLView(baseConfig);
 
     expect(findOpenEventCallCount).toBe(0);
-    expect(lastCalculateFullPnLParams?.entrySqrtPriceX96).toBeUndefined();
+    expect(lastCalculateLpEconomicsFacts?.entrySqrtPriceX96).toBeUndefined();
   });
 
   it("skips PnL projection when entry cannot be found", async () => {
@@ -497,7 +514,7 @@ describe("close_tx persistence and exit cache bypass", () => {
     });
 
     expect(findCloseEventCallCount).toBeGreaterThan(0);
-    expect(lastCalculateFullPnLParams?.exitSqrtPriceX96).toBe(79228162514264337593543950336n);
+    expect(lastCalculateLpEconomicsFacts?.exitSqrtPriceX96).toBe(79228162514264337593543950336n);
     expect(result[0].exitPrice).toBe(1.0);
   });
 
@@ -642,8 +659,8 @@ describe("active position fees and withdrawals", () => {
 
     await getPnLView(baseConfig);
 
-    expect(lastCalculateFullPnLParams?.exitAmount0Raw).toBe(511n);
-    expect(lastCalculateFullPnLParams?.exitAmount1Raw).toBe(522n);
+    expect(lastCalculateLpEconomicsFacts?.exitAmount0).toBe(511n);
+    expect(lastCalculateLpEconomicsFacts?.exitAmount1).toBe(522n);
   });
 
   it("separates previously collected fees from withdrawn principal and keeps pending fees uncollected only", async () => {
@@ -656,8 +673,8 @@ describe("active position fees and withdrawals", () => {
 
     const [result] = await getPnLView(baseConfig);
 
-    expect(lastCalculateFullPnLParams?.feesCollected0Raw).toBe(31n);
-    expect(lastCalculateFullPnLParams?.feesCollected1Raw).toBe(32n);
+    expect(lastCalculateLpEconomicsFacts?.totalFees0).toBe(31n);
+    expect(lastCalculateLpEconomicsFacts?.totalFees1).toBe(32n);
     expect(result.pendingFeesValueInToken1).toBe(3);
   });
 });

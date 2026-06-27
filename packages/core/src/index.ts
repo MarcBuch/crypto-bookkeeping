@@ -83,6 +83,7 @@ export * from "./math/divergence-loss.js";
 // Services
 export * from "./services/errors.js";
 export * from "./services/positions.js";
+export * from "./services/lp-economics.js";
 export * from "./services/pnl.js";
 export * from "./services/il.js";
 export * from "./services/snapshot.js";

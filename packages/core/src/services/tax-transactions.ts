@@ -10,12 +10,26 @@ import {
 } from "../chain/hypersync.js";
 import { resolveTokenMetadata, type TokenMetadataClient } from "../chain/token-metadata.js";
 import type { Config } from "../config.js";
+import { createHedgeStore } from "../db/hedge-store.js";
+import { createTaxLedgerStore } from "../db/tax-ledger-store.js";
 import {
-  getAllPositions,
+  closeHedgeEvent,
+  createManualTaxTransaction,
   getAllClosedHedgeEvents,
+  getAllPositions,
+  getEarliestHedgeSnapshot,
+  getHedgeEvents,
+  getOpenHedgeEvent,
   getTaxSyncState,
   getTaxTransaction,
   getTaxTransactionsNeedingEurEnrichment,
+  getTaxTransactionsNeedingGermanTaxReview,
+  insertHedgeEvent,
+  insertHedgeSnapshot,
+  listGermanTaxableTransactions,
+  listHedgeSnapshots,
+  listTaxTransactions,
+  updateTaxTransaction,
   updateTaxTransactionEurValues,
   upsertSyncedTaxTransaction,
   upsertTaxSyncState,
@@ -24,6 +38,35 @@ import {
   type SyncedTaxTransaction,
 } from "../db/store.js";
 import { getHistoricalPrice } from "./pricing.js";
+
+function getTaxLedgerStore() {
+  return createTaxLedgerStore({
+    createManualTaxTransaction,
+    getTaxSyncState,
+    getTaxTransaction,
+    getTaxTransactionsNeedingEurEnrichment,
+    getTaxTransactionsNeedingGermanTaxReview,
+    listGermanTaxableTransactions,
+    listTaxTransactions,
+    updateTaxTransaction,
+    updateTaxTransactionEurValues,
+    upsertSyncedTaxTransaction,
+    upsertTaxSyncState,
+  });
+}
+
+function getHedgeStore() {
+  return createHedgeStore({
+    closeHedgeEvent,
+    getAllClosedHedgeEvents,
+    getEarliestHedgeSnapshot,
+    getHedgeEvents,
+    getOpenHedgeEvent,
+    insertHedgeEvent,
+    insertHedgeSnapshot,
+    listHedgeSnapshots,
+  });
+}
 
 const DEFAULT_EXPLORER_API_URL = "https://www.hyperscan.com/api";
 const DEFAULT_EXPLORER_CHAIN_ID = 999;
@@ -86,6 +129,7 @@ export async function syncLpTaxFlows(
   config: Pick<Config, "wallet" | "pricing" | "rpc" | "chainId" | "contracts">,
   options: SyncLpTaxFlowsOptions = {},
 ): Promise<SyncLpTaxFlowsSummary> {
+  const taxLedgerStore = getTaxLedgerStore();
   const viemClient = options.viemClient ?? createClient(config);
   const syncedAt = new Date().toISOString();
   const positions = getAllPositions();
@@ -132,7 +176,7 @@ export async function syncLpTaxFlows(
             syncedAt,
           );
           const [enriched] = await enrichTaxTransactionsWithEurValues([depositEntry], config);
-          upsertSyncedTaxTransaction(enriched);
+          taxLedgerStore.upsertSyncedTransaction(enriched);
           synced += 1;
         }
 
@@ -149,7 +193,7 @@ export async function syncLpTaxFlows(
             syncedAt,
           );
           const [enriched] = await enrichTaxTransactionsWithEurValues([depositEntry], config);
-          upsertSyncedTaxTransaction(enriched);
+          taxLedgerStore.upsertSyncedTransaction(enriched);
           synced += 1;
         }
       } else {
@@ -175,7 +219,7 @@ export async function syncLpTaxFlows(
             syncedAt,
           );
           const [enriched] = await enrichTaxTransactionsWithEurValues([withdrawalEntry], config);
-          upsertSyncedTaxTransaction(enriched);
+          taxLedgerStore.upsertSyncedTransaction(enriched);
           synced += 1;
         }
 
@@ -190,7 +234,7 @@ export async function syncLpTaxFlows(
             syncedAt,
           );
           const [enriched] = await enrichTaxTransactionsWithEurValues([withdrawalEntry], config);
-          upsertSyncedTaxTransaction(enriched);
+          taxLedgerStore.upsertSyncedTransaction(enriched);
           synced += 1;
         }
       }
@@ -214,7 +258,7 @@ export async function syncLpTaxFlows(
             syncedAt,
           );
           const [enriched] = await enrichTaxTransactionsWithEurValues([feeEntry], config);
-          upsertSyncedTaxTransaction(enriched);
+          taxLedgerStore.upsertSyncedTransaction(enriched);
           synced += 1;
         }
 
@@ -229,7 +273,7 @@ export async function syncLpTaxFlows(
             syncedAt,
           );
           const [enriched] = await enrichTaxTransactionsWithEurValues([feeEntry], config);
-          upsertSyncedTaxTransaction(enriched);
+          taxLedgerStore.upsertSyncedTransaction(enriched);
           synced += 1;
         }
       }
@@ -473,13 +517,15 @@ export async function syncHedgeTaxFlows(
   options: { syncedAt?: string } = {},
 ): Promise<{ synced: number }> {
   const syncedAt = options.syncedAt ?? new Date().toISOString();
-  const closedEvents = getAllClosedHedgeEvents();
+  const taxLedgerStore = getTaxLedgerStore();
+  const hedgeStore = getHedgeStore();
+  const closedEvents = hedgeStore.listClosedEvents();
   let synced = 0;
   for (const event of closedEvents) {
     const entries = buildHedgeTaxEntries(event, syncedAt);
     for (const entry of entries) {
       // Already enriched in DB — skip pricing API, upsert as-is
-      const existing = getTaxTransaction(entry.id);
+      const existing = taxLedgerStore.getTransaction(entry.id);
       const alreadyEnriched =
         existing !== null && (existing.cost_eur !== null || existing.proceeds_eur !== null);
 
@@ -489,10 +535,10 @@ export async function syncHedgeTaxFlows(
         entry.proceeds_eur !== null ||
         !entry.time_stamp
       ) {
-        upsertSyncedTaxTransaction(entry);
+        taxLedgerStore.upsertSyncedTransaction(entry);
       } else {
         const [enriched] = await enrichTaxTransactionsWithEurValues([entry], config);
-        upsertSyncedTaxTransaction(enriched);
+        taxLedgerStore.upsertSyncedTransaction(enriched);
       }
       synced++;
     }
@@ -507,9 +553,10 @@ export async function syncTaxTransactions(
   >,
   options: SyncTaxTransactionsOptions = {},
 ): Promise<SyncTaxTransactionsSummary> {
+  const taxLedgerStore = getTaxLedgerStore();
   const wallet = config.wallet;
   const syncedAt = new Date().toISOString();
-  const previousSyncState = getTaxSyncState(wallet);
+  const previousSyncState = taxLedgerStore.getSyncState(wallet);
   const fromBlock =
     previousSyncState?.last_block_number != null ? previousSyncState.last_block_number + 1 : 0;
 
@@ -586,7 +633,7 @@ export async function syncTaxTransactions(
 
     const row = hyperSyncTxToSyncedTaxTransaction(tx, wallet, syncedAt);
     const [enriched] = await enrichTaxTransactionsWithEurValues([row], config);
-    upsertSyncedTaxTransaction(enriched);
+    taxLedgerStore.upsertSyncedTransaction(enriched);
     synced += 1;
     if (row.block_number !== null) {
       latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
@@ -616,7 +663,7 @@ export async function syncTaxTransactions(
           }
         : baseRow;
     const [enriched] = await enrichTaxTransactionsWithEurValues([row], config);
-    upsertSyncedTaxTransaction(enriched);
+    taxLedgerStore.upsertSyncedTransaction(enriched);
     synced += 1;
     if (row.block_number !== null) {
       latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
@@ -648,7 +695,7 @@ export async function syncTaxTransactions(
   synced += hedgeFlowResult.synced;
 
   // ── Update sync state watermark ────────────────────────────────────────────
-  upsertTaxSyncState({
+  taxLedgerStore.recordSyncState({
     wallet,
     last_synced_at: syncedAt,
     last_block_number: latestKnownBlockNumber(
@@ -795,6 +842,7 @@ async function syncInternalTransactions(
   fromBlock: number,
   syncedAt: string,
 ): Promise<{ synced: number; latestBlockNumber: number | null }> {
+  const taxLedgerStore = getTaxLedgerStore();
   const source = options.source ?? DEFAULT_SOURCE;
   const baseUrl = options.baseUrl ?? config.tax?.explorerApiUrl ?? DEFAULT_EXPLORER_API_URL;
   const chainId = config.tax?.explorerChainId ?? DEFAULT_EXPLORER_CHAIN_ID;
@@ -841,7 +889,7 @@ async function syncInternalTransactions(
 
     // Upsert each enriched row
     for (const row of enrichedRows) {
-      upsertSyncedTaxTransaction(row);
+      taxLedgerStore.upsertSyncedTransaction(row);
       synced += 1;
       if (row.block_number !== null) {
         latestBlockNumber = Math.max(latestBlockNumber ?? row.block_number, row.block_number);
@@ -857,12 +905,13 @@ async function syncInternalTransactions(
 export async function enrichTaxTransactionsEurValues(
   config: Pick<Config, "tax" | "pricing">,
 ): Promise<{ enriched: number; skipped: number }> {
-  let rows: ReturnType<typeof getTaxTransactionsNeedingEurEnrichment> = [];
+  const taxLedgerStore = getTaxLedgerStore();
+  let rows: ReturnType<typeof taxLedgerStore.listTransactionsNeedingEurEnrichment> = [];
   let enriched = 0;
   let skipped = 0;
 
   try {
-    rows = getTaxTransactionsNeedingEurEnrichment();
+    rows = taxLedgerStore.listTransactionsNeedingEurEnrichment();
 
     for (const row of rows) {
       const asset = row.asset_in ?? row.asset_out;
@@ -893,7 +942,11 @@ export async function enrichTaxTransactionsEurValues(
         gain_eur = null;
       }
 
-      updateTaxTransactionEurValues(row.id, { cost_eur, proceeds_eur, gain_eur });
+      taxLedgerStore.updateTransactionEurValues(row.id, {
+        cost_eur,
+        proceeds_eur,
+        gain_eur,
+      });
       enriched += 1;
     }
   } catch (err) {

@@ -1,17 +1,12 @@
 import { createClient } from "../chain/client.js";
-import { findOpenEvent } from "../chain/events.js";
-import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import {
-  computeUnclaimedFees,
-  getPoolAddress,
-  getPoolState,
-  getTokenInfo,
-} from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
-import { getPosition, insertSnapshot } from "../db/store.js";
-import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
-import { persistPositionEntry } from "./position-entry.js";
+import { insertSnapshot } from "../db/store.js";
+import { sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
+import {
+  createPositionLifecycleContext,
+  resolvePositionLifecycle,
+} from "./position-lifecycle.js";
 
 export interface SnapshotResult {
   tokenId: string;
@@ -21,13 +16,7 @@ export interface SnapshotResult {
 
 export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
   const client = createClient(config);
-
-  const hyperSyncClient = config.hyperSync?.apiToken
-    ? createHyperSyncClient({
-        url: config.hyperSync.url ?? DEFAULT_HYPERSYNC_URL,
-        apiToken: config.hyperSync.apiToken,
-      })
-    : undefined;
+  const lifecycleContext = await createPositionLifecycleContext(config, { includeLatestBlock: true });
 
   const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
@@ -36,10 +25,6 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
   }
 
   const results: SnapshotResult[] = [];
-
-  // Number of blocks to scan back when discovering events (window size).
-  // undefined → findOpenEvent uses its 30-day default.
-  const logsWindowBlocks = config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined;
 
   for (const pos of positions) {
     // Skip positions with 0 liquidity (closed)
@@ -52,100 +37,36 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
       continue;
     }
 
-    const [token0Info, token1Info] = await Promise.all([
-      getTokenInfo(client, pos.token0),
-      getTokenInfo(client, pos.token1),
-    ]);
-
-    const poolAddress = await getPoolAddress(
-      client,
-      config.contracts.factory,
-      pos.token0,
-      pos.token1,
-      pos.fee,
-    );
-
-    const poolState = await getPoolState(client, poolAddress);
-
-    // Get or determine entry price
-    let entryAmount0 = 0n;
-    let entryAmount1 = 0n;
-
-    const posConfigSnap = config.positions?.[pos.tokenId.toString()];
-    const storedPos = getPosition(pos.tokenId.toString());
-    if (storedPos?.entry_sqrt_price_x96) {
-      entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
-      entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-    } else {
-      const openResult = await findOpenEvent(
-        client,
-        config.contracts.positionManager,
-        pos.tokenId,
-        config.wallet,
-        posConfigSnap?.openTx,
-        undefined,
-        logsWindowBlocks,
-        undefined,
-        hyperSyncClient,
+    const lifecycle = await resolvePositionLifecycle(lifecycleContext, pos, {
+      entryNotFound: "use_current_amounts",
+    });
+    if (lifecycle.status === "rpc_error") {
+      console.error(
+        `[lp-tracker] RPC error discovering ${lifecycle.stage} event for position ${pos.tokenId.toString()}:`,
+        lifecycle.error,
       );
-
-      if (openResult.status === "rpc_error") {
-        console.error(
-          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
-          openResult.error,
-        );
-        continue;
-      }
-      if (openResult.status === "found") {
-        const openEvent = openResult.event;
-        entryAmount0 = openEvent.amount0;
-        entryAmount1 = openEvent.amount1;
-
-        persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-      } else {
-        // not_found — use current price as fallback (matching original behavior)
-        const currentAmounts = getTokenAmounts(
-          pos.liquidity,
-          poolState.sqrtPriceX96,
-          pos.tickLower,
-          pos.tickUpper,
-        );
-        entryAmount0 = currentAmounts.amount0;
-        entryAmount1 = currentAmounts.amount1;
-      }
+      continue;
     }
-
-    // Calculate current state
-    const currentAmounts = getTokenAmounts(
-      pos.liquidity,
-      poolState.sqrtPriceX96,
-      pos.tickLower,
-      pos.tickUpper,
-    );
+    if (lifecycle.status !== "resolved") continue;
+    const { facts } = lifecycle;
+    const { token0Info, token1Info, poolState } = facts;
 
     const exitPrice = sqrtPriceX96ToPrice(
       poolState.sqrtPriceX96,
       token0Info.decimals,
       token1Info.decimals,
     );
-    const entryAmt0H = Number(entryAmount0) / 10 ** token0Info.decimals;
-    const entryAmt1H = Number(entryAmount1) / 10 ** token1Info.decimals;
-    const curAmt0H = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;
-    const curAmt1H = Number(currentAmounts.amount1) / 10 ** token1Info.decimals;
+    const entryAmt0H = Number(facts.entryAmount0) / 10 ** token0Info.decimals;
+    const entryAmt1H = Number(facts.entryAmount1) / 10 ** token1Info.decimals;
+    const curAmt0H = Number(facts.currentAmount0) / 10 ** token0Info.decimals;
+    const curAmt1H = Number(facts.currentAmount1) / 10 ** token1Info.decimals;
 
     const valueLp = curAmt0H * exitPrice + curAmt1H;
     const valueHold = entryAmt0H * exitPrice + entryAmt1H;
     const divergenceLoss = valueHold > 0 ? (valueLp - valueHold) / valueHold : 0;
 
-    // Calculate fees
-    const { fees0, fees1 } = await computeUnclaimedFees(
-      client,
-      poolAddress,
-      pos,
-      poolState,
-      token0Info.decimals,
-      token1Info.decimals,
-    );
+    const fees0 = Number(facts.pendingFees0) / 10 ** token0Info.decimals;
+    const fees1 = Number(facts.pendingFees1) / 10 ** token1Info.decimals;
 
     const feesValue = fees0 * exitPrice + fees1;
     const netPnl = valueLp - valueHold + feesValue;

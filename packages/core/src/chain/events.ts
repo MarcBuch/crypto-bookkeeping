@@ -2,12 +2,7 @@ import { parseAbiItem, decodeEventLog, type Address } from "viem";
 
 import { getErrorMessage, isHexString, isRecord } from "../utils/guards.js";
 import type { Client } from "./client";
-import {
-  fetchLogsByAddressAndTopics,
-  padUint256,
-  type HyperSyncRawLog,
-  type HypersyncClient,
-} from "./hypersync.js";
+import { fetchLogsByAddressAndTopics, padUint256, type HypersyncClient } from "./hypersync.js";
 import { withRetry } from "./rpc";
 
 type HexString = `0x${string}`;
@@ -31,6 +26,29 @@ type ReceiptClient = {
 };
 type LogsClient = Pick<Client, "getLogs">;
 type PoolPriceClient = Pick<Client, "readContract">;
+type PositionEventName = "IncreaseLiquidity" | "DecreaseLiquidity" | "Collect";
+
+type PositionLogRecord = {
+  blockNumber: bigint;
+  transactionHash: HexString;
+  logIndex?: bigint;
+  args?: unknown;
+  topics?: ReadonlyArray<string | null | undefined>;
+  data?: string;
+};
+
+type PositionLogSource = {
+  kind: "viem" | "hypersync";
+  getLatestBlock: () => Promise<bigint>;
+  getReceipt: ((args: ReceiptQuery) => Promise<ReceiptLike>) | null;
+  getLogs: (
+    eventName: PositionEventName,
+    positionManager: Address,
+    tokenId: bigint,
+    fromBlock: bigint,
+    toBlock: bigint,
+  ) => Promise<PositionLogRecord[]>;
+};
 
 type LiquidityArgs = {
   tokenId: bigint;
@@ -67,18 +85,34 @@ const LOGS_CHUNK_SIZE = 100_000n;
 // Used as the default getLogs scan window when no explicit fromBlock is provided.
 const DEFAULT_LOGS_WINDOW_BLOCKS = 2_592_000n;
 
+const INCREASE_LIQUIDITY_EVENT = parseAbiItem(
+  "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+);
+const DECREASE_LIQUIDITY_EVENT = parseAbiItem(
+  "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+);
+const COLLECT_EVENT = parseAbiItem(
+  "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
+);
+
 const eventAbi = [
-  parseAbiItem(
-    "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
-  ),
-  parseAbiItem(
-    "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
-  ),
-  parseAbiItem(
-    "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
-  ),
+  INCREASE_LIQUIDITY_EVENT,
+  DECREASE_LIQUIDITY_EVENT,
+  COLLECT_EVENT,
   parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"),
 ];
+
+const EVENT_TOPICS: Record<PositionEventName, HexString> = {
+  IncreaseLiquidity: INCREASE_LIQUIDITY_TOPIC,
+  DecreaseLiquidity: DECREASE_LIQUIDITY_TOPIC,
+  Collect: COLLECT_TOPIC,
+};
+
+const EVENT_FILTERS = {
+  IncreaseLiquidity: INCREASE_LIQUIDITY_EVENT,
+  DecreaseLiquidity: DECREASE_LIQUIDITY_EVENT,
+  Collect: COLLECT_EVENT,
+} as const;
 
 export interface PositionOpenEvent {
   tokenId: bigint;
@@ -119,9 +153,10 @@ export async function findOpenEvent(
   hyperSyncClient?: HypersyncClient,
 ): Promise<EventResult<PositionOpenEvent>> {
   try {
+    const source = createPositionLogSource(client, hyperSyncClient);
     // Fast path: use known transaction hash
     if (knownOpenTx) {
-      const getTransactionReceipt = client.getTransactionReceipt;
+      const getTransactionReceipt = source.getReceipt;
       if (!getTransactionReceipt) {
         throw new Error("Client does not support getTransactionReceipt");
       }
@@ -136,7 +171,7 @@ export async function findOpenEvent(
 
     // Slow path: paginated getLogs scan
     console.log(`    Scanning logs for open event of token #${tokenId}...`);
-    const resolvedLatestBlock = latestBlock ?? (await withRetry(() => client.getBlockNumber()));
+    const resolvedLatestBlock = latestBlock ?? (await source.getLatestBlock());
 
     let startBlock: bigint;
     if (fromBlock !== undefined) {
@@ -148,41 +183,18 @@ export async function findOpenEvent(
       startBlock = resolvedLatestBlock > window ? resolvedLatestBlock - window : 1n;
     }
 
-    if (hyperSyncClient) {
-      // SDK path: single call handles pagination internally
-      const paddedTokenId = padUint256(tokenId);
-      const rawLogs = await fetchLogsByAddressAndTopics(
-        hyperSyncClient,
+    if (source.kind === "hypersync") {
+      const logs = await source.getLogs(
+        "IncreaseLiquidity",
         positionManager,
-        [[INCREASE_LIQUIDITY_TOPIC], [paddedTokenId]],
-        Number(startBlock),
-        resolvedLatestBlock !== undefined ? Number(resolvedLatestBlock) : undefined,
+        tokenId,
+        startBlock,
+        resolvedLatestBlock,
       );
-
-      if (rawLogs.length > 0) {
-        const log = rawLogs[0]; // first match is the open event
-        console.log(`    Found open event at block ${log.blockNumber}`);
-        const decoded = decodeHyperSyncLog(log, eventAbi);
-        if (decoded && decoded.eventName === "IncreaseLiquidity") {
-          const args = toLiquidityArgs(decoded.args);
-          if (!args) {
-            return { status: "not_found" };
-          }
-          // Defensive check: SDK filters by topic1, but verify tokenId matches
-          if (args.tokenId === tokenId) {
-            return {
-              status: "found",
-              event: {
-                tokenId,
-                blockNumber: BigInt(log.blockNumber),
-                transactionHash: log.transactionHash,
-                amount0: args.amount0,
-                amount1: args.amount1,
-                liquidity: args.liquidity,
-              },
-            };
-          }
-        }
+      const event = logs.length > 0 ? toOpenEvent(logs[0], tokenId) : null;
+      if (event) {
+        console.log(`    Found open event at block ${event.blockNumber}`);
+        return { status: "found", event };
       }
       console.warn(`    Could not find open event for token #${tokenId}`);
       return { status: "not_found" };
@@ -194,36 +206,19 @@ export async function findOpenEvent(
             ? lo + LOGS_CHUNK_SIZE - 1n
             : resolvedLatestBlock;
 
-        const logs = await withRetry(() =>
-          client.getLogs({
-            address: positionManager,
-            event: parseAbiItem(
-              "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
-            ),
-            args: { tokenId },
-            fromBlock: lo,
-            toBlock: hi,
-          }),
+        const logs = await source.getLogs(
+          "IncreaseLiquidity",
+          positionManager,
+          tokenId,
+          lo,
+          hi,
         );
 
         if (logs.length > 0) {
-          const log = logs[0];
-          const args = toLiquidityArgs(log.args);
-          if (!args || log.blockNumber == null || log.transactionHash == null) {
-            continue;
-          }
-          console.log(`    Found open event at block ${log.blockNumber}`);
-          return {
-            status: "found",
-            event: {
-              tokenId,
-              blockNumber: log.blockNumber,
-              transactionHash: log.transactionHash,
-              amount0: args.amount0,
-              amount1: args.amount1,
-              liquidity: args.liquidity,
-            },
-          };
+          const event = toOpenEvent(logs[0], tokenId);
+          if (!event) continue;
+          console.log(`    Found open event at block ${event.blockNumber}`);
+          return { status: "found", event };
         }
       }
 
@@ -255,9 +250,10 @@ export async function findCloseEvent(
   hyperSyncClient?: HypersyncClient,
 ): Promise<EventResult<PositionCloseEvent>> {
   try {
+    const source = createPositionLogSource(client, hyperSyncClient);
     // Fast path: use known transaction hash
     if (knownCloseTx) {
-      const getTransactionReceipt = client.getTransactionReceipt;
+      const getTransactionReceipt = source.getReceipt;
       if (!getTransactionReceipt) {
         throw new Error("Client does not support getTransactionReceipt");
       }
@@ -305,7 +301,7 @@ export async function findCloseEvent(
 
     // Slow path: paginated getLogs scan
     console.log(`    Scanning logs for close event of token #${tokenId}...`);
-    const resolvedLatestBlock = latestBlock ?? (await withRetry(() => client.getBlockNumber()));
+    const resolvedLatestBlock = latestBlock ?? (await source.getLatestBlock());
 
     let startBlock: bigint;
     if (fromBlock !== undefined) {
@@ -317,26 +313,22 @@ export async function findCloseEvent(
       startBlock = resolvedLatestBlock > window ? resolvedLatestBlock - window : 1n;
     }
 
-    if (hyperSyncClient) {
+    if (source.kind === "hypersync") {
       // SDK path: fetch DecreaseLiquidity and Collect logs in parallel
-      const paddedTokenId = padUint256(tokenId);
-      const toBlockNum =
-        resolvedLatestBlock !== undefined ? Number(resolvedLatestBlock) : undefined;
-
       const [decreaseLogs, collectLogs] = await Promise.all([
-        fetchLogsByAddressAndTopics(
-          hyperSyncClient,
+        source.getLogs(
+          "DecreaseLiquidity",
           positionManager,
-          [[DECREASE_LIQUIDITY_TOPIC], [paddedTokenId]],
-          Number(startBlock),
-          toBlockNum !== undefined ? toBlockNum + 1 : undefined,
+          tokenId,
+          startBlock,
+          resolvedLatestBlock,
         ),
-        fetchLogsByAddressAndTopics(
-          hyperSyncClient,
+        source.getLogs(
+          "Collect",
           positionManager,
-          [[COLLECT_TOPIC], [paddedTokenId]],
-          Number(startBlock),
-          toBlockNum !== undefined ? toBlockNum + 1 : undefined,
+          tokenId,
+          startBlock,
+          resolvedLatestBlock,
         ),
       ]);
 
@@ -345,21 +337,18 @@ export async function findCloseEvent(
         return { status: "not_found" };
       }
 
-      const dLog = decreaseLogs[0];
-      const decreaseDecoded = decodeHyperSyncLog(dLog, eventAbi);
-      if (!decreaseDecoded || decreaseDecoded.eventName !== "DecreaseLiquidity") {
+      const dLog = selectLatestLog(decreaseLogs);
+      if (!dLog) {
+        console.warn(`    Could not find close event for token #${tokenId}`);
+        return { status: "not_found" };
+      }
+      const event = toCloseEvent(dLog, tokenId);
+      if (!event) {
         console.warn(`    Could not decode close event for token #${tokenId}`);
         return { status: "not_found" };
       }
 
-      const dArgs = toLiquidityArgs(decreaseDecoded.args);
-      if (!dArgs) {
-        return { status: "not_found" };
-      }
-      const decreaseAmount0 = dArgs.amount0;
-      const decreaseAmount1 = dArgs.amount1;
-
-      console.log(`    Found close event at block ${dLog.blockNumber}`);
+      console.log(`    Found close event at block ${event.blockNumber}`);
 
       // Sum collect amounts for fees, but only up to and including the close block
       // (in case the tokenId is reused in a new lifecycle after this close)
@@ -367,103 +356,65 @@ export async function findCloseEvent(
       // block yet); bound them here to exclude any logs from a future position lifecycle.
       let collectAmount0 = 0n;
       let collectAmount1 = 0n;
-      const boundedCollectLogs = collectLogs.filter((c) => c.blockNumber <= dLog.blockNumber);
+      const boundedCollectLogs = collectLogs.filter((c) => c.blockNumber <= event.blockNumber);
       for (const cLog of boundedCollectLogs) {
-        const collectDecoded = decodeHyperSyncLog(cLog, eventAbi);
-        if (collectDecoded && collectDecoded.eventName === "Collect") {
-          const cArgs = toCollectArgs(collectDecoded.args);
-          if (!cArgs) continue;
-          collectAmount0 += cArgs.amount0Collect;
-          collectAmount1 += cArgs.amount1Collect;
-        }
+        const cArgs = getCollectArgs(cLog);
+        if (!cArgs) continue;
+        collectAmount0 += cArgs.amount0Collect;
+        collectAmount1 += cArgs.amount1Collect;
       }
 
-      const decreaseTotals = { amount0: decreaseAmount0, amount1: decreaseAmount1 };
+      const decreaseTotals = { amount0: event.amount0, amount1: event.amount1 };
       for (const decLog of decreaseLogs) {
-        if (decLog === dLog || decLog.blockNumber > dLog.blockNumber) continue;
-        const priorDecreaseDecoded = decodeHyperSyncLog(decLog, eventAbi);
-        if (priorDecreaseDecoded && priorDecreaseDecoded.eventName === "DecreaseLiquidity") {
-          const priorDecreaseArgs = toLiquidityArgs(priorDecreaseDecoded.args);
-          if (!priorDecreaseArgs) continue;
-          decreaseTotals.amount0 += priorDecreaseArgs.amount0;
-          decreaseTotals.amount1 += priorDecreaseArgs.amount1;
-        }
+        if (decLog === dLog || decLog.blockNumber > event.blockNumber) continue;
+        const priorDecreaseArgs = getLiquidityArgs(decLog, "DecreaseLiquidity");
+        if (!priorDecreaseArgs) continue;
+        decreaseTotals.amount0 += priorDecreaseArgs.amount0;
+        decreaseTotals.amount1 += priorDecreaseArgs.amount1;
       }
 
       const collectTotals = { amount0: collectAmount0, amount1: collectAmount1 };
       return {
         status: "found",
-        event: applyCollectTotals(
-          {
-            tokenId,
-            blockNumber: BigInt(dLog.blockNumber),
-            transactionHash: dLog.transactionHash,
-            amount0: decreaseAmount0,
-            amount1: decreaseAmount1,
-            liquidity: dArgs.liquidity,
-            collectedFees0: 0n,
-            collectedFees1: 0n,
-          },
-          collectTotals,
-          decreaseTotals,
-        ),
+        event: applyCollectTotals(event, collectTotals, decreaseTotals),
       };
     } else {
-      // viem fallback: existing pagination loop
+      let selectedLog: PositionLogRecord | null = null;
+
       for (let lo = startBlock; lo <= resolvedLatestBlock; lo += LOGS_CHUNK_SIZE) {
         const hi =
           lo + LOGS_CHUNK_SIZE - 1n < resolvedLatestBlock
             ? lo + LOGS_CHUNK_SIZE - 1n
             : resolvedLatestBlock;
 
-        const decreaseLogs = await withRetry(() =>
-          client.getLogs({
-            address: positionManager,
-            event: parseAbiItem(
-              "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
-            ),
-            args: { tokenId },
-            fromBlock: lo,
-            toBlock: hi,
-          }),
+        const decreaseLogs = await source.getLogs(
+          "DecreaseLiquidity",
+          positionManager,
+          tokenId,
+          lo,
+          hi,
         );
 
-        if (decreaseLogs.length > 0) {
-          const dLog = decreaseLogs[0];
-          const dArgs = toLiquidityArgs(dLog.args);
-          if (!dArgs || dLog.blockNumber == null || dLog.transactionHash == null) {
-            continue;
-          }
-          const decreaseAmount0 = dArgs.amount0;
-          const decreaseAmount1 = dArgs.amount1;
+        selectedLog = selectLatestLog([selectedLog, ...decreaseLogs].filter(isDefined));
+      }
 
-          console.log(`    Found close event at block ${dLog.blockNumber}`);
+      if (selectedLog) {
+        const event = toCloseEvent(selectedLog, tokenId);
+        if (event) {
+          console.log(`    Found close event at block ${event.blockNumber}`);
           const [decreaseTotals, collectTotals] = await Promise.all([
-            sumDecreaseLiquidityLogs(
-              client,
+            sumDecreaseLiquidityLogsFromSource(
+              source,
               positionManager,
               tokenId,
               startBlock,
-              dLog.blockNumber,
+              event.blockNumber,
             ),
-            sumCollectLogs(client, positionManager, tokenId, startBlock, dLog.blockNumber),
+            sumCollectLogsFromSource(source, positionManager, tokenId, startBlock, event.blockNumber),
           ]);
           return {
             status: "found",
-            event: applyCollectTotals(
-              {
-                tokenId,
-                blockNumber: dLog.blockNumber,
-                transactionHash: dLog.transactionHash,
-                amount0: decreaseAmount0,
-                amount1: decreaseAmount1,
-                liquidity: dArgs.liquidity,
-                collectedFees0: 0n,
-                collectedFees1: 0n,
-              },
-              collectTotals,
-              decreaseTotals,
-            ),
+            event: applyCollectTotals(event, collectTotals, decreaseTotals),
           };
         }
       }
@@ -518,51 +469,13 @@ export async function sumDecreaseLiquidityLogs(
   toBlock: bigint,
   hyperSyncClient?: HypersyncClient,
 ): Promise<{ amount0: bigint; amount1: bigint }> {
-  let amount0 = 0n;
-  let amount1 = 0n;
-
-  if (hyperSyncClient) {
-    const paddedTokenId = padUint256(tokenId);
-    const rawLogs = await fetchLogsByAddressAndTopics(
-      hyperSyncClient,
-      positionManager,
-      [[DECREASE_LIQUIDITY_TOPIC], [paddedTokenId]],
-      Number(fromBlock),
-      Number(toBlock) + 1,
-    );
-    for (const log of rawLogs) {
-      const decoded = decodeHyperSyncLog(log, eventAbi);
-      if (decoded && decoded.eventName === "DecreaseLiquidity") {
-        const args = toLiquidityArgs(decoded.args);
-        if (!args) continue;
-        amount0 += args.amount0;
-        amount1 += args.amount1;
-      }
-    }
-  } else {
-    for (let lo = fromBlock; lo <= toBlock; lo += LOGS_CHUNK_SIZE) {
-      const hi = lo + LOGS_CHUNK_SIZE - 1n < toBlock ? lo + LOGS_CHUNK_SIZE - 1n : toBlock;
-      const logs = await withRetry(() =>
-        client.getLogs({
-          address: positionManager,
-          event: parseAbiItem(
-            "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
-          ),
-          args: { tokenId },
-          fromBlock: lo,
-          toBlock: hi,
-        }),
-      );
-      for (const log of logs) {
-        const args = toLiquidityArgs(log.args);
-        if (!args) continue;
-        amount0 += args.amount0;
-        amount1 += args.amount1;
-      }
-    }
-  }
-
-  return { amount0, amount1 };
+  return sumDecreaseLiquidityLogsFromSource(
+    createPositionLogSource(client, hyperSyncClient),
+    positionManager,
+    tokenId,
+    fromBlock,
+    toBlock,
+  );
 }
 
 /**
@@ -577,29 +490,13 @@ export async function sumCollectLogsPublic(
   toBlock: bigint,
   hyperSyncClient?: HypersyncClient,
 ): Promise<{ amount0: bigint; amount1: bigint }> {
-  if (hyperSyncClient) {
-    const paddedTokenId = padUint256(tokenId);
-    const rawLogs = await fetchLogsByAddressAndTopics(
-      hyperSyncClient,
-      positionManager,
-      [[COLLECT_TOPIC], [paddedTokenId]],
-      Number(fromBlock),
-      Number(toBlock) + 1,
-    );
-    let amount0 = 0n;
-    let amount1 = 0n;
-    for (const log of rawLogs) {
-      const decoded = decodeHyperSyncLog(log, eventAbi);
-      if (decoded && decoded.eventName === "Collect") {
-        const args = toCollectArgs(decoded.args);
-        if (!args) continue;
-        amount0 += args.amount0Collect;
-        amount1 += args.amount1Collect;
-      }
-    }
-    return { amount0, amount1 };
-  }
-  return sumCollectLogs(client, positionManager, tokenId, fromBlock, toBlock);
+  return sumCollectLogsFromSource(
+    createPositionLogSource(client, hyperSyncClient),
+    positionManager,
+    tokenId,
+    fromBlock,
+    toBlock,
+  );
 }
 
 async function sumCollectLogs(
@@ -609,32 +506,13 @@ async function sumCollectLogs(
   fromBlock: bigint,
   toBlock: bigint,
 ): Promise<{ amount0: bigint; amount1: bigint }> {
-  let amount0 = 0n;
-  let amount1 = 0n;
-
-  for (let lo = fromBlock; lo <= toBlock; lo += LOGS_CHUNK_SIZE) {
-    const hi = lo + LOGS_CHUNK_SIZE - 1n < toBlock ? lo + LOGS_CHUNK_SIZE - 1n : toBlock;
-    const collectLogs = await withRetry(() =>
-      client.getLogs({
-        address: positionManager,
-        event: parseAbiItem(
-          "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collect, uint256 amount1Collect)",
-        ),
-        args: { tokenId },
-        fromBlock: lo,
-        toBlock: hi,
-      }),
-    );
-
-    for (const log of collectLogs) {
-      const args = toCollectArgs(log.args);
-      if (!args) continue;
-      amount0 += args.amount0Collect;
-      amount1 += args.amount1Collect;
-    }
-  }
-
-  return { amount0, amount1 };
+  return sumCollectLogsFromSource(
+    createPositionLogSource(client),
+    positionManager,
+    tokenId,
+    fromBlock,
+    toBlock,
+  );
 }
 
 function applyCollectTotals(
@@ -660,31 +538,302 @@ function applyCollectTotals(
 
 // === Internal helpers ===
 
-/**
- * Decode a HyperSync raw log using viem's decodeEventLog.
- * Filters out empty topic strings before decoding.
- * Uses strict: false to tolerate minor topic-count mismatches that can occur
- * with raw SDK logs (e.g. trailing null topics from the HyperSync wire format).
- */
-function decodeHyperSyncLog(log: HyperSyncRawLog, abi: any): any {
+function createPositionLogSource(
+  client: EventClient | LogsClient,
+  hyperSyncClient?: HypersyncClient,
+): PositionLogSource {
+  return hyperSyncClient
+    ? createHyperSyncPositionLogSource(client, hyperSyncClient)
+    : createViemPositionLogSource(client);
+}
+
+function createViemPositionLogSource(client: EventClient | LogsClient): PositionLogSource {
+  return {
+    kind: "viem",
+    getLatestBlock: async () => {
+      if (!("getBlockNumber" in client) || typeof client.getBlockNumber !== "function") {
+        throw new Error("Client does not support getBlockNumber");
+      }
+      return withRetry(() => client.getBlockNumber());
+    },
+    getReceipt:
+      "getTransactionReceipt" in client && typeof client.getTransactionReceipt === "function"
+        ? (args) => withRetry(() => client.getTransactionReceipt!(args))
+        : null,
+    getLogs: async (eventName, positionManager, tokenId, fromBlock, toBlock) => {
+      const logs = await withRetry(() =>
+        client.getLogs({
+          address: positionManager,
+          event: EVENT_FILTERS[eventName],
+          args: { tokenId },
+          fromBlock,
+          toBlock,
+        }),
+      );
+
+      return logs.flatMap((log) => {
+        if (log.blockNumber == null || log.transactionHash == null) {
+          return [];
+        }
+        const transactionHash = toLogTransactionHash(log.transactionHash);
+        if (!transactionHash) {
+          return [];
+        }
+        return [
+          {
+            blockNumber: log.blockNumber,
+            transactionHash,
+            logIndex: toBigInt(log.logIndex) ?? undefined,
+            args: log.args,
+          },
+        ];
+      });
+    },
+  };
+}
+
+function createHyperSyncPositionLogSource(
+  client: EventClient | LogsClient,
+  hyperSyncClient: HypersyncClient,
+): PositionLogSource {
+  const viemSource = createViemPositionLogSource(client);
+  return {
+    kind: "hypersync",
+    getLatestBlock: viemSource.getLatestBlock,
+    getReceipt: viemSource.getReceipt,
+    getLogs: async (eventName, positionManager, tokenId, fromBlock, toBlock) => {
+      const rawLogs = await fetchLogsByAddressAndTopics(
+        hyperSyncClient,
+        positionManager,
+        [[EVENT_TOPICS[eventName]], [padUint256(tokenId)]],
+        Number(fromBlock),
+        Number(toBlock) + 1,
+      );
+
+      return rawLogs.flatMap((log) => {
+        const transactionHash = toLogTransactionHash(log.transactionHash);
+        if (!transactionHash) {
+          return [];
+        }
+        return [
+          {
+            blockNumber: BigInt(log.blockNumber),
+            transactionHash,
+            logIndex: BigInt(log.logIndex),
+            topics: log.topics,
+            data: log.data,
+          },
+        ];
+      });
+    },
+  };
+}
+
+async function sumDecreaseLiquidityLogsFromSource(
+  source: PositionLogSource,
+  positionManager: Address,
+  tokenId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<{ amount0: bigint; amount1: bigint }> {
+  return sumPositionLogsFromSource(
+    source,
+    "DecreaseLiquidity",
+    positionManager,
+    tokenId,
+    fromBlock,
+    toBlock,
+    (log) => {
+      const args = getLiquidityArgs(log, "DecreaseLiquidity");
+      return args ? { amount0: args.amount0, amount1: args.amount1 } : null;
+    },
+  );
+}
+
+async function sumCollectLogsFromSource(
+  source: PositionLogSource,
+  positionManager: Address,
+  tokenId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<{ amount0: bigint; amount1: bigint }> {
+  return sumPositionLogsFromSource(
+    source,
+    "Collect",
+    positionManager,
+    tokenId,
+    fromBlock,
+    toBlock,
+    (log) => {
+      const args = getCollectArgs(log);
+      return args ? { amount0: args.amount0Collect, amount1: args.amount1Collect } : null;
+    },
+  );
+}
+
+async function sumPositionLogsFromSource(
+  source: PositionLogSource,
+  eventName: PositionEventName,
+  positionManager: Address,
+  tokenId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+  getAmounts: (log: PositionLogRecord) => { amount0: bigint; amount1: bigint } | null,
+): Promise<{ amount0: bigint; amount1: bigint }> {
+  let amount0 = 0n;
+  let amount1 = 0n;
+
+  if (source.kind === "hypersync") {
+    const logs = await source.getLogs(eventName, positionManager, tokenId, fromBlock, toBlock);
+    for (const log of logs) {
+      const amounts = getAmounts(log);
+      if (!amounts) continue;
+      amount0 += amounts.amount0;
+      amount1 += amounts.amount1;
+    }
+    return { amount0, amount1 };
+  }
+
+  for (let lo = fromBlock; lo <= toBlock; lo += LOGS_CHUNK_SIZE) {
+    const hi = lo + LOGS_CHUNK_SIZE - 1n < toBlock ? lo + LOGS_CHUNK_SIZE - 1n : toBlock;
+    const logs = await source.getLogs(eventName, positionManager, tokenId, lo, hi);
+    for (const log of logs) {
+      const amounts = getAmounts(log);
+      if (!amounts) continue;
+      amount0 += amounts.amount0;
+      amount1 += amounts.amount1;
+    }
+  }
+
+  return { amount0, amount1 };
+}
+
+function toOpenEvent(log: PositionLogRecord, tokenId: bigint): PositionOpenEvent | null {
+  const args = getLiquidityArgs(log, "IncreaseLiquidity");
+  if (!args || args.tokenId !== tokenId) {
+    return null;
+  }
+  return {
+    tokenId,
+    blockNumber: log.blockNumber,
+    transactionHash: log.transactionHash,
+    amount0: args.amount0,
+    amount1: args.amount1,
+    liquidity: args.liquidity,
+  };
+}
+
+function selectLatestLog(logs: readonly PositionLogRecord[]): PositionLogRecord | null {
+  let latest: PositionLogRecord | null = null;
+  for (const log of logs) {
+    if (!latest) {
+      latest = log;
+      continue;
+    }
+    if (log.blockNumber > latest.blockNumber) {
+      latest = log;
+      continue;
+    }
+    if (
+      log.blockNumber === latest.blockNumber &&
+      compareLogOrder(log, latest) > 0
+    ) {
+      latest = log;
+    }
+  }
+  return latest;
+}
+
+function compareLogOrder(a: PositionLogRecord, b: PositionLogRecord): number {
+  if (a.blockNumber !== b.blockNumber) {
+    return a.blockNumber > b.blockNumber ? 1 : -1;
+  }
+
+  if (a.logIndex !== undefined && b.logIndex !== undefined) {
+    if (a.logIndex === b.logIndex) return 0;
+    return a.logIndex > b.logIndex ? 1 : -1;
+  }
+
+  if (a.logIndex !== undefined) return 1;
+  if (b.logIndex !== undefined) return -1;
+  return 0;
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
+function toCloseEvent(log: PositionLogRecord, tokenId: bigint): PositionCloseEvent | null {
+  const args = getLiquidityArgs(log, "DecreaseLiquidity");
+  if (!args || args.tokenId !== tokenId) {
+    return null;
+  }
+  return {
+    tokenId,
+    blockNumber: log.blockNumber,
+    transactionHash: log.transactionHash,
+    amount0: args.amount0,
+    amount1: args.amount1,
+    liquidity: args.liquidity,
+    collectedFees0: 0n,
+    collectedFees1: 0n,
+  };
+}
+
+function getLiquidityArgs(
+  log: PositionLogRecord,
+  eventName: "IncreaseLiquidity" | "DecreaseLiquidity",
+): LiquidityArgs | null {
+  if (log.args !== undefined) {
+    return toLiquidityArgs(log.args);
+  }
+  const decoded = decodePositionLog(log);
+  return decoded && decoded.eventName === eventName ? toLiquidityArgs(decoded.args) : null;
+}
+
+function getCollectArgs(log: PositionLogRecord): CollectArgs | null {
+  if (log.args !== undefined) {
+    return toCollectArgs(log.args);
+  }
+  const decoded = decodePositionLog(log);
+  return decoded && decoded.eventName === "Collect" ? toCollectArgs(decoded.args) : null;
+}
+
+function decodePositionLog(log: PositionLogRecord): any {
+  if (!log.topics) {
+    return null;
+  }
+  return decodeTopicsAndData(log.topics, log.data ?? "0x", log.transactionHash, "");
+}
+
+function toLogTransactionHash(value: string): HexString | null {
+  return isHexString(value) ? value : null;
+}
+
+function decodeTopicsAndData(
+  topicsInput: ReadonlyArray<string | null | undefined>,
+  dataInput: string,
+  transactionHash: string,
+  logIndex: string,
+): any {
   try {
-    const validTopics = toTopics(log.topics);
+    const validTopics = toTopics(topicsInput);
     if (!validTopics) {
       return null;
     }
 
     // Normalise data: SDK may return "" instead of "0x" for empty-data logs.
-    const data = isHexString(log.data) ? log.data : "0x";
+    const data = isHexString(dataInput) ? dataInput : "0x";
 
     return decodeEventLog({
-      abi,
+      abi: eventAbi,
       data,
       topics: validTopics,
       strict: false,
     });
   } catch (err) {
     console.warn(
-      `    decodeHyperSyncLog: failed for tx ${log.transactionHash} logIndex ${log.logIndex}:`,
+      `    decodeHyperSyncLog: failed for tx ${transactionHash} logIndex ${logIndex}:`,
       getErrorMessage(err),
     );
     return null;

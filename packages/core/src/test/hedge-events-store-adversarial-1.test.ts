@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mock, describe, it, expect, beforeEach } from "bun:test";
 
 import { initSchema } from "../db/schema.js";
+import { createHedgeStore } from "../db/hedge-store.js";
 
 // Mock getDb before importing store functions
 let testDb: Database;
@@ -16,8 +17,12 @@ await mock.module("../db/schema.js", () => ({
 import {
   insertHedgeEvent,
   closeHedgeEvent,
+  getAllClosedHedgeEvents,
+  getEarliestHedgeSnapshot,
   getOpenHedgeEvent,
   getHedgeEvents,
+  insertHedgeSnapshot,
+  listHedgeSnapshots,
 } from "../db/store.js";
 import type { StoredHedgeEvent } from "../db/store.js";
 
@@ -49,6 +54,17 @@ describe("hedge-events-store — adversarial tests", () => {
     // Create a fresh in-memory database for each test
     testDb = new Database(":memory:");
     initSchema(testDb);
+  });
+
+  const hedgeStore = createHedgeStore({
+    closeHedgeEvent,
+    getAllClosedHedgeEvents,
+    getEarliestHedgeSnapshot,
+    getHedgeEvents,
+    getOpenHedgeEvent,
+    insertHedgeEvent,
+    insertHedgeSnapshot,
+    listHedgeSnapshots,
   });
 
   // ============================================================================
@@ -131,6 +147,81 @@ describe("hedge-events-store — adversarial tests", () => {
   // Cluster B: Close-before-open and idempotency
   // ============================================================================
   describe("Cluster B: Close-before-open and idempotency", () => {
+    it("scoped HedgeStore allows only one open event per token/coin lifecycle", () => {
+      const first = hedgeStore.recordEvent(minimalHedgeEvent("token-scope", "HYPE"));
+
+      expect(() =>
+        hedgeStore.recordEvent(
+          minimalHedgeEvent("token-scope", "HYPE", {
+            entry_px: 101,
+            size: 2,
+          }),
+        ),
+      ).toThrow("UNIQUE constraint failed");
+
+      expect(
+        hedgeStore.closeOpenEvent({
+          token_id: "token-scope",
+          coin: "HYPE",
+          closed_at: "2024-01-01T12:00:00Z",
+          close_px: 105,
+          realized_pnl: 4.5,
+          funding_earned: 0.1,
+          close_reason: "manual",
+          hl_fill_hash: "scope-close-1",
+        }),
+      )?.toMatchObject({ id: first.id, status: "closed" });
+
+      const reopened = hedgeStore.recordEvent(
+        minimalHedgeEvent("token-scope", "HYPE", {
+          opened_at: "2024-01-02T00:00:00Z",
+          entry_px: 110,
+          size: 1,
+        }),
+      );
+
+      expect(hedgeStore.findOpenEvent("token-scope", "HYPE")?.id).toBe(reopened.id);
+      expect(hedgeStore.listEvents("token-scope")).toHaveLength(2);
+      expect(
+        hedgeStore.listEvents("token-scope").filter((event) => event.coin === "HYPE" && event.status === "open"),
+      ).toHaveLength(1);
+    });
+
+    it("scoped HedgeStore closes idempotently by fill hash", () => {
+      const opened = hedgeStore.recordEvent(minimalHedgeEvent("token-idempotent", "HYPE"));
+
+      const firstClose = hedgeStore.closeOpenEvent({
+        token_id: "token-idempotent",
+        coin: "HYPE",
+        closed_at: "2024-01-01T00:00:00Z",
+        close_px: 105,
+        realized_pnl: 4.5,
+        funding_earned: 0.1,
+        close_reason: "manual",
+        hl_fill_hash: "scope-fill-1",
+      });
+      const secondClose = hedgeStore.closeOpenEvent({
+        token_id: "token-idempotent",
+        coin: "HYPE",
+        closed_at: "2024-01-02T00:00:00Z",
+        close_px: 999,
+        realized_pnl: 999,
+        funding_earned: 999,
+        close_reason: "different",
+        hl_fill_hash: "scope-fill-1",
+      });
+
+      expect(firstClose?.id).toBe(opened.id);
+      expect(secondClose).toMatchObject({
+        id: firstClose?.id,
+        closed_at: "2024-01-01T00:00:00Z",
+        close_px: 105,
+        realized_pnl: 4.5,
+        hl_fill_hash: "scope-fill-1",
+      });
+      expect(hedgeStore.listClosedEvents().filter((event) => event.hl_fill_hash === "scope-fill-1")).toHaveLength(1);
+    });
+
     it("insertHedgeEvent with duplicate (token_id, coin) when first is open — throws UNIQUE constraint error", () => {
       // Insert an open event for token-123, HYPE
       insertHedgeEvent(minimalHedgeEvent("token-123", "HYPE"));

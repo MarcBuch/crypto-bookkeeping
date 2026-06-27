@@ -1,28 +1,13 @@
 import { createClient } from "../chain/client.js";
-import {
-  findOpenEvent,
-  findCloseEvent,
-  sumDecreaseLiquidityLogs,
-  sumCollectLogsPublic,
-} from "../chain/events.js";
-import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import {
-  getPoolAddress,
-  getPoolState,
-  getTokenInfo,
-  computeUnclaimedFees,
-} from "../chain/pools.js";
 import { getAllPositions, type PositionData } from "../chain/positions.js";
-import { withRetry } from "../chain/rpc.js";
 import type { Config } from "../config.js";
-import { upsertPosition, getPosition } from "../db/store.js";
-import {
-  calculateFullPnL,
-  deriveEntryPriceFromAmounts,
-  getTokenAmounts,
-} from "../math/divergence-loss.js";
+import { sqlitePositionStore } from "../db/position-store.js";
+import { calculateFullPnL } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-import { persistPositionEntry } from "./position-entry.js";
+import {
+  createPositionLifecycleContext,
+  resolvePositionLifecycle,
+} from "./position-lifecycle.js";
 import { getHistoricalPrice, getUsdPrices } from "./pricing.js";
 
 export interface PnLView {
@@ -102,13 +87,7 @@ export async function getPnLView(
   rawPositions?: PositionData[],
 ): Promise<PnLView[]> {
   const client = createClient(config);
-
-  const hyperSyncClient = config.hyperSync?.apiToken
-    ? createHyperSyncClient({
-        url: config.hyperSync.url ?? DEFAULT_HYPERSYNC_URL,
-        apiToken: config.hyperSync.apiToken,
-      })
-    : undefined;
+  const lifecycleContext = await createPositionLifecycleContext(config, { includeLatestBlock: true });
 
   const positions =
     rawPositions ??
@@ -128,367 +107,43 @@ export async function getPnLView(
 
   const result: PnLView[] = [];
 
-  // logsFromBlock is the number of blocks to scan back (window size), matching
-  // the events.ts windowBlocks parameter. undefined → events.ts uses its default.
-  const logsWindowBlocks = config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined;
-
-  // Fetch latestBlock once to share across all position lookups
-  const latestBlock = await withRetry(() => client.getBlockNumber());
-
   for (const pos of filteredPositions) {
-    const [token0Info, token1Info] = await Promise.all([
-      getTokenInfo(client, pos.token0),
-      getTokenInfo(client, pos.token1),
-    ]);
-
-    const poolAddress = await getPoolAddress(
-      client,
-      config.contracts.factory,
-      pos.token0,
-      pos.token1,
-      pos.fee,
-    );
-
-    const poolState = await getPoolState(client, poolAddress);
-    const isActive = pos.liquidity > 0n;
-
-    // Find open event (entry amounts)
-    let entryAmount0 = 0n;
-    let entryAmount1 = 0n;
-    let entryLiquidity = pos.liquidity;
-    let entrySqrtPriceX96: bigint | undefined;
-
     const posConfig = config.positions?.[pos.tokenId.toString()];
     if (!posConfig) {
       console.warn(
         `[lp-tracker] Position ${pos.tokenId.toString()} found on-chain but missing from config.positions — consider adding it`,
       );
     }
-    const storedPos = getPosition(pos.tokenId.toString());
-    const hasStoredEntry = storedPos?.entry_amount0 && storedPos.entry_amount0 !== "0";
-    const hasStoredLiquidity = storedPos?.entry_liquidity && storedPos.entry_liquidity !== "0";
-    let entryBlock = storedPos?.entry_block != null ? BigInt(storedPos.entry_block) : undefined;
-    let closeBlock = storedPos?.close_block ?? null;
-    if (storedPos?.entry_sqrt_price_x96) {
-      entrySqrtPriceX96 = BigInt(storedPos.entry_sqrt_price_x96);
+    const lifecycle = await resolvePositionLifecycle(lifecycleContext, pos, {
+      entryNotFound: "skip",
+    });
+    if (lifecycle.status === "rpc_error") {
+      console.error(
+        `[lp-tracker] RPC error discovering ${lifecycle.stage} event for position ${pos.tokenId.toString()}:`,
+        lifecycle.error,
+      );
+      continue;
+    }
+    if (lifecycle.status === "skip") {
+      continue;
     }
 
-    if (posConfig?.openTx) {
-      // Config fast path: resolve entry amounts from known tx hash
-      const openResult = await findOpenEvent(
-        client,
-        config.contracts.positionManager,
-        pos.tokenId,
-        config.wallet,
-        posConfig.openTx,
-        undefined, // fromBlock — let the window default apply
-        logsWindowBlocks, // windowBlocks from config
-        latestBlock,
-        hyperSyncClient,
-      );
-
-      if (openResult.status === "rpc_error") {
-        console.error(
-          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
-          openResult.error,
-        );
-        continue;
-      }
-      if (openResult.status === "found") {
-        const openEvent = openResult.event;
-        entryAmount0 = openEvent.amount0;
-        entryAmount1 = openEvent.amount1;
-        entryLiquidity = openEvent.liquidity;
-        entryBlock = openEvent.blockNumber;
-        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-          openEvent.amount0,
-          openEvent.amount1,
-          openEvent.liquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
-
-        // Persist entry data + open_tx if missing or partially populated.
-        if (
-          !hasStoredEntry ||
-          !hasStoredLiquidity ||
-          !storedPos?.open_tx ||
-          storedPos.entry_block == null ||
-          storedPos.entry_sqrt_price_x96 == null
-        ) {
-          persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-        }
-      } else {
-        // not_found — could not resolve entry from config tx — skip this position
-        continue;
-      }
-    } else if (storedPos?.open_tx) {
-      // DB fast path: open_tx already persisted, entry data is already in the DB
-      entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
-      entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-      if (hasStoredLiquidity && storedPos.entry_liquidity) {
-        entryLiquidity = BigInt(storedPos.entry_liquidity);
-      }
-    } else if (storedPos && hasStoredEntry && (hasStoredLiquidity || isActive)) {
-      entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
-      entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-      if (hasStoredLiquidity && storedPos.entry_liquidity) {
-        entryLiquidity = BigInt(storedPos.entry_liquidity);
-      }
-    } else {
-      // Slow path: scan chain for open event
-      const openResult = await findOpenEvent(
-        client,
-        config.contracts.positionManager,
-        pos.tokenId,
-        config.wallet,
-        undefined,
-        undefined, // fromBlock — let the window default apply
-        logsWindowBlocks, // windowBlocks from config
-        latestBlock,
-        hyperSyncClient,
-      );
-
-      if (openResult.status === "rpc_error") {
-        console.error(
-          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
-          openResult.error,
-        );
-        continue;
-      }
-      if (openResult.status === "found") {
-        const openEvent = openResult.event;
-        entryAmount0 = openEvent.amount0;
-        entryAmount1 = openEvent.amount1;
-        entryLiquidity = openEvent.liquidity;
-        entryBlock = openEvent.blockNumber;
-        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-          openEvent.amount0,
-          openEvent.amount1,
-          openEvent.liquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
-
-        // Store entry data + open_tx for future use
-        persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-      } else {
-        // not_found — could not find entry — skip this position
-        continue;
-      }
-    }
-
-    // Get exit/current amounts and fees
-    let exitAmount0 = 0n;
-    let exitAmount1 = 0n;
-    let feesCollected0 = 0n;
-    let feesCollected1 = 0n;
-    let pendingFees0 = 0n;
-    let pendingFees1 = 0n;
-    let exitSqrtPriceX96 = poolState.sqrtPriceX96;
-
-    if (isActive) {
-      // Active position: use current amounts
-      const currentAmounts = getTokenAmounts(
-        pos.liquidity,
-        poolState.sqrtPriceX96,
-        pos.tickLower,
-        pos.tickUpper,
-      );
-      exitAmount0 = currentAmounts.amount0;
-      exitAmount1 = currentAmounts.amount1;
-
-      // Account for partial withdrawals: any DecreaseLiquidity events since
-      // the open block represent capital that was removed from the position.
-      // Without this, reduced capital looks like a loss vs the original entry.
-      if (entryBlock !== undefined) {
-        const [withdrawn, alreadyCollected] = await Promise.all([
-          sumDecreaseLiquidityLogs(
-            client,
-            config.contracts.positionManager,
-            pos.tokenId,
-            entryBlock,
-            latestBlock,
-            hyperSyncClient,
-          ),
-          sumCollectLogsPublic(
-            client,
-            config.contracts.positionManager,
-            pos.tokenId,
-            entryBlock,
-            latestBlock,
-            hyperSyncClient,
-          ),
-        ]);
-        // Add withdrawn principal back into exit amounts so P&L isn't distorted
-        exitAmount0 += withdrawn.amount0;
-        exitAmount1 += withdrawn.amount1;
-
-        // Fees already collected in prior Collect txs (not yet in uncollected accrual).
-        // alreadyCollected includes both fees and principal from DecreaseLiquidity,
-        // so subtract the withdrawn principal to isolate fees.
-        const prevFees0 =
-          alreadyCollected.amount0 > withdrawn.amount0
-            ? alreadyCollected.amount0 - withdrawn.amount0
-            : 0n;
-        const prevFees1 =
-          alreadyCollected.amount1 > withdrawn.amount1
-            ? alreadyCollected.amount1 - withdrawn.amount1
-            : 0n;
-        feesCollected0 += prevFees0;
-        feesCollected1 += prevFees1;
-      }
-
-      // Calculate uncollected fees (currently accrued, not yet claimed)
-      const feeResult = await computeUnclaimedFees(
-        client,
-        poolAddress,
-        pos,
-        poolState,
-        token0Info.decimals,
-        token1Info.decimals,
-      );
-      const unclaimedFees0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
-      const unclaimedFees1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
-      // Pending Earnings = only what's currently uncollected on-chain
-      pendingFees0 = unclaimedFees0;
-      pendingFees1 = unclaimedFees1;
-      // Total fees for P&L = previously collected + currently uncollected
-      feesCollected0 += unclaimedFees0;
-      feesCollected1 += unclaimedFees1;
-    } else {
-      // Closed position: use cached exit data if available
-      const hasCachedExit =
-        storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
-
-      if (hasCachedExit && storedPos) {
-        exitAmount0 = BigInt(storedPos.exit_amount0 ?? "0");
-        exitAmount1 = BigInt(storedPos.exit_amount1 ?? "0");
-        feesCollected0 = BigInt(storedPos.fees_collected0 ?? "0");
-        feesCollected1 = BigInt(storedPos.fees_collected1 ?? "0");
-        // Use stored exit price if available (stable across syncs)
-        if (storedPos.exit_sqrt_price_x96) {
-          exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
-        } else if (storedPos.close_block) {
-          // Derive from fixed withdrawal amounts. Block-level slot0 can reflect
-          // later swaps/reopens in the same transaction, not the burn price.
-          exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
-            exitAmount0,
-            exitAmount1,
-            entryLiquidity,
-            pos.tickLower,
-            pos.tickUpper,
-          );
-          // Persist so future syncs skip getPoolPriceAtBlock entirely
-          upsertPosition({
-            token_id: pos.tokenId.toString(),
-            token0: pos.token0,
-            token1: pos.token1,
-            token0_symbol: token0Info.symbol,
-            token1_symbol: token1Info.symbol,
-            token0_decimals: token0Info.decimals,
-            token1_decimals: token1Info.decimals,
-            fee: pos.fee,
-            tick_lower: pos.tickLower,
-            tick_upper: pos.tickUpper,
-            entry_sqrt_price_x96: storedPos.entry_sqrt_price_x96 ?? null,
-            entry_block: storedPos.entry_block ?? null,
-            entry_amount0: storedPos.entry_amount0 ?? null,
-            entry_amount1: storedPos.entry_amount1 ?? null,
-            entry_liquidity: storedPos.entry_liquidity ?? null,
-            exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
-          });
-        }
-      } else {
-        // Slow path: find the close event on chain
-        const closeResult = await findCloseEvent(
-          client,
-          config.contracts.positionManager,
-          pos.tokenId,
-          config.wallet,
-          posConfig?.closeTx,
-          entryBlock, // explicit fromBlock when known — wins over window
-          logsWindowBlocks, // windowBlocks fallback when entryBlock undefined
-          latestBlock,
-          hyperSyncClient,
-        );
-
-        if (closeResult.status === "rpc_error") {
-          console.error(
-            `[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`,
-            closeResult.error,
-          );
-          continue;
-        }
-        if (closeResult.status === "found") {
-          const closeEvent = closeResult.event;
-          exitAmount0 = closeEvent.amount0;
-          exitAmount1 = closeEvent.amount1;
-          feesCollected0 = closeEvent.collectedFees0;
-          feesCollected1 = closeEvent.collectedFees1;
-          closeBlock = Number(closeEvent.blockNumber);
-
-          // Use stored exit price if available (guards against RPC inconsistency for
-          // historical blocks — once stored, the value never changes across syncs).
-          // Only call getPoolPriceAtBlock when there is nothing stored yet.
-          if (storedPos?.exit_sqrt_price_x96 && !posConfig?.closeTx) {
-            exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
-          } else {
-            // Derive from the close event amounts. The pool's slot0 at the end
-            // of a rerange transaction can be after the next position opens.
-            exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
-              closeEvent.amount0,
-              closeEvent.amount1,
-              closeEvent.liquidity,
-              pos.tickLower,
-              pos.tickUpper,
-            );
-          }
-
-          // Persist close data for future fast-path use
-          upsertPosition({
-            token_id: pos.tokenId.toString(),
-            token0: pos.token0,
-            token1: pos.token1,
-            token0_symbol: token0Info.symbol,
-            token1_symbol: token1Info.symbol,
-            token0_decimals: token0Info.decimals,
-            token1_decimals: token1Info.decimals,
-            fee: pos.fee,
-            tick_lower: pos.tickLower,
-            tick_upper: pos.tickUpper,
-            entry_sqrt_price_x96: storedPos?.entry_sqrt_price_x96 ?? null,
-            entry_block: entryBlock != null ? Number(entryBlock) : null,
-            entry_amount0: entryAmount0.toString(),
-            entry_amount1: entryAmount1.toString(),
-            entry_liquidity: entryLiquidity.toString(),
-            open_tx: storedPos?.open_tx ?? null,
-            close_tx: closeEvent.transactionHash,
-            exit_amount0: closeEvent.amount0.toString(),
-            exit_amount1: closeEvent.amount1.toString(),
-            fees_collected0: closeEvent.collectedFees0.toString(),
-            fees_collected1: closeEvent.collectedFees1.toString(),
-            close_block: closeBlock,
-            exit_sqrt_price_x96: exitSqrtPriceX96.toString(),
-          });
-        }
-        // If no close event found, continue with zeroed amounts and current price
-      }
-    }
+    const { facts } = lifecycle;
+    const { token0Info, token1Info, storedPos, closeBlock } = facts;
 
     // Calculate full P&L
     const pnl = calculateFullPnL({
-      entryAmount0Raw: entryAmount0,
-      entryAmount1Raw: entryAmount1,
-      exitAmount0Raw: exitAmount0,
-      exitAmount1Raw: exitAmount1,
-      feesCollected0Raw: feesCollected0,
-      feesCollected1Raw: feesCollected1,
-      entrySqrtPriceX96,
-      exitSqrtPriceX96,
+      entryAmount0Raw: facts.entryAmount0,
+      entryAmount1Raw: facts.entryAmount1,
+      exitAmount0Raw: facts.exitAmount0,
+      exitAmount1Raw: facts.exitAmount1,
+      feesCollected0Raw: facts.totalFees0,
+      feesCollected1Raw: facts.totalFees1,
+      entrySqrtPriceX96: facts.entrySqrtPriceX96,
+      exitSqrtPriceX96: facts.exitSqrtPriceX96,
       tickLower: pos.tickLower,
       tickUpper: pos.tickUpper,
-      liquidity: entryLiquidity,
+      liquidity: facts.entryLiquidity,
       decimals0: token0Info.decimals,
       decimals1: token1Info.decimals,
     });
@@ -516,26 +171,24 @@ export async function getPnLView(
             getHistoricalPrice(config, t1sym, isoTimestamp, "usd"),
           ]);
           // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
-          upsertPosition({
-            token_id: pos.tokenId.toString(),
-            token0: pos.token0,
-            token1: pos.token1,
-            token0_symbol: token0Info.symbol,
-            token1_symbol: token1Info.symbol,
-            token0_decimals: token0Info.decimals,
-            token1_decimals: token1Info.decimals,
-            fee: pos.fee,
-            tick_lower: pos.tickLower,
-            tick_upper: pos.tickUpper,
-            entry_sqrt_price_x96:
-              entrySqrtPriceX96?.toString() ?? storedPos?.entry_sqrt_price_x96 ?? null,
-            entry_block: entryBlock != null ? Number(entryBlock) : (storedPos?.entry_block ?? null),
-            entry_amount0: entryAmount0.toString(),
-            entry_amount1: entryAmount1.toString(),
-            entry_liquidity: entryLiquidity.toString(),
-            close_block: closeBlock,
-            close_usd_price0: token0UsdPrice,
-            close_usd_price1: token1UsdPrice,
+          sqlitePositionStore.persistCloseUsdPrices({
+            pos,
+            tokens: { token0Info, token1Info },
+            entry: {
+              blockNumber:
+                facts.entryBlock != null
+                  ? facts.entryBlock
+                  : storedPos?.entry_block != null
+                    ? BigInt(storedPos.entry_block)
+                    : undefined,
+              amount0: facts.entryAmount0,
+              amount1: facts.entryAmount1,
+              liquidity: facts.entryLiquidity,
+              sqrtPriceX96: facts.entrySqrtPriceX96,
+            },
+            closeBlock,
+            closeUsdPrice0: token0UsdPrice,
+            closeUsdPrice1: token1UsdPrice,
           });
         } catch {
           // Graceful degradation: leave prices as null
@@ -579,8 +232,8 @@ export async function getPnLView(
 
     // Pending Earnings: only the currently uncollected fees (for active positions).
     // For closed positions pendingFees0/1 stay 0n (nothing left to collect).
-    const pendingFees0Human = Number(pendingFees0) / 10 ** token0Info.decimals;
-    const pendingFees1Human = Number(pendingFees1) / 10 ** token1Info.decimals;
+    const pendingFees0Human = Number(facts.pendingFees0) / 10 ** token0Info.decimals;
+    const pendingFees1Human = Number(facts.pendingFees1) / 10 ** token1Info.decimals;
     const pendingFeesValueInToken1 = pendingFees0Human * pnl.exitPrice + pendingFees1Human;
     const pendingFeesValueUsd =
       token0UsdPrice !== null && token1UsdPrice !== null
@@ -592,7 +245,7 @@ export async function getPnLView(
       pair: `${t0sym}/${t1sym}`,
       token0Symbol: t0sym,
       token1Symbol: t1sym,
-      status: isActive ? "active" : "closed",
+      status: facts.status,
       entryPrice: pnl.entryPrice,
       exitPrice: pnl.exitPrice,
       priceChangePercent: (pnl.exitPrice - pnl.entryPrice) / pnl.entryPrice,

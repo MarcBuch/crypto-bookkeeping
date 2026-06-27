@@ -373,8 +373,8 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
         token_name, transaction_type, source, is_error, incoming_quantity, incoming_asset,
         outgoing_quantity, outgoing_asset, cost_eur, proceeds_eur, gain_eur,
         holding_duration_days, synced_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
         hash = excluded.hash,
         block_number = excluded.block_number,
        time_stamp = excluded.time_stamp,
@@ -399,7 +399,8 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
         outgoing_quantity = excluded.outgoing_quantity,
         outgoing_asset = excluded.outgoing_asset,
         synced_at = excluded.synced_at,
-        updated_at = datetime('now')`,
+        updated_at = datetime('now')
+      WHERE tax_transactions.source != 'manual'`,
     [
       transaction.id,
       transaction.hash,

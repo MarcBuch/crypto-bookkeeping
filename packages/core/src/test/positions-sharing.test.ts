@@ -16,6 +16,7 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 let mockGetAllPositionsCallCount = 0;
 let mockGetAllPositionsResult: unknown = [];
 let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
+let mockFindOpenEventCallCount = 0;
 
 await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => {
@@ -56,12 +57,15 @@ await mock.module("../chain/client.js", () => ({
 }));
 
 await mock.module("../chain/events.js", () => ({
-  findOpenEvent: async () => ({
-    blockNumber: 100000n,
-    amount0: 1000000000000000000n, // 1 token with 18 decimals
-    amount1: 1000000000n, // 1 USDC with 6 decimals
-    liquidity: 1000000000000000000n, // 1e18
-  }),
+  findOpenEvent: async () => {
+    mockFindOpenEventCallCount++;
+    return {
+      blockNumber: 100000n,
+      amount0: 1000000000000000000n, // 1 token with 18 decimals
+      amount1: 1000000000n, // 1 USDC with 6 decimals
+      liquidity: 1000000000000000000n, // 1e18
+    };
+  },
   findCloseEvent: async () => null,
   getPoolPriceAtBlock: async () => ({ sqrtPriceX96: 79228162514264337593543950336n }),
 }));
@@ -82,7 +86,7 @@ await mock.module("../services/pnl.js", () => ({
 // ---------------------------------------------------------------------------
 
 import { listCachedPositionViews, listCachedPnLViews } from "../db/store.js";
-import { syncLpData } from "../services/positions.js";
+import { getPositionsView, syncLpData } from "../services/positions.js";
 import { useTestDb } from "./helpers/db.js";
 
 // ---------------------------------------------------------------------------
@@ -162,6 +166,7 @@ beforeEach(() => {
   mockGetAllPositionsCallCount = 0;
   mockGetAllPositionsResult = [];
   mockGetPnLView = async () => [];
+  mockFindOpenEventCallCount = 0;
 });
 
 afterEach(() => {
@@ -242,5 +247,12 @@ describe("syncLpData — position sharing", () => {
     const result = await syncLpData(fakeConfig);
 
     expect(result.positionCount).toBe(1);
+  });
+
+  it("getPositionsView uses cheap projection without scanning entry events", async () => {
+    const result = await getPositionsView(fakeConfig, [fakePosData]);
+
+    expect(result).toHaveLength(1);
+    expect(mockFindOpenEventCallCount).toBe(0);
   });
 });

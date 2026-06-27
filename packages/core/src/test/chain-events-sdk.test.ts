@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 
 import { encodeAbiParameters } from "viem";
 
-import { findCloseEvent, findOpenEvent } from "../chain/events.js";
+import {
+  findCloseEvent,
+  findOpenEvent,
+  sumCollectLogsPublic,
+  sumDecreaseLiquidityLogs,
+} from "../chain/events.js";
 import { padUint256 } from "../chain/hypersync.js";
 import { makeHypersyncClient } from "./helpers/hypersync.js";
 
@@ -35,6 +40,12 @@ interface MockLog {
   data?: string;
   topics: (string | undefined | null)[];
 }
+
+type SimpleEventLog = {
+  args: Record<string, bigint>;
+  blockNumber: bigint;
+  transactionHash: Hex;
+};
 
 /**
  * Build a mock viem-like Client for fallback tests (getLogs path).
@@ -78,6 +89,24 @@ function makeCloseClient(
         throw new Error("getLogs should not be called");
       }),
   };
+}
+
+function makeEventLog(
+  args: Record<string, bigint>,
+  blockNumber: bigint,
+  transactionHash: Hex,
+): SimpleEventLog {
+  return {
+    args,
+    blockNumber,
+    transactionHash,
+  };
+}
+
+function asGetLogs(
+  fn: (args?: { fromBlock?: bigint; toBlock?: bigint }) => Promise<SimpleEventLog[]>,
+): GetLogs {
+  return fn as unknown as GetLogs;
 }
 
 /**
@@ -158,6 +187,50 @@ function mockCollectLog(
 // ============================================================================
 
 describe("findOpenEvent SDK path", () => {
+  it("uses the known open transaction receipt path before any SDK scan", async () => {
+    const tokenId = 123n;
+    const latestBlock = 10_000n;
+    const queries: any[] = [];
+    const receipt = makeReceipt(
+      [
+        {
+          topics: [INCREASE_LIQUIDITY_TOPIC, padUint256(tokenId)],
+          data: encodeAbiParameters(
+            [{ type: "uint128" }, { type: "uint256" }, { type: "uint256" }],
+            [77n, 88n, 99n],
+          ),
+        },
+      ],
+      4_321n,
+      TX_HASH,
+    );
+
+    const hyperSyncClient = makeHyperSyncMock(async (query) => {
+      queries.push(query);
+      return {
+        data: { logs: [], blocks: [], transactions: [], traces: [] },
+        nextBlock: Number(latestBlock) + 1,
+        archiveHeight: Number(latestBlock) + 1,
+        totalExecutionTime: 1,
+      };
+    });
+
+    const result = await findOpenEvent(
+      makeCloseClient(receipt, undefined, latestBlock),
+      POSITION_MANAGER,
+      tokenId,
+      WALLET,
+      TX_HASH,
+      undefined,
+      undefined,
+      latestBlock,
+      hyperSyncClient,
+    );
+
+    expect(result.status).toBe("found");
+    expect(queries).toHaveLength(0);
+  });
+
   it("scenario 1: found — returns PositionOpenEvent with correct fields", async () => {
     const tokenId = 123n;
     const liquidity = 1000n;
@@ -306,6 +379,58 @@ describe("findOpenEvent SDK path", () => {
 // ============================================================================
 
 describe("findCloseEvent SDK path", () => {
+  it("pads tokenId and uses inclusive/exclusive block bounds in HyperSync queries", async () => {
+    const tokenId = 456n;
+    const latestBlock = 10_000n;
+    const queries: any[] = [];
+
+    const hyperSyncClient = makeHyperSyncMock(async (query) => {
+      queries.push(query);
+      if (queries.length === 1) {
+        return {
+          data: {
+            logs: [mockDecreaseLiquidityLog(tokenId, 2000n, 1000n, 3000n, 6000)],
+            blocks: [{ number: 6000, timestamp: 1700001000 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: Number(latestBlock) + 1,
+          archiveHeight: Number(latestBlock) + 1,
+          totalExecutionTime: 1,
+        };
+      }
+      return {
+        data: { logs: [], blocks: [], transactions: [], traces: [] },
+        nextBlock: Number(latestBlock) + 1,
+        archiveHeight: Number(latestBlock) + 1,
+        totalExecutionTime: 1,
+      };
+    });
+
+    const result = await findCloseEvent(
+      mockViemClient(),
+      POSITION_MANAGER,
+      tokenId,
+      WALLET,
+      undefined,
+      222n,
+      undefined,
+      latestBlock,
+      hyperSyncClient,
+    );
+
+    expect(result.status).toBe("found");
+    expect(queries).toHaveLength(2);
+    for (const query of queries) {
+      expect(query.fromBlock).toBe(222);
+      expect(query.toBlock).toBe(10001);
+      expect(query.logs[0]?.include?.address).toEqual([POSITION_MANAGER.toLowerCase()]);
+      expect(query.logs[0]?.include?.topics?.[1]).toEqual([padUint256(tokenId)]);
+    }
+    expect(queries[0]?.logs[0]?.include?.topics?.[0]).toEqual([DECREASE_LIQUIDITY_TOPIC]);
+    expect(queries[1]?.logs[0]?.include?.topics?.[0]).toEqual([COLLECT_TOPIC]);
+  });
+
   // ============================================================================
   // Scenario 5: findCloseEvent SDK path — found with no Collect logs (fees = 0)
   // ============================================================================
@@ -1210,6 +1335,83 @@ describe("SDK path edge cases", () => {
     expect(result.status).toBe("not_found");
   });
 
+  it("skips malformed HyperSync liquidity logs instead of throwing through the seam", async () => {
+    const malformedLog: MockLog = {
+      transactionHash: TX_HASH,
+      logIndex: 0,
+      blockNumber: 5000,
+      address: POSITION_MANAGER,
+      data: "0x1234",
+      topics: [DECREASE_LIQUIDITY_TOPIC, padUint256(222n)],
+    };
+
+    const hyperSyncClient = makeHyperSyncMock(async () => ({
+      data: {
+        logs: [malformedLog],
+        blocks: [{ number: 5000, timestamp: 1700000000 }],
+        transactions: [],
+        traces: [],
+      },
+      nextBlock: 10_001,
+      archiveHeight: 10_001,
+      totalExecutionTime: 1,
+    }));
+
+    const result = await findCloseEvent(
+      mockViemClient(),
+      POSITION_MANAGER,
+      222n,
+      WALLET,
+      undefined,
+      undefined,
+      undefined,
+      10_000n,
+      hyperSyncClient,
+    );
+
+    expect(result.status).toBe("not_found");
+  });
+
+  it("returns rpc_error when HyperSync collect aggregation fails after locating the close lifecycle", async () => {
+    const tokenId = 111n;
+    let callCount = 0;
+    const boom = new Error("collect page failed");
+    const hyperSyncClient = makeHyperSyncMock(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          data: {
+            logs: [mockDecreaseLiquidityLog(tokenId, 50n, 3000n, 4000n, 600)],
+            blocks: [{ number: 600, timestamp: 1700000600 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: 10_001,
+          archiveHeight: 10_001,
+          totalExecutionTime: 1,
+        };
+      }
+      throw boom;
+    });
+
+    const result = await findCloseEvent(
+      mockViemClient(),
+      POSITION_MANAGER,
+      tokenId,
+      WALLET,
+      undefined,
+      100n,
+      undefined,
+      10_000n,
+      hyperSyncClient,
+    );
+
+    expect(result.status).toBe("rpc_error");
+    if (result.status === "rpc_error") {
+      expect(result.error).toBe(boom);
+    }
+  });
+
   it("verifies tokenId matches in SDK results (defensive check)", async () => {
     const requestedTokenId = 500n;
     const returnedTokenId = 501n; // Different!
@@ -1244,5 +1446,158 @@ describe("SDK path edge cases", () => {
 
     // Should return not_found because tokenId doesn't match
     expect(result.status).toBe("not_found");
+  });
+});
+
+describe("adapter parity", () => {
+  it("returns the same close lifecycle event across viem and HyperSync adapters", async () => {
+    const tokenId = 901n;
+    const decrease = { tokenId, liquidity: 50n, amount0: 3000n, amount1: 4000n };
+    const priorDecrease = { tokenId, liquidity: 25n, amount0: 500n, amount1: 700n };
+    const priorCollect = { tokenId, amount0Collect: 200n, amount1Collect: 300n };
+    const closeCollect = { tokenId, amount0Collect: 3_800n, amount1Collect: 5_200n };
+
+    let viemCall = 0;
+    const viemClient: OpenClient = {
+      getBlockNumber: async () => 10_000n,
+      getLogs: asGetLogs(async () => {
+        viemCall += 1;
+        if (viemCall === 1) {
+          return [makeEventLog(decrease, 600n, TX_HASH)];
+        }
+        if (viemCall === 2) {
+          return [
+            makeEventLog(
+              priorDecrease,
+              400n,
+              "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            makeEventLog(decrease, 600n, TX_HASH),
+          ];
+        }
+        return [
+          makeEventLog(priorCollect, 450n, "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+          makeEventLog(closeCollect, 600n, TX_HASH),
+        ];
+      }),
+    };
+
+    let sdkCall = 0;
+    const hyperSyncClient = makeHyperSyncMock(async () => {
+      sdkCall += 1;
+      if (sdkCall === 1) {
+        return {
+          data: {
+            logs: [
+              {
+                ...mockDecreaseLiquidityLog(tokenId, 25n, 500n, 700n, 400),
+                transactionHash:
+                  "0x1111bbbbccccddddeeeeffffaaaaabbbbccccddddeeeeffffaaaaabbbbcccc",
+              },
+              {
+                ...mockDecreaseLiquidityLog(tokenId, 50n, 3000n, 4000n, 600),
+                transactionHash: TX_HASH,
+              },
+            ],
+            blocks: [
+              { number: 400, timestamp: 1700000400 },
+              { number: 600, timestamp: 1700000600 },
+            ],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: 10_001,
+          archiveHeight: 10_001,
+          totalExecutionTime: 1,
+        };
+      }
+      return {
+        data: {
+          logs: [
+            mockCollectLog(tokenId, WALLET, 200n, 300n, 450, 0),
+            mockCollectLog(tokenId, WALLET, 3800n, 5200n, 600, 1),
+          ],
+          blocks: [
+            { number: 450, timestamp: 1700000450 },
+            { number: 600, timestamp: 1700000600 },
+          ],
+          transactions: [],
+          traces: [],
+        },
+        nextBlock: 10_001,
+        archiveHeight: 10_001,
+        totalExecutionTime: 1,
+      };
+    });
+
+    const [viemResult, hypersyncResult] = await Promise.all([
+      findCloseEvent(viemClient, POSITION_MANAGER, tokenId, WALLET, undefined, 300n),
+      findCloseEvent(
+        mockViemClient(),
+        POSITION_MANAGER,
+        tokenId,
+        WALLET,
+        undefined,
+        300n,
+        undefined,
+        10_000n,
+        hyperSyncClient,
+      ),
+    ]);
+
+    expect(viemResult).toEqual(hypersyncResult);
+  });
+
+  it("returns the same aggregated sums across adapters", async () => {
+    const tokenId = 700n;
+    const viemDecreaseClient = {
+      getLogs: asGetLogs(async () => [
+        makeEventLog({ tokenId, liquidity: 1n, amount0: 10n, amount1: 20n }, 100n, TX_HASH),
+      ]),
+    };
+    const viemCollectClient = {
+      getLogs: asGetLogs(async () => [
+        makeEventLog({ tokenId, amount0Collect: 5n, amount1Collect: 7n }, 100n, TX_HASH),
+      ]),
+    };
+
+    let sdkCall = 0;
+    const hyperSyncClient = makeHyperSyncMock(async () => {
+      sdkCall += 1;
+      if (sdkCall === 1) {
+        return {
+          data: {
+            logs: [mockDecreaseLiquidityLog(tokenId, 1n, 10n, 20n, 100)],
+            blocks: [{ number: 100, timestamp: 1700000100 }],
+            transactions: [],
+            traces: [],
+          },
+          nextBlock: 201,
+          archiveHeight: 201,
+          totalExecutionTime: 1,
+        };
+      }
+      return {
+        data: {
+          logs: [mockCollectLog(tokenId, WALLET, 5n, 7n, 100)],
+          blocks: [{ number: 100, timestamp: 1700000100 }],
+          transactions: [],
+          traces: [],
+        },
+        nextBlock: 201,
+        archiveHeight: 201,
+        totalExecutionTime: 1,
+      };
+    });
+
+    const [viemDecrease, viemCollect, sdkDecrease, sdkCollect] = await Promise.all([
+      sumDecreaseLiquidityLogs(viemDecreaseClient, POSITION_MANAGER, tokenId, 1n, 200n),
+      sumCollectLogsPublic(viemCollectClient, POSITION_MANAGER, tokenId, 1n, 200n),
+      sumDecreaseLiquidityLogs(mockViemClient(), POSITION_MANAGER, tokenId, 1n, 200n, hyperSyncClient),
+      sumCollectLogsPublic(mockViemClient(), POSITION_MANAGER, tokenId, 1n, 200n, hyperSyncClient),
+    ]);
+
+    expect(viemDecrease).toEqual(sdkDecrease);
+    expect(viemCollect).toEqual(sdkCollect);
   });
 });

@@ -29,6 +29,25 @@ await mock.module("../db/store.js", () => ({
   upsertTaxSyncState: () => {},
 }));
 
+await mock.module("../db/hedge-store.js", () => ({
+  createHedgeStore: () => ({
+    listClosedEvents: () => mockClosedEvents,
+  }),
+}));
+
+await mock.module("../db/tax-ledger-store.js", () => ({
+  createTaxLedgerStore: () => ({
+    getTransaction: () => null,
+    upsertSyncedTransaction: (entry: unknown) => {
+      upsertCalls.push(entry);
+    },
+    getSyncState: () => null,
+    listTransactionsNeedingEurEnrichment: () => [],
+    updateTransactionEurValues: () => {},
+    recordSyncState: () => {},
+  }),
+}));
+
 await mock.module("../services/pricing.js", () => ({
   getHistoricalPrice: async () => 1.0, // Fixed price, no network calls
 }));

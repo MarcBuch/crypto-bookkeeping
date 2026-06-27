@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 
 import { encodeAbiParameters } from "viem";
 
-import { findCloseEvent, findCloseEventFromTx, findOpenEvent } from "../chain/events.js";
+import {
+  findCloseEvent,
+  findCloseEventFromTx,
+  findOpenEvent,
+  sumDecreaseLiquidityLogs,
+} from "../chain/events.js";
 
 type Hex = `0x${string}`;
 type CloseClient = Parameters<typeof findCloseEventFromTx>[0];
@@ -13,17 +18,30 @@ type SimpleEventLog = {
   args: Record<string, bigint>;
   blockNumber: bigint;
   transactionHash: Hex;
+  logIndex?: bigint;
 };
 
 const TX_HASH = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 const RECIPIENT = "0x2222222222222222222222222222222222222222" as Hex;
 
+const INCREASE_LIQUIDITY_TOPIC =
+  "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f" as Hex;
 const DECREASE_LIQUIDITY_TOPIC =
   "0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4" as Hex;
 const COLLECT_TOPIC = "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01" as Hex;
 
 function tokenTopic(tokenId: bigint): Hex {
   return `0x${tokenId.toString(16).padStart(64, "0")}`;
+}
+
+function increaseLog(tokenId: bigint, amount0: bigint, amount1: bigint, liquidity = 999n) {
+  return {
+    topics: [INCREASE_LIQUIDITY_TOPIC, tokenTopic(tokenId)],
+    data: encodeAbiParameters(
+      [{ type: "uint128" }, { type: "uint256" }, { type: "uint256" }],
+      [liquidity, amount0, amount1],
+    ),
+  };
 }
 
 function decreaseLog(tokenId: bigint, amount0: bigint, amount1: bigint, liquidity = 999n) {
@@ -50,11 +68,13 @@ function makeEventLog(
   args: Record<string, bigint>,
   blockNumber: bigint,
   transactionHash: Hex,
+  logIndex?: bigint,
 ): SimpleEventLog {
   return {
     args,
     blockNumber,
     transactionHash,
+    logIndex,
   };
 }
 
@@ -153,6 +173,45 @@ describe("findCloseEventFromTx", () => {
 
 const POSITION_MANAGER = "0x3333333333333333333333333333333333333333" as Hex;
 const WALLET = "0x4444444444444444444444444444444444444444" as Hex;
+
+describe("known transaction fast paths", () => {
+  it("uses the open receipt path without falling back to log scans", async () => {
+    let receiptCalls = 0;
+    let getLogsCalls = 0;
+    const client: OpenClient = {
+      getBlockNumber: async () => 9_999n,
+      getTransactionReceipt: async ({ hash }) => {
+        receiptCalls += 1;
+        expect(hash).toBe(TX_HASH);
+        return {
+          blockNumber: 123n,
+          transactionHash: TX_HASH,
+          logs: [increaseLog(123n, 100n, 200n, 50n)],
+        };
+      },
+      getLogs: async () => {
+        getLogsCalls += 1;
+        return [];
+      },
+    };
+
+    const result = await findOpenEvent(client, POSITION_MANAGER, 123n, WALLET, TX_HASH);
+
+    expect(result).toEqual({
+      status: "found",
+      event: {
+        tokenId: 123n,
+        blockNumber: 123n,
+        transactionHash: TX_HASH,
+        amount0: 100n,
+        amount1: 200n,
+        liquidity: 50n,
+      },
+    });
+    expect(receiptCalls).toBe(1);
+    expect(getLogsCalls).toBe(0);
+  });
+});
 
 function makeOpenClient(getLogs: GetLogs, latestBlock: bigint): OpenClient {
   return {
@@ -396,5 +455,196 @@ describe("findCloseEvent scan window computation", () => {
       expect(result.event.collectedFees0).toBe(10n);
       expect(result.event.collectedFees1).toBe(25n);
     }
+  });
+});
+
+describe("viem pagination semantics", () => {
+  it("findCloseEvent scans all viem chunks and picks the latest close across the full range", async () => {
+    const getLogs = (async (
+      args:
+        | {
+            fromBlock?: bigint;
+            toBlock?: bigint;
+            event?: { name?: string };
+          }
+        | undefined,
+    ) => {
+      const fromBlock = args?.fromBlock ?? 0n;
+      const toBlock = args?.toBlock ?? 0n;
+      const eventName = args?.event?.name;
+
+      if (eventName === "DecreaseLiquidity" && fromBlock === 1n && toBlock === 100_000n) {
+        expect({ fromBlock, toBlock }).toEqual({ fromBlock: 1n, toBlock: 100_000n });
+        return [
+          makeEventLog(
+            { tokenId: 1n, liquidity: 10n, amount0: 5n, amount1: 7n },
+            50n,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+            1n,
+          ),
+        ];
+      }
+
+      if (eventName === "DecreaseLiquidity" && fromBlock === 100_001n && toBlock === 100_100n) {
+        expect({ fromBlock, toBlock }).toEqual({ fromBlock: 100_001n, toBlock: 100_100n });
+        return [
+          makeEventLog({ tokenId: 1n, liquidity: 20n, amount0: 20n, amount1: 30n }, 100_050n, TX_HASH, 2n),
+        ];
+      }
+
+      if (eventName === "DecreaseLiquidity" && fromBlock === 100_001n && toBlock === 100_050n) {
+        return [
+          makeEventLog({ tokenId: 1n, liquidity: 20n, amount0: 20n, amount1: 30n }, 100_050n, TX_HASH, 2n),
+        ];
+      }
+
+      if (eventName === "Collect" && fromBlock === 1n && toBlock === 100_000n) {
+        return [
+          makeEventLog(
+            { tokenId: 1n, amount0Collect: 6n, amount1Collect: 9n },
+            50n,
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Hex,
+            3n,
+          ),
+        ];
+      }
+
+      if (eventName === "Collect" && fromBlock === 100_001n && toBlock === 100_050n) {
+        return [makeEventLog({ tokenId: 1n, amount0Collect: 27n, amount1Collect: 41n }, 100_050n, TX_HASH, 4n)];
+      }
+
+      throw new Error(
+        `Unexpected getLogs call for ${String(eventName)} ${fromBlock.toString()}-${toBlock.toString()}`,
+      );
+    }) as unknown as OpenClient["getLogs"];
+    const client = makeOpenClient(getLogs, 100_100n);
+
+    const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 1n);
+
+    expect(result).toEqual({
+      status: "found",
+      event: {
+        tokenId: 1n,
+        blockNumber: 100_050n,
+        transactionHash: TX_HASH,
+        amount0: 20n,
+        amount1: 30n,
+        liquidity: 20n,
+        collectedFees0: 8n,
+        collectedFees1: 13n,
+      },
+    });
+  });
+
+  it("findCloseEvent prefers the larger same-block logIndex when both viem close logs are indexed", async () => {
+    let callCount = 0;
+    const getLogs = (async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return [
+          makeEventLog(
+            { tokenId: 1n, liquidity: 10n, amount0: 10n, amount1: 20n },
+            500n,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+            1n,
+          ),
+          makeEventLog({ tokenId: 1n, liquidity: 11n, amount0: 11n, amount1: 21n }, 500n, TX_HASH, 2n),
+        ];
+      }
+      return [];
+    }) as unknown as OpenClient["getLogs"];
+    const client = makeOpenClient(getLogs, 500n);
+
+    const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 1n);
+
+    expect(result).toEqual({
+      status: "found",
+      event: {
+        tokenId: 1n,
+        blockNumber: 500n,
+        transactionHash: TX_HASH,
+        amount0: 11n,
+        amount1: 21n,
+        liquidity: 11n,
+        collectedFees0: 0n,
+        collectedFees1: 0n,
+      },
+    });
+  });
+
+  it("findCloseEvent deterministically prefers indexed same-block viem logs over unindexed ones", async () => {
+    let callCount = 0;
+    const getLogs = (async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return [
+          // Safe tie-break: when one same-block log has no logIndex, keep the indexed log
+          // because its ordering is explicit while the unindexed log's position is ambiguous.
+          makeEventLog(
+            { tokenId: 1n, liquidity: 10n, amount0: 10n, amount1: 20n },
+            500n,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+          ),
+          makeEventLog({ tokenId: 1n, liquidity: 12n, amount0: 12n, amount1: 22n }, 500n, TX_HASH, 1n),
+        ];
+      }
+      return [];
+    }) as unknown as OpenClient["getLogs"];
+    const client = makeOpenClient(getLogs, 500n);
+
+    const result = await findCloseEvent(client, POSITION_MANAGER, 1n, WALLET, undefined, 1n);
+
+    expect(result).toEqual({
+      status: "found",
+      event: {
+        tokenId: 1n,
+        blockNumber: 500n,
+        transactionHash: TX_HASH,
+        amount0: 12n,
+        amount1: 22n,
+        liquidity: 12n,
+        collectedFees0: 0n,
+        collectedFees1: 0n,
+      },
+    });
+  });
+
+  it("chunks DecreaseLiquidity aggregation into the existing 100k block windows", async () => {
+    const calls: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+    const getLogs = (async (args: { fromBlock?: bigint; toBlock?: bigint } | undefined) => {
+        const fromBlock = args?.fromBlock ?? 0n;
+        const toBlock = args?.toBlock ?? 0n;
+        calls.push({ fromBlock, toBlock });
+
+        if (fromBlock === 5n) {
+          return [makeEventLog({ tokenId: 1n, liquidity: 1n, amount0: 10n, amount1: 20n }, 6n, TX_HASH)];
+        }
+        if (fromBlock === 200_005n) {
+          return [
+            makeEventLog(
+              { tokenId: 1n, liquidity: 1n, amount0: 3n, amount1: 4n },
+              200_006n,
+              TX_HASH,
+            ),
+          ];
+        }
+        return [];
+      }) as unknown as OpenClient["getLogs"];
+    const client = { getLogs };
+
+    const totals = await sumDecreaseLiquidityLogs(
+      client,
+      POSITION_MANAGER,
+      1n,
+      5n,
+      200_010n,
+    );
+
+    expect(totals).toEqual({ amount0: 13n, amount1: 24n });
+    expect(calls).toEqual([
+      { fromBlock: 5n, toBlock: 100_004n },
+      { fromBlock: 100_005n, toBlock: 200_004n },
+      { fromBlock: 200_005n, toBlock: 200_010n },
+    ]);
   });
 });

@@ -18,6 +18,8 @@ let findOpenEventCallCount = 0;
 
 let mockFindCloseEvent: (..._args: unknown[]) => unknown = async () => ({ status: "not_found" });
 let findCloseEventCallCount = 0;
+let mockSumDecreaseLiquidityLogs: (..._args: unknown[]) => unknown = async () => ({ amount0: 0n, amount1: 0n });
+let mockSumCollectLogsPublic: (..._args: unknown[]) => unknown = async () => ({ amount0: 0n, amount1: 0n });
 let lastCalculateFullPnLParams: Record<string, unknown> | null = null;
 
 await mock.module("../chain/events.js", () => ({
@@ -29,12 +31,15 @@ await mock.module("../chain/events.js", () => ({
     findCloseEventCallCount++;
     return mockFindCloseEvent(...args);
   },
+  sumDecreaseLiquidityLogs: (...args: unknown[]) => mockSumDecreaseLiquidityLogs(...args),
+  sumCollectLogsPublic: (...args: unknown[]) => mockSumCollectLogsPublic(...args),
   getPoolPriceAtBlock: async () => null,
 }));
 
 await mock.module("../chain/client.js", () => ({
   createClient: () => ({
     getBlockNumber: async () => 1000n,
+    getLogs: async () => [],
   }),
 }));
 
@@ -42,8 +47,13 @@ await mock.module("../chain/rpc.js", () => ({
   withRetry: (fn: () => unknown) => fn(),
 }));
 
+let mockToken0Info = { symbol: "TOK", decimals: 18 };
+let mockToken1Info = { symbol: "TOK", decimals: 18 };
+let mockComputeUnclaimedFees: (..._args: unknown[]) => unknown = async () => ({ fees0: 0, fees1: 0 });
+
 await mock.module("../chain/pools.js", () => ({
-  getTokenInfo: async () => ({ symbol: "TOK", decimals: 18 }),
+  getTokenInfo: async (_client: unknown, token: string) =>
+    token === fakePos.token0 ? mockToken0Info : mockToken1Info,
   getPoolAddress: async () => "0x0000000000000000000000000000000000000099" as const,
   getPoolState: async () => ({
     sqrtPriceX96: 79228162514264337593543950336n,
@@ -51,6 +61,7 @@ await mock.module("../chain/pools.js", () => ({
     feeGrowthGlobal0X128: 0n,
     feeGrowthGlobal1X128: 0n,
   }),
+  computeUnclaimedFees: (...args: unknown[]) => mockComputeUnclaimedFees(...args),
   getTickData: async () => ({
     feeGrowthOutside0X128: 0n,
     feeGrowthOutside1X128: 0n,
@@ -163,8 +174,14 @@ useTestDb();
 
 beforeEach(() => {
   findOpenEventCallCount = 0;
+  findCloseEventCallCount = 0;
   mockFindOpenEvent = async () => ({ status: "not_found" });
   mockFindCloseEvent = async () => ({ status: "not_found" });
+  mockSumDecreaseLiquidityLogs = async () => ({ amount0: 0n, amount1: 0n });
+  mockSumCollectLogsPublic = async () => ({ amount0: 0n, amount1: 0n });
+  mockToken0Info = { symbol: "TOK", decimals: 18 };
+  mockToken1Info = { symbol: "TOK", decimals: 18 };
+  mockComputeUnclaimedFees = async () => ({ fees0: 0, fees1: 0 });
   mockGetAllPositions = async () => [fakePos];
   lastCalculateFullPnLParams = null;
 });
@@ -178,7 +195,7 @@ afterAll(() => {
 // ---------------------------------------------------------------------------
 
 describe("open_tx persistence and fast-path", () => {
-  it("slow-path persists open_tx after findOpenEvent returns a result", async () => {
+  it("slow-path persists entry facts after findOpenEvent returns a result", async () => {
     mockFindOpenEvent = async () => ({
       status: "found",
       event: { ...fakeOpenEvent, transactionHash: "0xSLOW" },
@@ -189,6 +206,11 @@ describe("open_tx persistence and fast-path", () => {
     const stored = getPosition(TOKEN_ID);
     expect(stored).not.toBeNull();
     expect(stored!.open_tx).toBe("0xSLOW");
+    expect(stored!.entry_block).toBe(100);
+    expect(stored!.entry_amount0).toBe("1000");
+    expect(stored!.entry_amount1).toBe("2000");
+    expect(stored!.entry_liquidity).toBe("1000000");
+    expect(stored!.entry_sqrt_price_x96).toBe("79228162514264337593543950336");
   });
 
   it("config fast-path persists open_tx when posConfig.openTx is set", async () => {
@@ -229,6 +251,8 @@ describe("open_tx persistence and fast-path", () => {
       entry_amount1: "2000",
       entry_liquidity: "1000000",
       open_tx: "0xCONFIG",
+      close_tx: "0xKEEP",
+      exit_amount0: "77",
     });
     mockFindOpenEvent = async () => ({
       status: "found",
@@ -246,6 +270,11 @@ describe("open_tx persistence and fast-path", () => {
     expect(stored!.entry_block).toBe(100);
     expect(stored!.entry_sqrt_price_x96).toBe("79228162514264337593543950336");
     expect(stored!.open_tx).toBe("0xCONFIG");
+    expect(stored!.entry_amount0).toBe("1000");
+    expect(stored!.entry_amount1).toBe("2000");
+    expect(stored!.entry_liquidity).toBe("1000000");
+    expect(stored!.close_tx).toBe("0xKEEP");
+    expect(stored!.exit_amount0).toBe("77");
   });
 
   it("DB fast-path skips findOpenEvent when open_tx is already stored", async () => {
@@ -300,6 +329,41 @@ describe("open_tx persistence and fast-path", () => {
 
     // And findOpenEvent was NOT called (DB fast-path)
     expect(findOpenEventCallCount).toBe(0);
+  });
+
+  it("passes undefined entrySqrtPriceX96 to PnL when stored entry amounts exist but sqrt price is missing", async () => {
+    upsertPosition({
+      token_id: TOKEN_ID,
+      token0: fakePos.token0,
+      token1: fakePos.token1,
+      token0_symbol: "TOK",
+      token1_symbol: "TOK",
+      token0_decimals: 18,
+      token1_decimals: 18,
+      fee: fakePos.fee,
+      tick_lower: fakePos.tickLower,
+      tick_upper: fakePos.tickUpper,
+      entry_sqrt_price_x96: null,
+      entry_block: 100,
+      entry_amount0: "1000",
+      entry_amount1: "2000",
+      entry_liquidity: "1000000",
+      open_tx: "0xPARTIAL",
+    });
+
+    await getPnLView(baseConfig);
+
+    expect(findOpenEventCallCount).toBe(0);
+    expect(lastCalculateFullPnLParams?.entrySqrtPriceX96).toBeUndefined();
+  });
+
+  it("skips PnL projection when entry cannot be found", async () => {
+    mockFindOpenEvent = async () => ({ status: "not_found" });
+
+    const result = await getPnLView(baseConfig);
+
+    expect(result).toEqual([]);
+    expect(getPosition(TOKEN_ID)).toBeNull();
   });
 });
 
@@ -359,6 +423,7 @@ describe("close_tx persistence and exit cache bypass", () => {
     expect(stored!.fees_collected0).toBe("10");
     expect(stored!.fees_collected1).toBe("20");
     expect(stored!.close_block).toBe(5000);
+    expect(stored!.exit_sqrt_price_x96).toBe("79228162514264337593543950336");
   });
 
   it("closed config path preserves freshly persisted entry metadata when storing close data", async () => {
@@ -427,7 +492,7 @@ describe("close_tx persistence and exit cache bypass", () => {
     const result = await getPnLView({
       ...baseConfig,
       positions: {
-        [TOKEN_ID]: { openTx: "0xCONFIG_OPEN", closeTx: "0xCONFIG_CLOSE" },
+        [TOKEN_ID]: { openTx: "", closeTx: "0xCONFIG_CLOSE" },
       },
     });
 
@@ -452,6 +517,28 @@ describe("close_tx persistence and exit cache bypass", () => {
     await getPnLView(baseConfig);
 
     expect(findCloseEventCallCount).toBe(0);
+  });
+
+  it("cached close data bypasses discovery only when config closeTx is absent", async () => {
+    mockGetAllPositions = async () => [fakePosZeroLiquidity];
+    upsertPosition({
+      ...fakePosWithEntry,
+      close_tx: "0xCACHED",
+      exit_amount0: "999",
+      exit_amount1: "888",
+      fees_collected0: "7",
+      fees_collected1: "8",
+      close_block: 5000,
+    });
+
+    await getPnLView({
+      ...baseConfig,
+      positions: {
+        [TOKEN_ID]: { openTx: "", closeTx: "0xCONFIG_CLOSE" },
+      },
+    });
+
+    expect(findCloseEventCallCount).toBeGreaterThan(0);
   });
 
   it("exit cache does not overwrite existing close data on second sync", async () => {
@@ -517,5 +604,60 @@ describe("pnl.ts caller — EventResult rpc_error propagation", () => {
 
     const ids = result.map((p: { tokenId: string }) => p.tokenId);
     expect(ids).not.toContain(TOKEN_ID);
+  });
+
+  it("rpc_error from findCloseEvent leaves previously stored lifecycle fields unchanged", async () => {
+    mockGetAllPositions = async () => [fakePosZeroLiquidity];
+    upsertPosition({
+      ...fakePosWithEntry,
+      close_tx: "0xPARTIAL",
+      open_tx: "0xOPEN",
+      exit_amount0: null,
+      exit_amount1: null,
+      fees_collected0: "5",
+      fees_collected1: "6",
+      close_block: 4444,
+    });
+    mockFindCloseEvent = async () => ({ status: "rpc_error", error: new Error("RPC timeout") });
+
+    await getPnLView(baseConfig);
+
+    const stored = getPosition(TOKEN_ID);
+    expect(stored!.open_tx).toBe("0xOPEN");
+    expect(stored!.close_tx).toBe("0xPARTIAL");
+    expect(stored!.exit_amount0).toBeNull();
+    expect(stored!.exit_amount1).toBeNull();
+    expect(stored!.fees_collected0).toBe("5");
+    expect(stored!.fees_collected1).toBe("6");
+    expect(stored!.close_block).toBe(4444);
+  });
+});
+
+describe("active position fees and withdrawals", () => {
+  it("includes partial withdrawals in exit-side amounts", async () => {
+    upsertPosition({ ...fakePosWithEntry });
+    mockToken0Info = { symbol: "TOK0", decimals: 0 };
+    mockToken1Info = { symbol: "TOK1", decimals: 0 };
+    mockSumDecreaseLiquidityLogs = async () => ({ amount0: 11n, amount1: 22n });
+
+    await getPnLView(baseConfig);
+
+    expect(lastCalculateFullPnLParams?.exitAmount0Raw).toBe(511n);
+    expect(lastCalculateFullPnLParams?.exitAmount1Raw).toBe(522n);
+  });
+
+  it("separates previously collected fees from withdrawn principal and keeps pending fees uncollected only", async () => {
+    upsertPosition({ ...fakePosWithEntry });
+    mockToken0Info = { symbol: "TOK0", decimals: 0 };
+    mockToken1Info = { symbol: "TOK1", decimals: 0 };
+    mockSumDecreaseLiquidityLogs = async () => ({ amount0: 11n, amount1: 22n });
+    mockSumCollectLogsPublic = async () => ({ amount0: 41n, amount1: 52n });
+    mockComputeUnclaimedFees = async () => ({ fees0: 1, fees1: 2 });
+
+    const [result] = await getPnLView(baseConfig);
+
+    expect(lastCalculateFullPnLParams?.feesCollected0Raw).toBe(31n);
+    expect(lastCalculateFullPnLParams?.feesCollected1Raw).toBe(32n);
+    expect(result.pendingFeesValueInToken1).toBe(3);
   });
 });

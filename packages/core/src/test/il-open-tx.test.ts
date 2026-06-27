@@ -293,6 +293,38 @@ describe("Cluster C: hasStoredEntry fast-path preserves open_tx", () => {
     expect(stored!.open_tx).toBe("0xSTORED");
     expect(findOpenEventCallCount).toBe(0);
   });
+
+  it("rescans open event when stored entry sqrt price is missing", async () => {
+    upsertPosition({
+      ...fakePosWithEntry,
+      entry_sqrt_price_x96: null,
+      open_tx: "0xPARTIAL",
+    });
+    mockFindOpenEvent = async () => ({
+      status: "found",
+      event: { ...fakeOpenEvent, transactionHash: "0xPARTIAL" },
+    });
+
+    await getILView(baseConfig);
+
+    expect(findOpenEventCallCount).toBeGreaterThan(0);
+    expect(getPosition(TOKEN_ID)?.entry_sqrt_price_x96).toBe("79228162514264337593543950336");
+  });
+
+  it("skips the position when stored entry sqrt price is missing and rescan cannot find entry", async () => {
+    upsertPosition({
+      ...fakePosWithEntry,
+      entry_sqrt_price_x96: null,
+      open_tx: "0xPARTIAL",
+    });
+    mockFindOpenEvent = async () => ({ status: "not_found" });
+
+    const result = await getILView(baseConfig);
+
+    expect(findOpenEventCallCount).toBeGreaterThan(0);
+    expect(result).toHaveLength(0);
+    expect(getPosition(TOKEN_ID)?.entry_sqrt_price_x96).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

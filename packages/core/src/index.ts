@@ -69,6 +69,9 @@ export type {
   StoredTaxSyncState,
   StoredLpSyncState,
 } from "./db/store.js";
+export * from "./db/hedge-store.js";
+export * from "./db/position-store.js";
+export * from "./db/tax-ledger-store.js";
 export * from "./db/schema.js";
 
 // Display
@@ -83,6 +86,7 @@ export * from "./services/positions.js";
 export * from "./services/pnl.js";
 export * from "./services/il.js";
 export * from "./services/snapshot.js";
+export * from "./services/position-lifecycle.js";
 export * from "./services/history.js";
 export * from "./services/pricing.js";
 export * from "./services/hedge.js";

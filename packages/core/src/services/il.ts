@@ -1,23 +1,12 @@
 import { createClient } from "../chain/client.js";
-import { findOpenEvent, findCloseEvent, getPoolPriceAtBlock } from "../chain/events.js";
-import { createHyperSyncClient, DEFAULT_HYPERSYNC_URL } from "../chain/hypersync.js";
-import {
-  computeUnclaimedFees,
-  getPoolAddress,
-  getPoolState,
-  getTokenInfo,
-} from "../chain/pools.js";
 import { getAllPositions } from "../chain/positions.js";
 import type { Config } from "../config.js";
-import { getPosition } from "../db/store.js";
-import {
-  calculateDivergenceLoss,
-  deriveEntryPriceFromAmounts,
-  getTokenAmounts,
-  sqrtPriceX96ToPrice,
-} from "../math/divergence-loss.js";
+import { sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 import { NotFoundError } from "./errors.js";
-import { persistPositionEntry } from "./position-entry.js";
+import {
+  createPositionLifecycleContext,
+  resolvePositionLifecycle,
+} from "./position-lifecycle.js";
 
 export interface ILView {
   tokenId: string;
@@ -41,13 +30,7 @@ export interface ILView {
 
 export async function getILView(config: Config, tokenId?: string): Promise<ILView[]> {
   const client = createClient(config);
-
-  const hyperSyncClient = config.hyperSync?.apiToken
-    ? createHyperSyncClient({
-        url: config.hyperSync.url ?? DEFAULT_HYPERSYNC_URL,
-        apiToken: config.hyperSync.apiToken,
-      })
-    : undefined;
+  const lifecycleContext = await createPositionLifecycleContext(config, { includeLatestBlock: true });
 
   const positions = await getAllPositions(client, config.contracts.positionManager, config.wallet);
 
@@ -65,145 +48,39 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
 
   const result: ILView[] = [];
 
-  // Number of blocks to scan back when discovering events (window size).
-  // undefined → findOpenEvent/findCloseEvent use their 30-day default.
-  const logsWindowBlocks = config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined;
-
   for (const pos of filteredPositions) {
-    const [token0Info, token1Info] = await Promise.all([
-      getTokenInfo(client, pos.token0),
-      getTokenInfo(client, pos.token1),
-    ]);
-
-    const poolAddress = await getPoolAddress(
-      client,
-      config.contracts.factory,
-      pos.token0,
-      pos.token1,
-      pos.fee,
-    );
-
-    const poolState = await getPoolState(client, poolAddress);
-    const isActive = pos.liquidity > 0n;
-    const posConfigIL = config.positions?.[pos.tokenId.toString()];
-
-    // Get entry price
-    let entrySqrtPriceX96: bigint;
-    let entryAmount0 = 0n;
-    let entryAmount1 = 0n;
-    const storedPos = getPosition(pos.tokenId.toString());
-
-    if (storedPos?.entry_sqrt_price_x96) {
-      entrySqrtPriceX96 = BigInt(storedPos.entry_sqrt_price_x96);
-      entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
-      entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-    } else {
-      // Need to find entry - run event scan
-      const openResult = await findOpenEvent(
-        client,
-        config.contracts.positionManager,
-        pos.tokenId,
-        config.wallet,
-        posConfigIL?.openTx,
-        undefined,
-        logsWindowBlocks,
-        undefined,
-        hyperSyncClient,
+    const lifecycle = await resolvePositionLifecycle(lifecycleContext, pos, {
+      entryNotFound: "skip",
+      requireEntrySqrtPriceX96: true,
+    });
+    if (lifecycle.status === "rpc_error") {
+      console.error(
+        `[lp-tracker] RPC error discovering ${lifecycle.stage} event for position ${pos.tokenId.toString()}:`,
+        lifecycle.error,
       );
-
-      if (openResult.status === "rpc_error") {
-        console.error(
-          `[lp-tracker] RPC error discovering open event for position ${pos.tokenId.toString()}:`,
-          openResult.error,
-        );
-        continue;
-      }
-      if (openResult.status === "found") {
-        const openEvent = openResult.event;
-        entryAmount0 = openEvent.amount0;
-        entryAmount1 = openEvent.amount1;
-        // Derive entry price from actual deposit amounts (most accurate)
-        entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-          openEvent.amount0,
-          openEvent.amount1,
-          openEvent.liquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
-
-        // Store for future use
-        persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-      } else {
-        // not_found — could not find entry — skip this position
-        continue;
-      }
+      continue;
+    }
+    if (lifecycle.status === "skip") {
+      continue;
     }
 
-    // Determine current/exit sqrtPriceX96
-    let currentSqrtPriceX96 = poolState.sqrtPriceX96;
-    let exitAmount0 = 0n;
-    let exitAmount1 = 0n;
+    const { facts } = lifecycle;
+    const { token0Info, token1Info } = facts;
+    const entrySqrtPriceX96 = facts.entrySqrtPriceX96;
 
-    if (isActive) {
-      const currentAmounts = getTokenAmounts(
-        pos.liquidity,
-        poolState.sqrtPriceX96,
-        pos.tickLower,
-        pos.tickUpper,
-      );
-      exitAmount0 = currentAmounts.amount0;
-      exitAmount1 = currentAmounts.amount1;
-    } else {
-      // Closed: find close event — start from entry_block to avoid scanning from block 0
-      const entryBlockIL = storedPos?.entry_block ? BigInt(storedPos.entry_block) : undefined;
-      const closeResult = await findCloseEvent(
-        client,
-        config.contracts.positionManager,
-        pos.tokenId,
-        config.wallet,
-        posConfigIL?.closeTx,
-        entryBlockIL,
-        logsWindowBlocks,
-        undefined,
-        hyperSyncClient,
-      );
-      if (closeResult.status === "rpc_error") {
-        console.error(
-          `[lp-tracker] RPC error discovering close event for position ${pos.tokenId.toString()}:`,
-          closeResult.error,
-        );
-        continue;
-      }
-      if (closeResult.status === "found") {
-        const closeEvent = closeResult.event;
-        exitAmount0 = closeEvent.amount0;
-        exitAmount1 = closeEvent.amount1;
-        const closePrice = await getPoolPriceAtBlock(client, poolAddress, closeEvent.blockNumber);
-        if (closePrice) currentSqrtPriceX96 = closePrice.sqrtPriceX96;
-      }
+    if (entrySqrtPriceX96 == null) {
+      continue;
     }
 
-    // Calculate DL
-    const dlResult = calculateDivergenceLoss(
-      pos.liquidity > 0n ? pos.liquidity : BigInt(storedPos?.entry_sqrt_price_x96 ? 1 : 1),
-      pos.tickLower,
-      pos.tickUpper,
-      entrySqrtPriceX96,
-      currentSqrtPriceX96,
-      token0Info.decimals,
-      token1Info.decimals,
-    );
-
-    // For closed positions, override with actual amounts
     const exitPrice = sqrtPriceX96ToPrice(
-      currentSqrtPriceX96,
+      facts.exitSqrtPriceX96,
       token0Info.decimals,
       token1Info.decimals,
     );
-    const entryAmt0H = Number(entryAmount0) / 10 ** token0Info.decimals;
-    const entryAmt1H = Number(entryAmount1) / 10 ** token1Info.decimals;
-    const exitAmt0H = Number(exitAmount0) / 10 ** token0Info.decimals;
-    const exitAmt1H = Number(exitAmount1) / 10 ** token1Info.decimals;
+    const entryAmt0H = Number(facts.entryAmount0) / 10 ** token0Info.decimals;
+    const entryAmt1H = Number(facts.entryAmount1) / 10 ** token1Info.decimals;
+    const exitAmt0H = Number(facts.currentAmount0) / 10 ** token0Info.decimals;
+    const exitAmt1H = Number(facts.currentAmount1) / 10 ** token1Info.decimals;
 
     const valueLp = exitAmt0H * exitPrice + exitAmt1H;
     const valueHold = entryAmt0H * exitPrice + entryAmt1H;
@@ -211,20 +88,8 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
     const divergenceLoss = valueHold > 0 ? (valueLp - valueHold) / valueHold : 0;
 
     // Calculate fees
-    let fees0 = 0;
-    let fees1 = 0;
-    if (isActive) {
-      const feeResult = await computeUnclaimedFees(
-        client,
-        poolAddress,
-        pos,
-        poolState,
-        token0Info.decimals,
-        token1Info.decimals,
-      );
-      fees0 = feeResult.fees0;
-      fees1 = feeResult.fees1;
-    }
+    const fees0 = Number(facts.pendingFees0) / 10 ** token0Info.decimals;
+    const fees1 = Number(facts.pendingFees1) / 10 ** token1Info.decimals;
 
     const feesValue = fees0 * exitPrice + fees1;
     const netVsHodl = valueHold > 0 ? (valueLp + feesValue - valueHold) / valueHold : 0;
@@ -237,8 +102,8 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
       pair: `${token0Info.symbol}/${token1Info.symbol}`,
       token0Symbol: token0Info.symbol,
       token1Symbol: token1Info.symbol,
-      status: isActive ? "active" : "closed",
-      entryPrice: dlResult.entryPrice,
+      status: facts.status,
+      entryPrice: sqrtPriceX96ToPrice(entrySqrtPriceX96, token0Info.decimals, token1Info.decimals),
       currentPrice: exitPrice,
       priceLower,
       priceUpper,

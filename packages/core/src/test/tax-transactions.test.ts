@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, it, expect } from "bun:test";
 
 import { getDb, resolveDbPath } from "../db/schema.js";
+import { sqliteTaxLedgerStore } from "../db/tax-ledger-store.js";
 import {
   createManualTaxTransaction,
   getTaxTransactionsNeedingGermanTaxReview,
@@ -77,6 +78,83 @@ function makeManualTaxTransaction(
 
 describe("tax transaction persistence", () => {
   useTestDb();
+
+  describe("TaxLedgerStore invariants", () => {
+    it("preserves manual label/comment across synced upserts through the scoped store", () => {
+      sqliteTaxLedgerStore.upsertSyncedTransaction(makeSyncedTaxTransaction());
+
+      expect(
+        sqliteTaxLedgerStore.updateTransaction("tx-1:external", {
+          label: "Trade",
+          comment: "manual note",
+        }),
+      ).toMatchObject({
+        label: "Trade",
+        comment: "manual note",
+      });
+
+      sqliteTaxLedgerStore.upsertSyncedTransaction(
+        makeSyncedTaxTransaction({
+          hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          block_number: 101,
+          value: "2",
+          synced_at: "2026-05-30T12:05:00.000Z",
+        }),
+      );
+
+      expect(sqliteTaxLedgerStore.getTransaction("tx-1:external")).toMatchObject({
+        hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        block_number: 101,
+        value: "2",
+        label: "Trade",
+        comment: "manual note",
+      });
+    });
+
+    it("does not let synced-only upserts overwrite manual rows", () => {
+      const created = sqliteTaxLedgerStore.createManualTransaction(
+        makeManualTaxTransaction({
+          id: "scoped-manual-row",
+          hash: "manual-hash",
+          label: "Transfer",
+          incoming_quantity: "9",
+          incoming_asset: "USDC",
+          comment: "keep me manual",
+        }),
+      );
+
+      sqliteTaxLedgerStore.upsertSyncedTransaction(
+        makeSyncedTaxTransaction({
+          id: created.id,
+          hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          transaction_type: "tokentx",
+          source: "hyperevmscan",
+          incoming_quantity: "1",
+          incoming_asset: "HYPE",
+          synced_at: "2026-05-30T12:10:00.000Z",
+        }),
+      );
+
+      expect(sqliteTaxLedgerStore.getTransaction(created.id)).toMatchObject({
+        id: created.id,
+        source: "manual",
+        transaction_type: "manual",
+        hash: "manual-hash",
+        label: "Transfer",
+        incoming_quantity: "9",
+        incoming_asset: "USDC",
+        comment: "keep me manual",
+      });
+    });
+
+    it("only allows manual rows to update ledger properties through the scoped store", () => {
+      sqliteTaxLedgerStore.upsertSyncedTransaction(makeSyncedTaxTransaction());
+
+      expect(() =>
+        sqliteTaxLedgerStore.updateTransaction("tx-1:external", { incoming_quantity: "1" }),
+      ).toThrow("Only manual tax transactions can update ledger properties");
+    });
+  });
 
   it("upserts the same id by updating synced fields while preserving manual metadata", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());

@@ -1,12 +1,6 @@
 import type { Config } from "../config.js";
+import { sqliteHedgeStore } from "../db/hedge-store.js";
 import {
-  insertHedgeSnapshot,
-  getOpenHedgeEvent,
-  getEarliestHedgeSnapshot,
-  insertHedgeEvent,
-  listHedgeSnapshots,
-  closeHedgeEvent,
-  getHedgeEvents,
   type StoredHedgeEvent,
   type StoredHedgeSnapshot,
 } from "../db/store.js";
@@ -114,9 +108,7 @@ function buildStaleHedgeView(
   coin: string,
   snapshot: StoredHedgeSnapshot,
 ): HedgeView {
-  const closedEvent = getHedgeEvents(tokenId).find(
-    (event) => event.coin === coin && event.status === "closed",
-  );
+  const closedEvent = sqliteHedgeStore.findClosedEvent(tokenId, coin);
   const isClosed = parseFloat(snapshot.szi) === 0 || closedEvent != null;
 
   if (isClosed) {
@@ -159,9 +151,7 @@ function buildKnownClosedStaleHedgeView(
   position: HyperliquidPosition,
   snapshot: StoredHedgeSnapshot | null,
 ): HedgeView {
-  const closedEvent = getHedgeEvents(tokenId).find(
-    (event) => event.coin === coin && event.status === "closed",
-  );
+  const closedEvent = sqliteHedgeStore.findClosedEvent(tokenId, coin);
 
   return {
     tokenId,
@@ -182,7 +172,7 @@ function buildKnownClosedStaleHedgeView(
 }
 
 function getLatestHedgeSnapshot(tokenId: string, coin: string): StoredHedgeSnapshot | null {
-  return listHedgeSnapshots(tokenId).find((snapshot) => snapshot.coin === coin) ?? null;
+  return sqliteHedgeStore.listSnapshots(tokenId).find((snapshot) => snapshot.coin === coin) ?? null;
 }
 
 export async function getHedgeView(config: Config, tokenId: string): Promise<HedgeView> {
@@ -308,7 +298,7 @@ export function snapshotHedge(view: HedgeView): void {
     return;
   }
 
-  insertHedgeSnapshot({
+  sqliteHedgeStore.recordSnapshot({
     token_id: view.tokenId,
     coin: view.coin,
     szi: view.szi,
@@ -371,9 +361,7 @@ async function resolveAbsentPosition(
   coin: string,
 ): Promise<HedgeView | null> {
   // Fast path: already recorded in DB
-  const existingClosed = getHedgeEvents(tokenId).find(
-    (e) => e.coin === coin && e.status === "closed",
-  );
+  const existingClosed = sqliteHedgeStore.findClosedEvent(tokenId, coin);
   if (existingClosed) {
     return buildClosedView(tokenId, coin, existingClosed);
   }
@@ -416,7 +404,7 @@ async function resolveAbsentPosition(
 
   // Insert open event (idempotent — partial unique index guards duplicates)
   try {
-    insertHedgeEvent({
+    sqliteHedgeStore.recordEvent({
       token_id: tokenId,
       coin,
       status: "open",
@@ -434,7 +422,7 @@ async function resolveAbsentPosition(
     // Race or already exists — continue
   }
 
-  const closedEvent = closeHedgeEvent({
+  const closedEvent = sqliteHedgeStore.closeOpenEvent({
     token_id: tokenId,
     coin,
     closed_at: new Date(largestFill.time).toISOString(),
@@ -449,8 +437,7 @@ async function resolveAbsentPosition(
 
   const finalEvent =
     closedEvent ??
-    getHedgeEvents(tokenId).find((e) => e.coin === coin && e.status === "closed") ??
-    null;
+    sqliteHedgeStore.findClosedEvent(tokenId, coin) ?? null;
 
   return finalEvent ? buildClosedView(tokenId, coin, finalEvent) : null;
 }
@@ -475,20 +462,20 @@ function buildClosedView(tokenId: string, coin: string, event: StoredHedgeEvent)
 
 export function resolveHedgeOpen(tokenId: string, coin: string): StoredHedgeEvent | null {
   // Check if an open event already exists (idempotent)
-  const existingOpen = getOpenHedgeEvent(tokenId, coin);
+  const existingOpen = sqliteHedgeStore.findOpenEvent(tokenId, coin);
   if (existingOpen) {
     return existingOpen;
   }
 
   // Query the earliest hedge_snapshot for this (tokenId, coin)
-  const earliestSnapshot = getEarliestHedgeSnapshot(tokenId, coin);
+  const earliestSnapshot = sqliteHedgeStore.findEarliestSnapshot(tokenId, coin);
   if (!earliestSnapshot) {
     return null;
   }
 
   // Create the open event from the earliest snapshot
   try {
-    return insertHedgeEvent({
+      return sqliteHedgeStore.recordEvent({
       token_id: tokenId,
       coin: coin,
       status: "open",
@@ -504,7 +491,7 @@ export function resolveHedgeOpen(tokenId: string, coin: string): StoredHedgeEven
     });
   } catch {
     // Race: another caller already inserted the open event — return it
-    return getOpenHedgeEvent(tokenId, coin);
+    return sqliteHedgeStore.findOpenEvent(tokenId, coin);
   }
 }
 
@@ -514,10 +501,7 @@ export async function resolveHedgeClose(
   coin: string,
 ): Promise<StoredHedgeEvent | null> {
   // Step 1: Check if already closed (idempotent)
-  const allEvents = getHedgeEvents(tokenId);
-  const existingClosed = allEvents.find(
-    (event) => event.status === "closed" && event.coin === coin,
-  );
+  const existingClosed = sqliteHedgeStore.findClosedEvent(tokenId, coin);
   if (existingClosed) {
     return existingClosed;
   }
@@ -529,7 +513,7 @@ export async function resolveHedgeClose(
   }
 
   // Step 3: Get funding_earned from most recent hedge_snapshots
-  const snapshots = listHedgeSnapshots(tokenId);
+  const snapshots = sqliteHedgeStore.listSnapshots(tokenId);
   const mostRecentSnapshot = snapshots.find((s) => s.coin === coin);
   const fundingEarned = mostRecentSnapshot?.funding_earned ?? 0;
 
@@ -569,7 +553,7 @@ export async function resolveHedgeClose(
   );
 
   // Step 8: Call closeHedgeEvent
-  const closedEvent = closeHedgeEvent({
+  const closedEvent = sqliteHedgeStore.closeOpenEvent({
     token_id: tokenId,
     coin,
     closed_at: new Date(largestFill.time).toISOString(),
@@ -586,8 +570,7 @@ export async function resolveHedgeClose(
   }
 
   // Re-fetch in case of race condition
-  const allEventsAfter = getHedgeEvents(tokenId);
-  return allEventsAfter.find((event) => event.status === "closed" && event.coin === coin) || null;
+  return sqliteHedgeStore.findClosedEvent(tokenId, coin);
 }
 
 // ---------------------------------------------------------------------------

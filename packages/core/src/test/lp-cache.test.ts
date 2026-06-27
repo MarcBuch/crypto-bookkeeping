@@ -6,6 +6,7 @@ import {
   getPositionsCacheSyncedAt,
   replaceCachedPositionViews,
   replaceCachedPnLViews,
+  replaceLpCaches,
   getLpSyncState,
   upsertLpSyncState,
 } from "../db/store.js";
@@ -214,6 +215,26 @@ describe("lp cache store", () => {
       const after = listCachedPnLViews();
       expect(after).toHaveLength(1);
       expect(readStringField(requireCachedRow(after[0]), "tokenId")).toBe("original");
+    });
+
+    it("replaceLpCaches rolls back both position and pnl caches when either side fails", () => {
+      const originalPosition = { ...fakePositionView, tokenId: "position-original" };
+      const originalPnL = { ...fakePnLView, tokenId: "pnl-original" };
+
+      replaceCachedPositionViews([originalPosition], fakeSyncedAt);
+      replaceCachedPnLViews([originalPnL], fakeSyncedAt);
+
+      const nextPosition = { ...fakePositionView, tokenId: "position-next" };
+      const dupPnL1 = { ...fakePnLView, tokenId: "duplicate" };
+      const dupPnL2 = { ...fakePnLView, tokenId: "duplicate" };
+
+      expect(() => {
+        replaceLpCaches([nextPosition], [dupPnL1, dupPnL2], "2026-06-02T20:00:00.000Z");
+      }).toThrow();
+
+      expect(listCachedPositionViews()).toEqual([originalPosition]);
+      expect(listCachedPnLViews()).toEqual([originalPnL]);
+      expect(getPositionsCacheSyncedAt()).toBe(fakeSyncedAt);
     });
   });
 

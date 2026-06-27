@@ -1,5 +1,4 @@
 import { createClient } from "../chain/client.js";
-import { getPoolAddress, getSlot0, getTokenInfo } from "../chain/pools.js";
 import { getAllPositions, getPositionData, type PositionData } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import {
@@ -8,8 +7,11 @@ import {
   upsertPositionViewCache,
   upsertPnLViewCache,
 } from "../db/store.js";
-import { getTokenAmounts, sqrtPriceX96ToPrice } from "../math/divergence-loss.js";
 import { getHedgeView, snapshotHedge } from "./hedge.js";
+import {
+  createPositionLifecycleContext,
+  projectCurrentPosition,
+} from "./position-lifecycle.js";
 import { getPnLView } from "./pnl.js";
 
 export interface PositionView {
@@ -34,7 +36,8 @@ export async function getPositionsView(
   config: Config,
   rawPositions?: PositionData[],
 ): Promise<PositionView[]> {
-  const client = createClient(config);
+  const lifecycleContext = await createPositionLifecycleContext(config);
+  const client = lifecycleContext.client;
 
   const positions =
     rawPositions ??
@@ -47,57 +50,32 @@ export async function getPositionsView(
   const result: PositionView[] = [];
 
   for (const pos of positions) {
-    const [token0Info, token1Info] = await Promise.all([
-      getTokenInfo(client, pos.token0),
-      getTokenInfo(client, pos.token1),
-    ]);
-
-    const poolAddress = await getPoolAddress(
-      client,
-      config.contracts.factory,
-      pos.token0,
-      pos.token1,
-      pos.fee,
-    );
-
-    const poolSlot0 = await getSlot0(client, poolAddress);
-
-    const currentAmounts = getTokenAmounts(
-      pos.liquidity,
-      poolSlot0.sqrtPriceX96,
-      pos.tickLower,
-      pos.tickUpper,
-    );
-
-    const priceLower = 1.0001 ** pos.tickLower * 10 ** (token0Info.decimals - token1Info.decimals);
-    const priceUpper = 1.0001 ** pos.tickUpper * 10 ** (token0Info.decimals - token1Info.decimals);
-
-    const currentPrice = sqrtPriceX96ToPrice(
-      poolSlot0.sqrtPriceX96,
-      token0Info.decimals,
-      token1Info.decimals,
-    );
-
-    const inRange = poolSlot0.tick >= pos.tickLower && poolSlot0.tick < pos.tickUpper;
-    const isActive = pos.liquidity > 0n;
-
-    const amount0Human = Number(currentAmounts.amount0) / 10 ** token0Info.decimals;
-    const amount1Human = Number(currentAmounts.amount1) / 10 ** token1Info.decimals;
+    const projection = await projectCurrentPosition(lifecycleContext, pos);
+    const amount0Human = Number(projection.currentAmount0) / 10 ** projection.token0Info.decimals;
+    const amount1Human = Number(projection.currentAmount1) / 10 ** projection.token1Info.decimals;
 
     result.push({
       tokenId: pos.tokenId.toString(),
-      token0: { address: pos.token0, symbol: token0Info.symbol, decimals: token0Info.decimals },
-      token1: { address: pos.token1, symbol: token1Info.symbol, decimals: token1Info.decimals },
+      token0: {
+        address: pos.token0,
+        symbol: projection.token0Info.symbol,
+        decimals: projection.token0Info.decimals,
+      },
+      token1: {
+        address: pos.token1,
+        symbol: projection.token1Info.symbol,
+        decimals: projection.token1Info.decimals,
+      },
       fee: pos.fee,
       feePercent: pos.fee / 10000,
       tickLower: pos.tickLower,
       tickUpper: pos.tickUpper,
-      priceLower,
-      priceUpper,
-      currentPrice,
+      priceLower: projection.priceLower,
+      priceUpper: projection.priceUpper,
+      currentPrice: projection.currentPrice,
       liquidity: pos.liquidity.toString(),
-      status: isActive ? "active" : "closed",
-      inRange,
+      status: projection.status,
+      inRange: projection.inRange,
       currentAmount0: amount0Human,
       currentAmount1: amount1Human,
     });

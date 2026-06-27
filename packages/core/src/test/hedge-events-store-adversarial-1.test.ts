@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { mock, describe, it, expect, beforeEach } from "bun:test";
 
-import { initSchema } from "../db/schema.js";
 import { createHedgeStore } from "../db/hedge-store.js";
+import { initSchema } from "../db/schema.js";
 
 // Mock getDb before importing store functions
 let testDb: Database;
@@ -183,7 +183,9 @@ describe("hedge-events-store — adversarial tests", () => {
       expect(hedgeStore.findOpenEvent("token-scope", "HYPE")?.id).toBe(reopened.id);
       expect(hedgeStore.listEvents("token-scope")).toHaveLength(2);
       expect(
-        hedgeStore.listEvents("token-scope").filter((event) => event.coin === "HYPE" && event.status === "open"),
+        hedgeStore
+          .listEvents("token-scope")
+          .filter((event) => event.coin === "HYPE" && event.status === "open"),
       ).toHaveLength(1);
     });
 
@@ -219,7 +221,9 @@ describe("hedge-events-store — adversarial tests", () => {
         realized_pnl: 4.5,
         hl_fill_hash: "scope-fill-1",
       });
-      expect(hedgeStore.listClosedEvents().filter((event) => event.hl_fill_hash === "scope-fill-1")).toHaveLength(1);
+      expect(
+        hedgeStore.listClosedEvents().filter((event) => event.hl_fill_hash === "scope-fill-1"),
+      ).toHaveLength(1);
     });
 
     it("insertHedgeEvent with duplicate (token_id, coin) when first is open — throws UNIQUE constraint error", () => {

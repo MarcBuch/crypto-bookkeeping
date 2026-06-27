@@ -1,9 +1,6 @@
 import type { Config } from "../config.js";
 import { sqliteHedgeStore } from "../db/hedge-store.js";
-import {
-  type StoredHedgeEvent,
-  type StoredHedgeSnapshot,
-} from "../db/store.js";
+import type { StoredHedgeEvent, StoredHedgeSnapshot } from "../db/store.js";
 import { isRecord } from "../utils/guards.js";
 import type { PnLView } from "./pnl.js";
 
@@ -435,9 +432,7 @@ async function resolveAbsentPosition(
     hl_fill_hash: String(largestFill.tid),
   });
 
-  const finalEvent =
-    closedEvent ??
-    sqliteHedgeStore.findClosedEvent(tokenId, coin) ?? null;
+  const finalEvent = closedEvent ?? sqliteHedgeStore.findClosedEvent(tokenId, coin) ?? null;
 
   return finalEvent ? buildClosedView(tokenId, coin, finalEvent) : null;
 }
@@ -475,7 +470,7 @@ export function resolveHedgeOpen(tokenId: string, coin: string): StoredHedgeEven
 
   // Create the open event from the earliest snapshot
   try {
-      return sqliteHedgeStore.recordEvent({
+    return sqliteHedgeStore.recordEvent({
       token_id: tokenId,
       coin: coin,
       status: "open",

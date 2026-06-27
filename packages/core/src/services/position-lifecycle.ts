@@ -108,7 +108,9 @@ export async function createPositionLifecycleContext(
     client,
     hyperSyncClient,
     logsWindowBlocks: config.logsFromBlock != null ? BigInt(config.logsFromBlock) : undefined,
-    latestBlock: options?.includeLatestBlock ? await withRetry(() => client.getBlockNumber()) : undefined,
+    latestBlock: options?.includeLatestBlock
+      ? await withRetry(() => client.getBlockNumber())
+      : undefined,
   };
 }
 
@@ -369,7 +371,8 @@ export async function resolvePositionLifecycle(
     totalFees0 = previouslyCollectedFees0 + pendingFees0;
     totalFees1 = previouslyCollectedFees1 + pendingFees1;
   } else {
-    const hasCachedExit = storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
+    const hasCachedExit =
+      storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
 
     if (hasCachedExit && storedPos) {
       currentAmount0 = BigInt(storedPos.exit_amount0 ?? "0");

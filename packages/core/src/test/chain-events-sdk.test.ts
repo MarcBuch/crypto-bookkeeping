@@ -106,6 +106,7 @@ function makeEventLog(
 function asGetLogs(
   fn: (args?: { fromBlock?: bigint; toBlock?: bigint }) => Promise<SimpleEventLog[]>,
 ): GetLogs {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   return fn as unknown as GetLogs;
 }
 
@@ -1476,7 +1477,11 @@ describe("adapter parity", () => {
           ];
         }
         return [
-          makeEventLog(priorCollect, 450n, "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+          makeEventLog(
+            priorCollect,
+            450n,
+            "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          ),
           makeEventLog(closeCollect, 600n, TX_HASH),
         ];
       }),
@@ -1491,8 +1496,7 @@ describe("adapter parity", () => {
             logs: [
               {
                 ...mockDecreaseLiquidityLog(tokenId, 25n, 500n, 700n, 400),
-                transactionHash:
-                  "0x1111bbbbccccddddeeeeffffaaaaabbbbccccddddeeeeffffaaaaabbbbcccc",
+                transactionHash: "0x1111bbbbccccddddeeeeffffaaaaabbbbccccddddeeeeffffaaaaabbbbcccc",
               },
               {
                 ...mockDecreaseLiquidityLog(tokenId, 50n, 3000n, 4000n, 600),
@@ -1593,7 +1597,14 @@ describe("adapter parity", () => {
     const [viemDecrease, viemCollect, sdkDecrease, sdkCollect] = await Promise.all([
       sumDecreaseLiquidityLogs(viemDecreaseClient, POSITION_MANAGER, tokenId, 1n, 200n),
       sumCollectLogsPublic(viemCollectClient, POSITION_MANAGER, tokenId, 1n, 200n),
-      sumDecreaseLiquidityLogs(mockViemClient(), POSITION_MANAGER, tokenId, 1n, 200n, hyperSyncClient),
+      sumDecreaseLiquidityLogs(
+        mockViemClient(),
+        POSITION_MANAGER,
+        tokenId,
+        1n,
+        200n,
+        hyperSyncClient,
+      ),
       sumCollectLogsPublic(mockViemClient(), POSITION_MANAGER, tokenId, 1n, 200n, hyperSyncClient),
     ]);
 

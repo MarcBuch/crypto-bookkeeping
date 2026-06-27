@@ -2,7 +2,6 @@ import { Database } from "bun:sqlite";
 import { describe, it, expect } from "bun:test";
 
 import { getDb, resolveDbPath } from "../db/schema.js";
-import { sqliteTaxLedgerStore } from "../db/tax-ledger-store.js";
 import {
   createManualTaxTransaction,
   getTaxTransactionsNeedingGermanTaxReview,
@@ -16,6 +15,7 @@ import {
   upsertTaxSyncState,
   updateTaxTransaction,
 } from "../db/store.js";
+import { sqliteTaxLedgerStore } from "../db/tax-ledger-store.js";
 import { useTestDb } from "./helpers/db.js";
 
 type TableSqlRow = { sql: string };

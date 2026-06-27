@@ -22,7 +22,9 @@ const tokens = {
   token1Info: { symbol: "TKN1", decimals: 6 },
 };
 
-function storedPosition(overrides: Partial<StoredPosition> = {}): Omit<StoredPosition, "created_at"> {
+function storedPosition(
+  overrides: Partial<StoredPosition> = {},
+): Omit<StoredPosition, "created_at"> {
   return {
     token_id: basePos.tokenId.toString(),
     token0: basePos.token0,
@@ -44,14 +46,16 @@ function storedPosition(overrides: Partial<StoredPosition> = {}): Omit<StoredPos
   };
 }
 
-function openEvent(overrides: Partial<{
-  tokenId: bigint;
-  blockNumber: bigint;
-  transactionHash: string;
-  amount0: bigint;
-  amount1: bigint;
-  liquidity: bigint;
-}> = {}) {
+function openEvent(
+  overrides: Partial<{
+    tokenId: bigint;
+    blockNumber: bigint;
+    transactionHash: string;
+    amount0: bigint;
+    amount1: bigint;
+    liquidity: bigint;
+  }> = {},
+) {
   return {
     tokenId: basePos.tokenId,
     blockNumber: 100n,
@@ -63,16 +67,18 @@ function openEvent(overrides: Partial<{
   };
 }
 
-function closeEvent(overrides: Partial<{
-  tokenId: bigint;
-  blockNumber: bigint;
-  transactionHash: string;
-  amount0: bigint;
-  amount1: bigint;
-  liquidity: bigint;
-  collectedFees0: bigint;
-  collectedFees1: bigint;
-}> = {}) {
+function closeEvent(
+  overrides: Partial<{
+    tokenId: bigint;
+    blockNumber: bigint;
+    transactionHash: string;
+    amount0: bigint;
+    amount1: bigint;
+    liquidity: bigint;
+    collectedFees0: bigint;
+    collectedFees1: bigint;
+  }> = {},
+) {
   return {
     tokenId: basePos.tokenId,
     blockNumber: 500n,

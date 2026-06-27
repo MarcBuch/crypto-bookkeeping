@@ -206,13 +206,7 @@ export async function findOpenEvent(
             ? lo + LOGS_CHUNK_SIZE - 1n
             : resolvedLatestBlock;
 
-        const logs = await source.getLogs(
-          "IncreaseLiquidity",
-          positionManager,
-          tokenId,
-          lo,
-          hi,
-        );
+        const logs = await source.getLogs("IncreaseLiquidity", positionManager, tokenId, lo, hi);
 
         if (logs.length > 0) {
           const event = toOpenEvent(logs[0], tokenId);
@@ -323,13 +317,7 @@ export async function findCloseEvent(
           startBlock,
           resolvedLatestBlock,
         ),
-        source.getLogs(
-          "Collect",
-          positionManager,
-          tokenId,
-          startBlock,
-          resolvedLatestBlock,
-        ),
+        source.getLogs("Collect", positionManager, tokenId, startBlock, resolvedLatestBlock),
       ]);
 
       if (decreaseLogs.length === 0) {
@@ -410,7 +398,13 @@ export async function findCloseEvent(
               startBlock,
               event.blockNumber,
             ),
-            sumCollectLogsFromSource(source, positionManager, tokenId, startBlock, event.blockNumber),
+            sumCollectLogsFromSource(
+              source,
+              positionManager,
+              tokenId,
+              startBlock,
+              event.blockNumber,
+            ),
           ]);
           return {
             status: "found",
@@ -492,22 +486,6 @@ export async function sumCollectLogsPublic(
 ): Promise<{ amount0: bigint; amount1: bigint }> {
   return sumCollectLogsFromSource(
     createPositionLogSource(client, hyperSyncClient),
-    positionManager,
-    tokenId,
-    fromBlock,
-    toBlock,
-  );
-}
-
-async function sumCollectLogs(
-  client: LogsClient,
-  positionManager: Address,
-  tokenId: bigint,
-  fromBlock: bigint,
-  toBlock: bigint,
-): Promise<{ amount0: bigint; amount1: bigint }> {
-  return sumCollectLogsFromSource(
-    createPositionLogSource(client),
     positionManager,
     tokenId,
     fromBlock,
@@ -734,10 +712,7 @@ function selectLatestLog(logs: readonly PositionLogRecord[]): PositionLogRecord 
       latest = log;
       continue;
     }
-    if (
-      log.blockNumber === latest.blockNumber &&
-      compareLogOrder(log, latest) > 0
-    ) {
+    if (log.blockNumber === latest.blockNumber && compareLogOrder(log, latest) > 0) {
       latest = log;
     }
   }

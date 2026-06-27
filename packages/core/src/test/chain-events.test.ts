@@ -460,6 +460,7 @@ describe("findCloseEvent scan window computation", () => {
 
 describe("viem pagination semantics", () => {
   it("findCloseEvent scans all viem chunks and picks the latest close across the full range", async () => {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const getLogs = (async (
       args:
         | {
@@ -488,13 +489,23 @@ describe("viem pagination semantics", () => {
       if (eventName === "DecreaseLiquidity" && fromBlock === 100_001n && toBlock === 100_100n) {
         expect({ fromBlock, toBlock }).toEqual({ fromBlock: 100_001n, toBlock: 100_100n });
         return [
-          makeEventLog({ tokenId: 1n, liquidity: 20n, amount0: 20n, amount1: 30n }, 100_050n, TX_HASH, 2n),
+          makeEventLog(
+            { tokenId: 1n, liquidity: 20n, amount0: 20n, amount1: 30n },
+            100_050n,
+            TX_HASH,
+            2n,
+          ),
         ];
       }
 
       if (eventName === "DecreaseLiquidity" && fromBlock === 100_001n && toBlock === 100_050n) {
         return [
-          makeEventLog({ tokenId: 1n, liquidity: 20n, amount0: 20n, amount1: 30n }, 100_050n, TX_HASH, 2n),
+          makeEventLog(
+            { tokenId: 1n, liquidity: 20n, amount0: 20n, amount1: 30n },
+            100_050n,
+            TX_HASH,
+            2n,
+          ),
         ];
       }
 
@@ -510,7 +521,14 @@ describe("viem pagination semantics", () => {
       }
 
       if (eventName === "Collect" && fromBlock === 100_001n && toBlock === 100_050n) {
-        return [makeEventLog({ tokenId: 1n, amount0Collect: 27n, amount1Collect: 41n }, 100_050n, TX_HASH, 4n)];
+        return [
+          makeEventLog(
+            { tokenId: 1n, amount0Collect: 27n, amount1Collect: 41n },
+            100_050n,
+            TX_HASH,
+            4n,
+          ),
+        ];
       }
 
       throw new Error(
@@ -538,6 +556,7 @@ describe("viem pagination semantics", () => {
 
   it("findCloseEvent prefers the larger same-block logIndex when both viem close logs are indexed", async () => {
     let callCount = 0;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const getLogs = (async () => {
       callCount += 1;
       if (callCount === 1) {
@@ -548,7 +567,12 @@ describe("viem pagination semantics", () => {
             "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
             1n,
           ),
-          makeEventLog({ tokenId: 1n, liquidity: 11n, amount0: 11n, amount1: 21n }, 500n, TX_HASH, 2n),
+          makeEventLog(
+            { tokenId: 1n, liquidity: 11n, amount0: 11n, amount1: 21n },
+            500n,
+            TX_HASH,
+            2n,
+          ),
         ];
       }
       return [];
@@ -574,6 +598,7 @@ describe("viem pagination semantics", () => {
 
   it("findCloseEvent deterministically prefers indexed same-block viem logs over unindexed ones", async () => {
     let callCount = 0;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const getLogs = (async () => {
       callCount += 1;
       if (callCount === 1) {
@@ -585,7 +610,12 @@ describe("viem pagination semantics", () => {
             500n,
             "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
           ),
-          makeEventLog({ tokenId: 1n, liquidity: 12n, amount0: 12n, amount1: 22n }, 500n, TX_HASH, 1n),
+          makeEventLog(
+            { tokenId: 1n, liquidity: 12n, amount0: 12n, amount1: 22n },
+            500n,
+            TX_HASH,
+            1n,
+          ),
         ];
       }
       return [];
@@ -611,34 +641,27 @@ describe("viem pagination semantics", () => {
 
   it("chunks DecreaseLiquidity aggregation into the existing 100k block windows", async () => {
     const calls: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const getLogs = (async (args: { fromBlock?: bigint; toBlock?: bigint } | undefined) => {
-        const fromBlock = args?.fromBlock ?? 0n;
-        const toBlock = args?.toBlock ?? 0n;
-        calls.push({ fromBlock, toBlock });
+      const fromBlock = args?.fromBlock ?? 0n;
+      const toBlock = args?.toBlock ?? 0n;
+      calls.push({ fromBlock, toBlock });
 
-        if (fromBlock === 5n) {
-          return [makeEventLog({ tokenId: 1n, liquidity: 1n, amount0: 10n, amount1: 20n }, 6n, TX_HASH)];
-        }
-        if (fromBlock === 200_005n) {
-          return [
-            makeEventLog(
-              { tokenId: 1n, liquidity: 1n, amount0: 3n, amount1: 4n },
-              200_006n,
-              TX_HASH,
-            ),
-          ];
-        }
-        return [];
-      }) as unknown as OpenClient["getLogs"];
+      if (fromBlock === 5n) {
+        return [
+          makeEventLog({ tokenId: 1n, liquidity: 1n, amount0: 10n, amount1: 20n }, 6n, TX_HASH),
+        ];
+      }
+      if (fromBlock === 200_005n) {
+        return [
+          makeEventLog({ tokenId: 1n, liquidity: 1n, amount0: 3n, amount1: 4n }, 200_006n, TX_HASH),
+        ];
+      }
+      return [];
+    }) as unknown as OpenClient["getLogs"];
     const client = { getLogs };
 
-    const totals = await sumDecreaseLiquidityLogs(
-      client,
-      POSITION_MANAGER,
-      1n,
-      5n,
-      200_010n,
-    );
+    const totals = await sumDecreaseLiquidityLogs(client, POSITION_MANAGER, 1n, 5n, 200_010n);
 
     expect(totals).toEqual({ amount0: 13n, amount1: 24n });
     expect(calls).toEqual([

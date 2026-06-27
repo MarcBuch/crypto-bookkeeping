@@ -11,7 +11,6 @@ import {
 import { resolveTokenMetadata, type TokenMetadataClient } from "../chain/token-metadata.js";
 import type { Config } from "../config.js";
 import { createHedgeStore } from "../db/hedge-store.js";
-import { createTaxLedgerStore } from "../db/tax-ledger-store.js";
 import {
   closeHedgeEvent,
   createManualTaxTransaction,
@@ -37,6 +36,7 @@ import {
   type StoredHedgeEvent,
   type SyncedTaxTransaction,
 } from "../db/store.js";
+import { createTaxLedgerStore } from "../db/tax-ledger-store.js";
 import { getHistoricalPrice } from "./pricing.js";
 
 function getTaxLedgerStore() {

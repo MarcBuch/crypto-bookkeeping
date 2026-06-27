@@ -8,11 +8,8 @@ import {
   upsertPnLViewCache,
 } from "../db/store.js";
 import { getHedgeView, snapshotHedge } from "./hedge.js";
-import {
-  createPositionLifecycleContext,
-  projectCurrentPosition,
-} from "./position-lifecycle.js";
 import { getPnLView } from "./pnl.js";
+import { createPositionLifecycleContext, projectCurrentPosition } from "./position-lifecycle.js";
 
 export interface PositionView {
   tokenId: string;

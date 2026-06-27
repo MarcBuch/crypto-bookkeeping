@@ -85,7 +85,10 @@ function entryColumns(entry: PositionEntryFacts) {
   };
 }
 
-function preserveStoredValue<T>(stored: T | null | undefined, incoming: T | null | undefined): T | null {
+function preserveStoredValue<T>(
+  stored: T | null | undefined,
+  incoming: T | null | undefined,
+): T | null {
   return stored ?? incoming ?? null;
 }
 

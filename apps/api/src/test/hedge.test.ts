@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, mock } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, mock } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
@@ -42,18 +42,63 @@ const fakeHedgeView = {
   leverage: { type: "cross", value: 1 },
 };
 
+const baseHedgeEvents = [
+  {
+    id: 1,
+    token_id: null,
+    trade_key: "trade-1",
+    tax_key: "tax-1",
+    coin: "HYPE",
+    status: "closed",
+    entry_px: 1500,
+    size: 10,
+    opened_at: "2024-01-01T00:00:00Z",
+    closed_at: "2024-01-02T00:00:00Z",
+    close_px: 1550,
+    realized_pnl: 500,
+    hl_fill_hash: null,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-02T00:00:00Z",
+  },
+  {
+    id: 2,
+    token_id: "123",
+    trade_key: "trade-2",
+    tax_key: "tax-2",
+    coin: "HYPE",
+    status: "open",
+    entry_px: 1600,
+    size: 5,
+    opened_at: "2024-01-03T00:00:00Z",
+    closed_at: null,
+    close_px: null,
+    realized_pnl: null,
+    hl_fill_hash: null,
+    created_at: "2024-01-03T00:00:00Z",
+    updated_at: "2024-01-03T00:00:00Z",
+  },
+];
+
+const fakeCachedPositions = [{ tokenId: "789", status: "closed" }];
+
 // --- Mutable mock function references ---
 let mockGetHedgeView: (config: unknown, tokenId: string) => Promise<unknown> = async () =>
   fakeHedgeView;
 
 let mockGetHedgeEvents: (tokenId: string) => Promise<unknown> = async () => [];
 
+let mockListCachedPositionViews: () => unknown[] = () => [];
+let mockListHedgeEvents: () => unknown[] = () => [];
+let mockAssignHedgeEvent: (id: number, tokenId: string | null) => unknown = () => null;
+let mockAssignHedgeEventCallCount = 0;
+let mockHedgeEvents = structuredClone(baseHedgeEvents);
+
 // --- Mock @lp-tracker/core BEFORE importing server ---
 await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
-  listCachedPositionViews: () => [],
+  listCachedPositionViews: () => mockListCachedPositionViews(),
   listCachedPnLViews: () => [],
   getPositionsCacheSyncedAt: () => null,
   syncLpData: async () => ({ synced: 0 }),
@@ -68,6 +113,8 @@ await mock.module("@lp-tracker/core", () => ({
   enrichTaxTransactionsEurValues: async () => ({ enriched: 0, skipped: 0 }),
   getHedgeView: (config: unknown, tokenId: string) => mockGetHedgeView(config, tokenId),
   getHedgeEvents: (tokenId: string) => mockGetHedgeEvents(tokenId),
+  listHedgeEvents: () => mockListHedgeEvents(),
+  assignHedgeEvent: (id: number, tokenId: string | null) => mockAssignHedgeEvent(id, tokenId),
   NotFoundError: class NotFoundError extends Error {
     constructor(msg: string) {
       super(msg);
@@ -96,6 +143,322 @@ beforeAll(async () => {
   const { buildServer } = await import("../index.js");
   server = await buildServer(fakeConfig);
   await server.ready();
+});
+
+beforeEach(() => {
+  mockHedgeEvents = structuredClone(baseHedgeEvents);
+  mockAssignHedgeEventCallCount = 0;
+  mockGetHedgeView = async () => fakeHedgeView;
+  mockGetHedgeEvents = async (tokenId: string) =>
+    mockHedgeEvents.filter((event) => event.token_id === tokenId);
+  mockListCachedPositionViews = () => fakeCachedPositions;
+  mockListHedgeEvents = () => mockHedgeEvents;
+  mockAssignHedgeEvent = (id: number, tokenId: string | null) => {
+    mockAssignHedgeEventCallCount += 1;
+    const event = mockHedgeEvents.find((candidate) => candidate.id === id);
+    if (!event) {
+      return null;
+    }
+
+    event.token_id = tokenId;
+    return event;
+  };
+});
+
+describe("GET /hedges", () => {
+  it("returns assigned and unassigned hedge trades by default", async () => {
+    const res = await server.inject({ method: "GET", url: "/hedges" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ hedges: mockHedgeEvents });
+  });
+
+  it("filters assigned hedges", async () => {
+    const res = await server.inject({ method: "GET", url: "/hedges?assigned=assigned" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedges).toEqual([mockHedgeEvents[1]]);
+  });
+
+  it("accepts assigned=all explicitly", async () => {
+    const res = await server.inject({ method: "GET", url: "/hedges?assigned=all" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ hedges: mockHedgeEvents });
+  });
+
+  it("filters unassigned hedges", async () => {
+    const res = await server.inject({ method: "GET", url: "/hedges?assigned=unassigned" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedges).toEqual([mockHedgeEvents[0]]);
+  });
+
+  it("returns 400 for invalid assigned filter", async () => {
+    const res = await server.inject({ method: "GET", url: "/hedges?assigned=nope" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "assigned must be one of: assigned, unassigned, all",
+    });
+  });
+});
+
+describe("PATCH /hedges/:id/assignment", () => {
+  it("assigns a hedge to an existing cached-only position", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: "789" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({ id: 1, token_id: "789" });
+  });
+
+  it("preserves trade_key and tax_key on assignment", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: "789" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({
+      id: 1,
+      token_id: "789",
+      trade_key: "trade-1",
+      tax_key: "tax-1",
+    });
+  });
+
+  it("unassigns a hedge", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/2/assignment",
+      payload: { tokenId: null },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({ id: 2, token_id: null });
+  });
+
+  it("preserves trade_key and tax_key on unassignment", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/2/assignment",
+      payload: { tokenId: null },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({
+      id: 2,
+      token_id: null,
+      trade_key: "trade-2",
+      tax_key: "tax-2",
+    });
+  });
+
+  it("reassigns a hedge from one valid LP position to another", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/2/assignment",
+      payload: { tokenId: "456" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({ id: 2, token_id: "456" });
+  });
+
+  it("preserves trade_key and tax_key on reassignment", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/2/assignment",
+      payload: { tokenId: "456" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({
+      id: 2,
+      token_id: "456",
+      trade_key: "trade-2",
+      tax_key: "tax-2",
+    });
+  });
+
+  it("accepts assignment to a closed cached position", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: "789" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hedge).toMatchObject({ id: 1, token_id: "789" });
+  });
+
+  it("returns 404 when hedge event does not exist", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/999/assignment",
+      payload: { tokenId: "123" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: "Hedge event not found", id: "999" });
+  });
+
+  it("returns 400 for invalid hedge id", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/not-a-number/assignment",
+      payload: { tokenId: "123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "id must be a positive safe integer" });
+  });
+
+  it("returns 400 for decimal hedge id", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1.5/assignment",
+      payload: { tokenId: "123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "id must be a positive safe integer" });
+  });
+
+  it("returns 400 for negative hedge id", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/-1/assignment",
+      payload: { tokenId: "123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "id must be a positive safe integer" });
+  });
+
+  it("returns 400 for zero hedge id", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/0/assignment",
+      payload: { tokenId: "123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "id must be a positive safe integer" });
+  });
+
+  it("returns 400 for unsafe integer hedge id", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/9007199254740992/assignment",
+      payload: { tokenId: "123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "id must be a positive safe integer" });
+  });
+
+  it("returns 400 for null body", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      headers: { "content-type": "application/json" },
+      payload: "null",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "body must be an object" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
+
+  it("returns 400 for array body", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      headers: { "content-type": "application/json" },
+      payload: '["123"]',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "body must be an object" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
+
+  it("returns 400 for missing tokenId", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string or null" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
+
+  it("returns 400 for invalid request body", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: "abc" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string or null" });
+  });
+
+  it("returns 400 for numeric tokenId provided as a number", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: 123 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string or null" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
+
+  it("returns 400 for tokenId provided as an array", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: ["123"] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string or null" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
+
+  it("returns 400 for tokenId provided as an object", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: { value: "123" } },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string or null" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
+
+  it("returns 404 when assignment target position does not exist", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/hedges/1/assignment",
+      payload: { tokenId: "999" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: "Position not found", tokenId: "999" });
+    expect(mockAssignHedgeEventCallCount).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -214,6 +577,13 @@ describe("GET /positions/:tokenId/hedge", () => {
       const res2 = await server.inject({ method: "GET", url: "/positions/456/hedge" });
       expect(res2.statusCode).toBe(404);
       expect(res2.json().error).toBe("No hedge configured for this position");
+    });
+
+    it("stays config-gated for cached-only positions with assigned hedge events", async () => {
+      const res = await server.inject({ method: "GET", url: "/positions/789/hedge" });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ error: "Position not found", tokenId: "789" });
     });
   });
 
@@ -584,20 +954,14 @@ describe("GET /positions/:tokenId/hedge/events", () => {
     });
   });
 
-  // =========================================================================
-  // Cluster B2: Position exists but has no hedge config
-  // =========================================================================
   describe("Cluster B2: Position with no hedge config", () => {
-    it("returns 404 when position exists but has no hedge config", async () => {
+    it("returns 200 for config position without hedge config", async () => {
       const res = await server.inject({ method: "GET", url: "/positions/456/hedge/events" });
-      expect(res.statusCode).toBe(404);
-      expect(res.json()).toMatchObject({
-        error: "No hedge configured for this position",
-        tokenId: "456",
-      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ events: [], tokenId: "456" });
     });
 
-    it("returns 404 before calling getHedgeEvents for missing hedge config", async () => {
+    it("calls getHedgeEvents for position without hedge config", async () => {
       let getHedgeEventsCalled = false;
       mockGetHedgeEvents = async () => {
         getHedgeEventsCalled = true;
@@ -605,20 +969,8 @@ describe("GET /positions/:tokenId/hedge/events", () => {
       };
 
       const res = await server.inject({ method: "GET", url: "/positions/456/hedge/events" });
-      expect(res.statusCode).toBe(404);
-      expect(getHedgeEventsCalled).toBe(false);
-    });
-
-    it("distinguishes between 'position not found' and 'no hedge config' errors", async () => {
-      // Position 999 doesn't exist
-      const res1 = await server.inject({ method: "GET", url: "/positions/999/hedge/events" });
-      expect(res1.statusCode).toBe(404);
-      expect(res1.json().error).toBe("Position not found");
-
-      // Position 456 exists but has no hedge
-      const res2 = await server.inject({ method: "GET", url: "/positions/456/hedge/events" });
-      expect(res2.statusCode).toBe(404);
-      expect(res2.json().error).toBe("No hedge configured for this position");
+      expect(res.statusCode).toBe(200);
+      expect(getHedgeEventsCalled).toBe(true);
     });
   });
 
@@ -659,12 +1011,36 @@ describe("GET /positions/:tokenId/hedge/events", () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers["content-type"]).toContain("application/json");
     });
+
+    it("returns 200 for cached-only position token", async () => {
+      mockGetHedgeEvents = async () => [];
+
+      const res = await server.inject({ method: "GET", url: "/positions/789/hedge/events" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ events: [], tokenId: "789" });
+    });
   });
 
   // =========================================================================
   // Cluster D: Returns events (known position, events exist)
   // =========================================================================
   describe("Cluster D: Returns events (known position, events exist)", () => {
+    it("returns only hedges assigned to the requested tokenId and includes tokenId", async () => {
+      mockGetHedgeEvents = async (tokenId: string) =>
+        mockHedgeEvents.filter((event) => event.token_id === tokenId);
+
+      const res = await server.inject({ method: "GET", url: "/positions/123/hedge/events" });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        tokenId: "123",
+        events: [
+          expect.objectContaining({ id: 2, token_id: "123", trade_key: "trade-2", tax_key: "tax-2" }),
+        ],
+      });
+      expect(res.json().events).toHaveLength(1);
+    });
+
     it("returns 200 with single hedge event", async () => {
       const fakeEvent = {
         id: 1,

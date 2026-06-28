@@ -104,6 +104,8 @@ await mock.module("@lp-tracker/core", () => ({
     closeReason: null,
   }),
   getHedgeEvents: async () => [],
+  listHedgeEvents: () => [],
+  assignHedgeEvent: () => null,
   listTaxTransactions: () => [],
   syncTaxTransactions: async () => ({}),
   createManualTaxTransaction: () => null,

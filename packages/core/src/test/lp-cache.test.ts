@@ -38,6 +38,7 @@ const fakePnLView = {
   pair: "WHYPE/USDC",
   token0Symbol: "WHYPE",
   token1Symbol: "USDC",
+  openedAt: "2026-05-01T00:00:00.000Z",
   status: "active",
   entryPrice: 1.0,
   exitPrice: 1.5,

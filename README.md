@@ -288,7 +288,7 @@ HTTP status codes:
 
 ## Web (`apps/web`)
 
-The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position, P&L, and tax transaction labeling data. It uses TanStack Router for client routing, reads `/positions` and `/pnl` from the API for the dashboard, and exposes `/tax` for manually syncing wallet transactions, selecting `Trade`/`Transfer` labels, and saving local comments. P&L cards prioritize Fee Income USD when available and show USD unavailable for missing or `null` pricing values.
+The web app is a Vite + React + TypeScript + Tailwind dashboard for LP position, P&L, and tax transaction labeling data. It uses TanStack Router for client routing, reads `/positions` and `/pnl` from the API for the dashboard, and exposes `/tax` for manually syncing wallet transactions, selecting `Trade`/`Transfer` labels, and saving local comments. P&L cards prioritize Lifetime Income USD when available and show USD unavailable for missing or `null` pricing values.
 
 ### Start the app
 

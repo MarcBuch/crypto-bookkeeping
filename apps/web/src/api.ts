@@ -24,6 +24,7 @@ export interface PnLView {
   pair: string;
   token0Symbol: string;
   token1Symbol: string;
+  openedAt?: string | null;
   status: "active" | "closed";
   entryPrice: number;
   exitPrice: number;

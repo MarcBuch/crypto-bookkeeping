@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -6,6 +6,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { DashboardPosition, HedgeEvent } from "../../src/api";
 import { Dashboard, EmptyState, ErrorState, LoadingState } from "../../src/App";
 import { hedgeQueryKeys } from "../../src/hooks/useHedge";
+
+const REAL_DATE_NOW = Date.now;
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function expectMetricValue(html: string, label: string, value: string): void {
+  expect(html).toMatch(
+    new RegExp(`${escapeRegex(label)}</p><span[^>]*></span></div><p[^>]*>${escapeRegex(value)}</p>`),
+  );
+}
 
 const activePosition: DashboardPosition = {
   tokenId: "123",
@@ -28,6 +40,7 @@ const activePosition: DashboardPosition = {
     pair: "WHYPE/USDC",
     token0Symbol: "WHYPE",
     token1Symbol: "USDC",
+    openedAt: "2026-06-01T00:00:00.000Z",
     status: "active",
     entryPrice: 1,
     exitPrice: 1.5,
@@ -111,6 +124,10 @@ function renderDashboard(positions: DashboardPosition[], assignedHedges: HedgeEv
 }
 
 describe("dashboard rendering", () => {
+  afterEach(() => {
+    Date.now = REAL_DATE_NOW;
+  });
+
   it("renders loading state", () => {
     const html = renderToStaticMarkup(<LoadingState />);
 
@@ -155,10 +172,53 @@ describe("dashboard rendering", () => {
   it("prioritizes USD fee income when values are available", () => {
     const html = renderDashboard([activePosition, closedPosition]);
 
-    expect(html).toContain("Fee Income USD");
+    expect(html).toContain("Lifetime Income USD");
     expect(html).toContain("$6.46");
+    expect(html).toContain("Carry Run Rate");
     expect(html).toContain("24.69 USDC");
     expect(html).toContain("12.35 USDC");
+  });
+
+  it("renders a 30-day normalized carry run rate when openedAt is present", () => {
+    Date.now = () => new Date("2026-06-11T00:00:00.000Z").getTime();
+
+    const html = renderDashboard([activePosition]);
+
+    expectMetricValue(html, "Carry Run Rate", "$9.69");
+  });
+
+  it("normalizes carry once at the portfolio level instead of summing per-position run rates", () => {
+    Date.now = () => new Date("2026-06-11T00:00:00.000Z").getTime();
+
+    const laterOpenedPosition: DashboardPosition = {
+      ...closedPosition,
+      tokenId: "789",
+      pnl: {
+        ...closedPosition.pnl!,
+        tokenId: "789",
+        openedAt: "2026-06-06T00:00:00.000Z",
+        feesValueUsd: 6,
+      },
+    };
+
+    const html = renderDashboard([activePosition, laterOpenedPosition]);
+
+    expectMetricValue(html, "Carry Run Rate", "$27.69");
+  });
+
+  it("shows USD unavailable for carry run rate on legacy cached PnL rows missing openedAt", () => {
+    const legacyCachedPosition: DashboardPosition = {
+      ...activePosition,
+      pnl: {
+        ...activePosition.pnl!,
+        openedAt: undefined,
+      },
+    };
+
+    const html = renderDashboard([legacyCachedPosition]);
+
+    expectMetricValue(html, "Carry Run Rate", "USD unavailable");
+    expectMetricValue(html, "Lifetime Income USD", "$3.23");
   });
 
   it("sums only numeric USD fees across mixed positions", () => {
@@ -166,7 +226,7 @@ describe("dashboard rendering", () => {
 
     const html = renderDashboard([activePosition, positionWithoutUsdFees]);
 
-    expect(html).toMatch(/Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
+    expect(html).toMatch(/Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
     expect(html).toContain("USD unavailable");
     expect(html).not.toContain("$0.00");
     expect(html).toContain("24.69 USDC");
@@ -182,7 +242,7 @@ describe("dashboard rendering", () => {
     const html = renderDashboard([positionWithNullUsdFees, positionWithMissingUsdFees]);
 
     expect(html).toMatch(
-      /Fee Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/,
+      /Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/,
     );
     expect(html).not.toContain("$0.00");
     expect(html).toContain("24.69 USDC");

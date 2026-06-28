@@ -192,6 +192,7 @@ export function Dashboard({
   const assignedHedgesByTokenId = groupAssignedHedgesByTokenId(assignedHedgesData?.hedges ?? []);
 
   const openPositions = positions.filter((position) => position.status !== "closed");
+  const carryRunRateUsd = calculateThirtyDayPortfolioCarryRunRate(positions);
   const totals = positions.reduce(
     (acc, position) => {
       acc.pnl +=
@@ -226,12 +227,12 @@ export function Dashboard({
           />
           <MetricCard
             label="Carry Run Rate"
-            value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
+            value={carryRunRateUsd !== null ? formatUsd(carryRunRateUsd) : "USD unavailable"}
             detail="30-day normalized"
-            tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
+            tone={carryRunRateUsd ?? undefined}
           />
           <MetricCard
-            label="Fee Income USD"
+            label="Lifetime Income USD"
             value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
             detail={`${formatNumber(totals.fees)} ${token1Symbol}`}
             tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
@@ -1482,6 +1483,37 @@ function currentBalanceUsd(position: DashboardPosition): number | null {
   }
 
   return null;
+}
+
+function calculateThirtyDayPortfolioCarryRunRate(positions: DashboardPosition[]): number | null {
+  let totalFeesUsd = 0;
+  let earliestOpenedAt: number | null = null;
+
+  for (const position of positions) {
+    const pnl = position.pnl;
+    if (!pnl || typeof pnl.feesValueUsd !== "number" || pnl.openedAt == null) {
+      continue;
+    }
+
+    const openedAt = new Date(pnl.openedAt).getTime();
+    if (!Number.isFinite(openedAt)) {
+      continue;
+    }
+
+    totalFeesUsd += pnl.feesValueUsd;
+    earliestOpenedAt = earliestOpenedAt === null ? openedAt : Math.min(earliestOpenedAt, openedAt);
+  }
+
+  if (earliestOpenedAt === null) {
+    return null;
+  }
+
+  const elapsedMs = Date.now() - earliestOpenedAt;
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return null;
+  }
+
+  return (totalFeesUsd / elapsedMs) * 1000 * 60 * 60 * 24 * 30;
 }
 
 function venueLabel(position: DashboardPosition): { name: string; dotClass: string } {

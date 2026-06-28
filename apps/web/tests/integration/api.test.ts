@@ -106,6 +106,7 @@ const pnl: PnLView = {
   pair: "WHYPE/USDC",
   token0Symbol: "WHYPE",
   token1Symbol: "USDC",
+  openedAt: "2026-06-01T00:00:00.000Z",
   status: "active",
   entryPrice: 1,
   exitPrice: 1.5,
@@ -297,6 +298,7 @@ describe("API client", () => {
     const { positions: dashboardPositions } = await getDashboardPositions();
 
     expect(dashboardPositions[0]?.pnl).toMatchObject({
+      openedAt: "2026-06-01T00:00:00.000Z",
       feesCollected0Usd: 0.03,
       feesCollected1Usd: 0.02,
       feesValueUsd: 0.05,
@@ -304,6 +306,24 @@ describe("API client", () => {
       token1UsdPrice: 1,
       usdPriceSource: "coingecko",
     });
+  });
+
+  it("keeps older P&L responses with fees but missing openedAt stable", async () => {
+    const { openedAt: _openedAt, ...legacyPnl } = pnl;
+
+    mockFetch((url) => {
+      if (url.endsWith("/positions")) {
+        return jsonResponse({ positions: [position] });
+      }
+
+      return jsonResponse({ positions: [legacyPnl] });
+    });
+
+    const { positions: dashboardPositions } = await getDashboardPositions();
+
+    expect(dashboardPositions).toEqual([{ ...position, pnl: legacyPnl }]);
+    expect(dashboardPositions[0]?.pnl?.feesValueUsd).toBe(0.05);
+    expect(dashboardPositions[0]?.pnl?.openedAt).toBeUndefined();
   });
 
   it("preserves null USD fee fields through dashboard merge", async () => {

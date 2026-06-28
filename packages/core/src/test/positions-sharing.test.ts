@@ -132,6 +132,7 @@ const fakePnLView = {
   pair: "TEST/TEST",
   token0Symbol: "TEST",
   token1Symbol: "TEST",
+  openedAt: "2026-05-01T00:00:00.000Z",
   status: "closed",
   entryPrice: 1.0,
   exitPrice: 1.5,

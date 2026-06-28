@@ -12,6 +12,7 @@ export interface PnLView {
   pair: string;
   token0Symbol: string;
   token1Symbol: string;
+  openedAt: string | null;
   status: "active" | "closed";
   entryPrice: number;
   exitPrice: number;
@@ -129,6 +130,16 @@ export async function getPnLView(
 
     const { facts } = lifecycle;
     const { token0Info, token1Info, storedPos, closeBlock } = facts;
+    let openedAt: string | null = null;
+
+    if (facts.entryBlock != null) {
+      try {
+        const entryBlock = await client.getBlock({ blockNumber: facts.entryBlock });
+        openedAt = new Date(Number(entryBlock.timestamp * 1000n)).toISOString();
+      } catch {
+        openedAt = null;
+      }
+    }
 
     const economics = calculateLpEconomics(facts);
 
@@ -223,6 +234,7 @@ export async function getPnLView(
       pair: `${t0sym}/${t1sym}`,
       token0Symbol: t0sym,
       token1Symbol: t1sym,
+      openedAt,
       status: facts.status,
       entryPrice: economics.entryPrice,
       exitPrice: economics.exitPrice,

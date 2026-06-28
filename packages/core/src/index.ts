@@ -59,6 +59,7 @@ export {
   upsertLpSyncState,
   upsertPositionViewCache,
   upsertPnLViewCache,
+  updateCachedPnLView,
 } from "./db/store.js";
 export { getAllPositions as getAllStoredPositions } from "./db/store.js";
 export type {

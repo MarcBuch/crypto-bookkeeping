@@ -862,6 +862,20 @@ export function upsertPnLViewCache(tokenId: string | null, data: unknown, synced
   ]);
 }
 
+export function updateCachedPnLView(tokenId: string, update: Record<string, unknown>): void {
+  const db = getDb();
+  const existing = db.query<CacheRow, [string]>("SELECT data FROM pnl_view_cache WHERE token_id = ?").get(tokenId);
+  if (!existing) {
+    return;
+  }
+
+  const merged = { ...parseCachedView(existing.data), ...update };
+  db.run(
+    "UPDATE pnl_view_cache SET data = ? WHERE token_id = ?",
+    [JSON.stringify(merged), tokenId],
+  );
+}
+
 export interface StoredTokenMetadata {
   contract_address: string;
   symbol: string | null;

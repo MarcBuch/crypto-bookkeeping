@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, mock } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, mock } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
@@ -51,6 +51,7 @@ const fakePnLView = {
   pair: "WETH/USDC",
   token0Symbol: "WETH",
   token1Symbol: "USDC",
+  openedAt: "2026-06-01T00:00:00.000Z",
   status: "active" as const,
   entryPrice: 1800,
   exitPrice: 2000,
@@ -119,6 +120,11 @@ const fakeILView = {
 let mockListCachedPnLViews: (...args: unknown[]) => unknown = () => [];
 let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
 let mockGetILView: (...args: unknown[]) => unknown = async () => [];
+let mockGetPosition: (...args: unknown[]) => unknown = () => null;
+let mockCreateClient: (...args: unknown[]) => unknown = () => ({
+  getBlock: async () => ({ timestamp: 1700000000n }),
+});
+let mockUpdateCachedPnLView: (...args: unknown[]) => unknown = () => undefined;
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
 await mock.module("@lp-tracker/core", () => ({
@@ -128,6 +134,9 @@ await mock.module("@lp-tracker/core", () => ({
   listCachedPositionViews: () => [],
   listCachedPnLViews: (...args: unknown[]) => mockListCachedPnLViews(...args),
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
+  getPosition: (...args: unknown[]) => mockGetPosition(...args),
+  createClient: (...args: unknown[]) => mockCreateClient(...args),
+  updateCachedPnLView: (...args: unknown[]) => mockUpdateCachedPnLView(...args),
   syncLpData: async () => ({ synced: 0 }),
   syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
   getPnLView: async () => [],
@@ -153,6 +162,7 @@ await mock.module("@lp-tracker/core", () => ({
   assignHedgeEvent: () => null,
   listTaxTransactions: () => [],
   syncTaxTransactions: async () => ({}),
+  createManualTaxTransaction: () => ({ id: "manual", hash: "manual" }),
   updateTaxTransaction: () => null,
   enrichTaxTransactionsEurValues: async () => ({ enriched: 0, skipped: 0 }),
   NotFoundError: MockNotFoundError,
@@ -166,6 +176,17 @@ beforeAll(async () => {
   const { buildServer } = await import("../index.js");
   server = await buildServer(fakeConfig);
   await server.ready();
+});
+
+beforeEach(() => {
+  mockListCachedPnLViews = () => [];
+  mockGetPositionsCacheSyncedAt = () => null;
+  mockGetILView = async () => [];
+  mockGetPosition = () => null;
+  mockCreateClient = () => ({
+    getBlock: async () => ({ timestamp: 1700000000n }),
+  });
+  mockUpdateCachedPnLView = () => undefined;
 });
 
 // ---------------------------------------------------------------------------
@@ -217,6 +238,27 @@ describe("GET /pnl", () => {
     const body = res.json();
     expect(body.positions).toEqual([]);
     expect(body.syncedAt).toBeNull();
+  });
+
+  it("backfills missing openedAt from stored entry_block for legacy cached rows", async () => {
+    const { openedAt: _openedAt, ...legacyPnLView } = fakePnLView;
+    const updates: Array<{ tokenId: string; openedAt: string }> = [];
+
+    mockListCachedPnLViews = () => [legacyPnLView];
+    mockGetPosition = () => ({ entry_block: 12345 });
+    mockCreateClient = () => ({
+      getBlock: async () => ({ timestamp: 1760000000n }),
+    });
+    mockUpdateCachedPnLView = (tokenId: string, update: { openedAt: string }) => {
+      updates.push({ tokenId, openedAt: update.openedAt });
+    };
+
+    const res = await server.inject({ method: "GET", url: "/pnl" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      positions: [{ tokenId: "123", openedAt: "2025-10-09T08:53:20.000Z" }],
+    });
+    expect(updates).toEqual([{ tokenId: "123", openedAt: "2025-10-09T08:53:20.000Z" }]);
   });
 });
 
@@ -276,6 +318,27 @@ describe("GET /positions/:tokenId/pnl", () => {
         ...nullableUsdFields,
       },
     });
+  });
+
+  it("backfills missing openedAt for single-position legacy cached rows", async () => {
+    const { openedAt: _openedAt, ...legacyPnLView } = fakePnLView;
+    const updates: Array<{ tokenId: string; openedAt: string }> = [];
+
+    mockListCachedPnLViews = () => [legacyPnLView];
+    mockGetPosition = () => ({ entry_block: 12345 });
+    mockCreateClient = () => ({
+      getBlock: async () => ({ timestamp: 1760000000n }),
+    });
+    mockUpdateCachedPnLView = (tokenId: string, update: { openedAt: string }) => {
+      updates.push({ tokenId, openedAt: update.openedAt });
+    };
+
+    const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      position: { tokenId: "123", openedAt: "2025-10-09T08:53:20.000Z" },
+    });
+    expect(updates).toEqual([{ tokenId: "123", openedAt: "2025-10-09T08:53:20.000Z" }]);
   });
 });
 

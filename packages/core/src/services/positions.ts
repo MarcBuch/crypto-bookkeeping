@@ -7,7 +7,7 @@ import {
   upsertPositionViewCache,
   upsertPnLViewCache,
 } from "../db/store.js";
-import { getHedgeView, snapshotHedge } from "./hedge.js";
+import { getHedgeView, snapshotHedge, syncHyperliquidHedgeTrades } from "./hedge.js";
 import { getPnLView } from "./pnl.js";
 import { createPositionLifecycleContext, projectCurrentPosition } from "./position-lifecycle.js";
 
@@ -85,6 +85,8 @@ export interface SyncLpDataSummary {
   wallet: string;
   syncedAt: string;
   positionCount: number;
+  hedgeTradesSynced: number;
+  hedgeSyncError?: string;
 }
 
 export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
@@ -120,11 +122,27 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
     }
   }
 
-  return {
+  let hedgeTradesSynced = 0;
+  let hedgeSyncError: string | undefined;
+  try {
+    hedgeTradesSynced = await syncHyperliquidHedgeTrades(config);
+  } catch (err) {
+    hedgeSyncError = err instanceof Error ? err.message : String(err);
+    console.warn("[hedge] Failed to sync hedge trades:", err);
+  }
+
+  const summary: SyncLpDataSummary = {
     wallet: config.wallet,
     syncedAt,
     positionCount: positions.length,
+    hedgeTradesSynced,
   };
+
+  if (hedgeSyncError) {
+    summary.hedgeSyncError = hedgeSyncError;
+  }
+
+  return summary;
 }
 
 export interface SyncSinglePositionSummary {

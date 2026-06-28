@@ -1,14 +1,20 @@
 import {
+  assignHedgeEvent,
   closeHedgeEvent,
   getAllClosedHedgeEvents,
+  getHedgeEvent,
+  getHedgeEventByTradeKey,
   getEarliestHedgeSnapshot,
   getHedgeEvents,
   getOpenHedgeEvent,
   insertHedgeEvent,
   insertHedgeSnapshot,
+  listHedgeEvents,
   listHedgeSnapshots,
+  listUnassignedHedgeEvents,
   type StoredHedgeEvent,
   type StoredHedgeSnapshot,
+  upsertHedgeEventByTradeKey,
 } from "./store.js";
 
 type HedgeStoreDeps = {
@@ -20,6 +26,12 @@ type HedgeStoreDeps = {
   insertHedgeEvent: typeof insertHedgeEvent;
   insertHedgeSnapshot: typeof insertHedgeSnapshot;
   listHedgeSnapshots: typeof listHedgeSnapshots;
+  assignHedgeEvent?: typeof assignHedgeEvent;
+  getHedgeEvent?: typeof getHedgeEvent;
+  getHedgeEventByTradeKey?: typeof getHedgeEventByTradeKey;
+  listHedgeEvents?: typeof listHedgeEvents;
+  listUnassignedHedgeEvents?: typeof listUnassignedHedgeEvents;
+  upsertHedgeEventByTradeKey?: typeof upsertHedgeEventByTradeKey;
 };
 
 export interface HedgeStore {
@@ -27,8 +39,16 @@ export interface HedgeStore {
   listSnapshots(tokenId: string): StoredHedgeSnapshot[];
   findEarliestSnapshot(tokenId: string, coin: string): StoredHedgeSnapshot | null;
   recordEvent(event: Omit<StoredHedgeEvent, "id">): StoredHedgeEvent;
+  getEvent(id: number): StoredHedgeEvent | null;
+  getEventByTradeKey(tradeKey: string): StoredHedgeEvent | null;
+  listAllEvents(): StoredHedgeEvent[];
+  listUnassignedEvents(): StoredHedgeEvent[];
+  assignEvent(id: number, tokenId: string | null): StoredHedgeEvent | null;
+  upsertEventByTradeKey(
+    event: Omit<StoredHedgeEvent, "id"> & { trade_key: string },
+  ): StoredHedgeEvent;
   closeOpenEvent(params: {
-    token_id: string;
+    token_id: string | null;
     coin: string;
     closed_at: string;
     close_px: number;
@@ -61,6 +81,33 @@ export function createHedgeStore(deps: HedgeStoreDeps): HedgeStore {
       return deps.insertHedgeEvent(event);
     },
 
+    getEvent(id) {
+      return deps.getHedgeEvent?.(id) ?? null;
+    },
+
+    getEventByTradeKey(tradeKey) {
+      return deps.getHedgeEventByTradeKey?.(tradeKey) ?? null;
+    },
+
+    listAllEvents() {
+      return deps.listHedgeEvents?.() ?? [];
+    },
+
+    listUnassignedEvents() {
+      return deps.listUnassignedHedgeEvents?.() ?? [];
+    },
+
+    assignEvent(id, tokenId) {
+      return deps.assignHedgeEvent?.(id, tokenId) ?? null;
+    },
+
+    upsertEventByTradeKey(event) {
+      if (!deps.upsertHedgeEventByTradeKey) {
+        return deps.insertHedgeEvent(event);
+      }
+      return deps.upsertHedgeEventByTradeKey(event);
+    },
+
     closeOpenEvent(params) {
       return deps.closeHedgeEvent(params);
     },
@@ -88,12 +135,18 @@ export function createHedgeStore(deps: HedgeStoreDeps): HedgeStore {
 }
 
 export const sqliteHedgeStore = createHedgeStore({
+  assignHedgeEvent,
   closeHedgeEvent,
   getAllClosedHedgeEvents,
+  getHedgeEvent,
+  getHedgeEventByTradeKey,
   getEarliestHedgeSnapshot,
   getHedgeEvents,
   getOpenHedgeEvent,
   insertHedgeEvent,
   insertHedgeSnapshot,
+  listHedgeEvents,
   listHedgeSnapshots,
+  listUnassignedHedgeEvents,
+  upsertHedgeEventByTradeKey,
 });

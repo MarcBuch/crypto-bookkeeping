@@ -67,7 +67,7 @@ export interface StoredHedgeSnapshot {
 
 export interface StoredHedgeEvent {
   id: number;
-  token_id: string;
+  token_id: string | null;
   coin: string;
   status: "open" | "closed";
   entry_px: number;
@@ -79,7 +79,42 @@ export interface StoredHedgeEvent {
   funding_earned: number | null;
   close_reason: string | null;
   hl_fill_hash: string | null;
+  trade_key?: string | null;
+  tax_key?: string | null;
+  current_szi?: string | null;
+  mark_px?: number | null;
+  unrealized_pnl?: number | null;
+  liquidation_px?: number | null;
+  leverage_type?: string | null;
+  leverage_value?: number | null;
+  updated_at?: string | null;
 }
+
+type HedgeEventInsert = Omit<StoredHedgeEvent, "id">;
+type HedgeEventUpsert = Omit<StoredHedgeEvent, "id"> & { trade_key: string };
+type PreparedHedgeEvent = {
+  token_id: string | null;
+  coin: string;
+  status: "open" | "closed";
+  entry_px: number;
+  size: number;
+  opened_at: string;
+  closed_at: string | null;
+  close_px: number | null;
+  realized_pnl: number | null;
+  funding_earned: number | null;
+  close_reason: string | null;
+  hl_fill_hash: string | null;
+  trade_key: string;
+  tax_key: string;
+  current_szi: string | null;
+  mark_px: number | null;
+  unrealized_pnl: number | null;
+  liquidation_px: number | null;
+  leverage_type: string | null;
+  leverage_value: number | null;
+  updated_at: string;
+};
 
 export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | null;
 export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
@@ -878,24 +913,34 @@ export function getEarliestHedgeSnapshot(
 }
 
 export function insertHedgeEvent(event: Omit<StoredHedgeEvent, "id">): StoredHedgeEvent {
+  const preparedEvent = prepareHedgeEventForWrite(event);
   const db = getDb();
   db.run(
     `INSERT INTO hedge_events
-     (token_id, coin, status, entry_px, size, opened_at, closed_at, close_px, realized_pnl, funding_earned, close_reason, hl_fill_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (token_id, coin, status, entry_px, size, opened_at, closed_at, close_px, realized_pnl, funding_earned, close_reason, hl_fill_hash, trade_key, tax_key, current_szi, mark_px, unrealized_pnl, liquidation_px, leverage_type, leverage_value, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      event.token_id,
-      event.coin,
-      event.status,
-      event.entry_px,
-      event.size,
-      event.opened_at,
-      event.closed_at ?? null,
-      event.close_px ?? null,
-      event.realized_pnl ?? null,
-      event.funding_earned ?? null,
-      event.close_reason ?? null,
-      event.hl_fill_hash ?? null,
+      preparedEvent.token_id,
+      preparedEvent.coin,
+      preparedEvent.status,
+      preparedEvent.entry_px,
+      preparedEvent.size,
+      preparedEvent.opened_at,
+      preparedEvent.closed_at,
+      preparedEvent.close_px,
+      preparedEvent.realized_pnl,
+      preparedEvent.funding_earned,
+      preparedEvent.close_reason,
+      preparedEvent.hl_fill_hash,
+      preparedEvent.trade_key,
+      preparedEvent.tax_key,
+      preparedEvent.current_szi,
+      preparedEvent.mark_px,
+      preparedEvent.unrealized_pnl,
+      preparedEvent.liquidation_px,
+      preparedEvent.leverage_type,
+      preparedEvent.leverage_value,
+      preparedEvent.updated_at,
     ],
   );
 
@@ -908,8 +953,190 @@ export function insertHedgeEvent(event: Omit<StoredHedgeEvent, "id">): StoredHed
   return inserted;
 }
 
+function defaultHedgeTradeKey(event: Pick<
+  HedgeEventInsert,
+  "token_id" | "coin" | "hl_fill_hash" | "opened_at" | "entry_px" | "size"
+>): string {
+  if (event.hl_fill_hash) {
+    return `trade:fill:${event.coin}:${event.hl_fill_hash}`;
+  }
+  return `trade:legacy:${event.token_id ?? "unassigned"}:${event.coin}:${event.opened_at}:${String(event.entry_px)}:${String(event.size)}`;
+}
+
+function defaultHedgeTaxKey(event: Pick<
+  HedgeEventInsert,
+  "token_id" | "coin" | "hl_fill_hash" | "opened_at" | "entry_px" | "size"
+>): string {
+  if (event.hl_fill_hash) {
+    return `tax:legacy:${event.token_id ?? "unassigned"}:${event.coin}:${event.hl_fill_hash}`;
+  }
+  return `tax:legacy:${event.token_id ?? "unassigned"}:${event.coin}:${event.opened_at}:${String(event.entry_px)}:${String(event.size)}`;
+}
+
+function normalizeClosedHedgeIdentity(event: StoredHedgeEvent): StoredHedgeEvent {
+  if (!event.hl_fill_hash) {
+    return event;
+  }
+
+  const normalizedTradeKey = defaultHedgeTradeKey({
+    token_id: event.token_id,
+    coin: event.coin,
+    hl_fill_hash: event.hl_fill_hash,
+    opened_at: event.opened_at,
+    entry_px: event.entry_px,
+    size: event.size,
+  });
+  const backfillTaxKey = defaultHedgeTaxKey({
+    token_id: event.token_id,
+    coin: event.coin,
+    hl_fill_hash: event.hl_fill_hash,
+    opened_at: event.opened_at,
+    entry_px: event.entry_px,
+    size: event.size,
+  });
+
+  if (event.trade_key === normalizedTradeKey && event.tax_key != null) {
+    return event;
+  }
+
+  const db = getDb();
+  db.run(
+    `UPDATE hedge_events
+     SET trade_key = ?, tax_key = COALESCE(tax_key, ?), updated_at = COALESCE(updated_at, closed_at, opened_at, datetime('now'))
+     WHERE id = ?`,
+    [normalizedTradeKey, backfillTaxKey, event.id],
+  );
+
+  const normalized = getHedgeEvent(event.id);
+  if (!normalized) {
+    throw new Error(`Normalized hedge event could not be reloaded: ${event.id}`);
+  }
+  return normalized;
+}
+
+function prepareHedgeEventForWrite(event: HedgeEventInsert): PreparedHedgeEvent {
+  const trade_key = event.trade_key ?? defaultHedgeTradeKey(event);
+  return {
+    token_id: event.token_id ?? null,
+    coin: event.coin,
+    status: event.status,
+    entry_px: event.entry_px,
+    size: event.size,
+    opened_at: event.opened_at,
+    closed_at: event.closed_at ?? null,
+    close_px: event.close_px ?? null,
+    realized_pnl: event.realized_pnl ?? null,
+    funding_earned: event.funding_earned ?? null,
+    close_reason: event.close_reason ?? null,
+    hl_fill_hash: event.hl_fill_hash ?? null,
+    trade_key,
+    tax_key: event.tax_key ?? defaultHedgeTaxKey(event),
+    current_szi: event.current_szi ?? null,
+    mark_px: event.mark_px ?? null,
+    unrealized_pnl: event.unrealized_pnl ?? null,
+    liquidation_px: event.liquidation_px ?? null,
+    leverage_type: event.leverage_type ?? null,
+    leverage_value: event.leverage_value ?? null,
+    updated_at: event.updated_at ?? event.closed_at ?? event.opened_at,
+  };
+}
+
+function overwriteHedgeEvent(existing: StoredHedgeEvent, preparedEvent: PreparedHedgeEvent): StoredHedgeEvent {
+  const existingTaxKey = existing.tax_key ?? null;
+  const shouldReplaceTaxKey =
+    existingTaxKey == null ||
+    (preparedEvent.status === "open" &&
+      preparedEvent.trade_key.startsWith("trade:hl:") &&
+      !preparedEvent.trade_key.includes(":active:") &&
+      existingTaxKey.startsWith("tax:hl:active:"));
+
+  const db = getDb();
+  db.run(
+    `UPDATE hedge_events
+     SET token_id = ?, coin = ?, status = ?, entry_px = ?, size = ?, opened_at = ?, closed_at = ?, close_px = ?, realized_pnl = ?, funding_earned = ?, close_reason = ?, hl_fill_hash = ?, trade_key = ?, tax_key = ?, current_szi = ?, mark_px = ?, unrealized_pnl = ?, liquidation_px = ?, leverage_type = ?, leverage_value = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      existing.token_id ?? preparedEvent.token_id,
+      preparedEvent.coin,
+      preparedEvent.status,
+      preparedEvent.entry_px,
+      preparedEvent.size,
+      preparedEvent.opened_at,
+      preparedEvent.closed_at,
+      preparedEvent.close_px,
+      preparedEvent.realized_pnl,
+      preparedEvent.funding_earned,
+      preparedEvent.close_reason,
+      preparedEvent.hl_fill_hash,
+      preparedEvent.trade_key,
+      shouldReplaceTaxKey ? preparedEvent.tax_key : existingTaxKey,
+      preparedEvent.current_szi,
+      preparedEvent.mark_px,
+      preparedEvent.unrealized_pnl,
+      preparedEvent.liquidation_px,
+      preparedEvent.leverage_type,
+      preparedEvent.leverage_value,
+      preparedEvent.updated_at,
+      existing.id,
+    ],
+  );
+
+  const updated = getHedgeEvent(existing.id);
+  if (!updated) {
+    throw new Error(`Updated hedge event could not be reloaded: ${existing.id}`);
+  }
+  return updated;
+}
+
+function reconcileClosedHedgeEventByFillHash(params: {
+  authoritativeClosedEvent: StoredHedgeEvent;
+  incomingTokenId: string | null;
+  coin: string;
+  cutoffClosedAt: string;
+}): StoredHedgeEvent {
+  const db = getDb();
+  let authoritativeClosedEvent = params.authoritativeClosedEvent;
+  let effectiveTokenId = authoritativeClosedEvent.token_id ?? params.incomingTokenId;
+
+  if (authoritativeClosedEvent.token_id == null && params.incomingTokenId != null) {
+    db.run(
+      `UPDATE hedge_events
+       SET token_id = ?, updated_at = COALESCE(updated_at, closed_at, opened_at, datetime('now'))
+       WHERE id = ? AND token_id IS NULL`,
+      [params.incomingTokenId, authoritativeClosedEvent.id],
+    );
+
+    const reloaded = getHedgeEvent(authoritativeClosedEvent.id);
+    if (!reloaded) {
+      throw new Error(`Reconciled hedge event could not be reloaded: ${authoritativeClosedEvent.id}`);
+    }
+    authoritativeClosedEvent = reloaded;
+    effectiveTokenId = authoritativeClosedEvent.token_id ?? params.incomingTokenId;
+  }
+
+  const staleOpenCutoff = authoritativeClosedEvent.closed_at ?? params.cutoffClosedAt;
+  const deleteStaleOpenRows = (tokenId: string | null): void => {
+    db.run(
+      `DELETE FROM hedge_events
+       WHERE token_id IS ?
+         AND coin = ?
+         AND status = 'open'
+         AND opened_at < ?
+         AND id != ?`,
+      [tokenId, params.coin, staleOpenCutoff, authoritativeClosedEvent.id],
+    );
+  };
+
+  deleteStaleOpenRows(effectiveTokenId);
+  if (effectiveTokenId != null) {
+    deleteStaleOpenRows(null);
+  }
+
+  return normalizeClosedHedgeIdentity(authoritativeClosedEvent);
+}
+
 export function closeHedgeEvent(params: {
-  token_id: string;
+  token_id: string | null;
   coin: string;
   closed_at: string;
   close_px: number;
@@ -926,13 +1153,18 @@ export function closeHedgeEvent(params: {
     .get(params.hl_fill_hash);
 
   if (existing) {
-    return existing;
+    return reconcileClosedHedgeEventByFillHash({
+      authoritativeClosedEvent: existing,
+      incomingTokenId: params.token_id,
+      coin: params.coin,
+      cutoffClosedAt: params.closed_at,
+    });
   }
 
   // Find the open event for this token_id and coin
   const openEvent = db
-    .query<StoredHedgeEvent, [string, string]>(
-      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
+    .query<StoredHedgeEvent, [string | null, string]>(
+      "SELECT * FROM hedge_events WHERE token_id IS ? AND coin = ? AND status = 'open'",
     )
     .get(params.token_id, params.coin);
 
@@ -940,11 +1172,30 @@ export function closeHedgeEvent(params: {
     return null;
   }
 
+  const tradeKey = defaultHedgeTradeKey({
+    token_id: openEvent.token_id,
+    coin: openEvent.coin,
+    hl_fill_hash: params.hl_fill_hash,
+    opened_at: openEvent.opened_at,
+    entry_px: openEvent.entry_px,
+    size: openEvent.size,
+  });
+  const fallbackTaxKey = defaultHedgeTaxKey({
+    token_id: openEvent.token_id,
+    coin: openEvent.coin,
+    hl_fill_hash: params.hl_fill_hash,
+    opened_at: openEvent.opened_at,
+    entry_px: openEvent.entry_px,
+    size: openEvent.size,
+  });
+
   // Update the open event to closed
   db.run(
     `UPDATE hedge_events
-     SET status = 'closed', closed_at = ?, close_px = ?, realized_pnl = ?, funding_earned = ?, close_reason = ?, hl_fill_hash = ?
-     WHERE id = ?`,
+     SET status = 'closed', closed_at = ?, close_px = ?, realized_pnl = ?, funding_earned = ?, close_reason = ?, hl_fill_hash = ?, trade_key = ?
+        , tax_key = COALESCE(tax_key, ?)
+         , updated_at = ?
+       WHERE id = ?`,
     [
       params.closed_at,
       params.close_px,
@@ -952,6 +1203,9 @@ export function closeHedgeEvent(params: {
       params.funding_earned,
       params.close_reason,
       params.hl_fill_hash,
+      tradeKey,
+      fallbackTaxKey,
+      params.closed_at,
       openEvent.id,
     ],
   );
@@ -962,14 +1216,14 @@ export function closeHedgeEvent(params: {
   if (!updated) {
     throw new Error(`Closed hedge event could not be reloaded: ${openEvent.id}`);
   }
-  return updated;
+  return normalizeClosedHedgeIdentity(updated);
 }
 
 export function getOpenHedgeEvent(token_id: string, coin: string): StoredHedgeEvent | null {
   const db = getDb();
   return db
     .query<StoredHedgeEvent, [string, string]>(
-      "SELECT * FROM hedge_events WHERE token_id = ? AND coin = ? AND status = 'open'",
+      "SELECT * FROM hedge_events WHERE token_id IS ? AND coin = ? AND status = 'open'",
     )
     .get(token_id, coin);
 }
@@ -990,6 +1244,150 @@ export function getAllClosedHedgeEvents(): StoredHedgeEvent[] {
       `SELECT * FROM hedge_events WHERE status = 'closed' ORDER BY closed_at ASC NULLS LAST, id ASC`,
     )
     .all();
+}
+
+export function getHedgeEvent(id: number): StoredHedgeEvent | null {
+  const db = getDb();
+  return db.query<StoredHedgeEvent, [number]>("SELECT * FROM hedge_events WHERE id = ?").get(id);
+}
+
+export function getHedgeEventByTradeKey(tradeKey: string): StoredHedgeEvent | null {
+  const db = getDb();
+  return db
+    .query<StoredHedgeEvent, [string]>("SELECT * FROM hedge_events WHERE trade_key = ?")
+    .get(tradeKey);
+}
+
+export function listHedgeEvents(): StoredHedgeEvent[] {
+  const db = getDb();
+  return db
+    .query<StoredHedgeEvent, []>(
+      "SELECT * FROM hedge_events ORDER BY opened_at DESC, id DESC",
+    )
+    .all();
+}
+
+export function listUnassignedHedgeEvents(): StoredHedgeEvent[] {
+  const db = getDb();
+  return db
+    .query<StoredHedgeEvent, []>(
+      "SELECT * FROM hedge_events WHERE token_id IS NULL ORDER BY opened_at DESC, id DESC",
+    )
+    .all();
+}
+
+export function assignHedgeEvent(id: number, tokenId: string | null): StoredHedgeEvent | null {
+  const db = getDb();
+  db.run("UPDATE hedge_events SET token_id = ?, updated_at = datetime('now') WHERE id = ?", [
+    tokenId,
+    id,
+  ]);
+  return getHedgeEvent(id);
+}
+
+export function upsertHedgeEventByTradeKey(event: HedgeEventUpsert): StoredHedgeEvent {
+  const preparedEvent = prepareHedgeEventForWrite(event);
+  const db = getDb();
+
+  if (preparedEvent.hl_fill_hash) {
+    const existingByFillHash = db
+      .query<StoredHedgeEvent, [string]>("SELECT * FROM hedge_events WHERE hl_fill_hash = ?")
+      .get(preparedEvent.hl_fill_hash);
+    if (existingByFillHash) {
+      return reconcileClosedHedgeEventByFillHash({
+        authoritativeClosedEvent: overwriteHedgeEvent(existingByFillHash, preparedEvent),
+        incomingTokenId: preparedEvent.token_id,
+        coin: preparedEvent.coin,
+        cutoffClosedAt: preparedEvent.closed_at ?? preparedEvent.updated_at,
+      });
+    }
+  }
+
+  if (preparedEvent.status === "closed") {
+    const existingOpenCandidate = db
+      .query<StoredHedgeEvent, [string, string]>(
+        `SELECT * FROM hedge_events
+         WHERE coin = ? AND status = 'open' AND opened_at < ?
+         ORDER BY opened_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(preparedEvent.coin, preparedEvent.closed_at ?? preparedEvent.updated_at);
+
+    if (existingOpenCandidate) {
+      return normalizeClosedHedgeIdentity(overwriteHedgeEvent(existingOpenCandidate, preparedEvent));
+    }
+  }
+
+  if (preparedEvent.status === "open") {
+    const existingOpenCandidate = db
+      .query<StoredHedgeEvent, [string]>(
+        `SELECT * FROM hedge_events
+         WHERE coin = ? AND status = 'open'
+         ORDER BY opened_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(preparedEvent.coin);
+
+    if (existingOpenCandidate && existingOpenCandidate.trade_key !== preparedEvent.trade_key) {
+      return overwriteHedgeEvent(existingOpenCandidate, preparedEvent);
+    }
+  }
+
+  db.run(
+    `INSERT INTO hedge_events
+     (token_id, coin, status, entry_px, size, opened_at, closed_at, close_px, realized_pnl, funding_earned, close_reason, hl_fill_hash, trade_key, tax_key, current_szi, mark_px, unrealized_pnl, liquidation_px, leverage_type, leverage_value, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(trade_key) DO UPDATE SET
+        token_id = COALESCE(hedge_events.token_id, excluded.token_id),
+        coin = excluded.coin,
+        status = excluded.status,
+        entry_px = excluded.entry_px,
+       size = excluded.size,
+       opened_at = excluded.opened_at,
+       closed_at = excluded.closed_at,
+       close_px = excluded.close_px,
+       realized_pnl = excluded.realized_pnl,
+       funding_earned = excluded.funding_earned,
+       close_reason = excluded.close_reason,
+       hl_fill_hash = excluded.hl_fill_hash,
+       tax_key = COALESCE(hedge_events.tax_key, excluded.tax_key),
+       current_szi = excluded.current_szi,
+       mark_px = excluded.mark_px,
+       unrealized_pnl = excluded.unrealized_pnl,
+       liquidation_px = excluded.liquidation_px,
+       leverage_type = excluded.leverage_type,
+       leverage_value = excluded.leverage_value,
+       updated_at = excluded.updated_at`,
+    [
+      preparedEvent.token_id,
+      preparedEvent.coin,
+      preparedEvent.status,
+      preparedEvent.entry_px,
+      preparedEvent.size,
+      preparedEvent.opened_at,
+      preparedEvent.closed_at,
+      preparedEvent.close_px,
+      preparedEvent.realized_pnl,
+      preparedEvent.funding_earned,
+      preparedEvent.close_reason,
+      preparedEvent.hl_fill_hash,
+      preparedEvent.trade_key,
+      preparedEvent.tax_key,
+      preparedEvent.current_szi,
+      preparedEvent.mark_px,
+      preparedEvent.unrealized_pnl,
+      preparedEvent.liquidation_px,
+      preparedEvent.leverage_type,
+      preparedEvent.leverage_value,
+      preparedEvent.updated_at,
+    ],
+  );
+
+  const stored = getHedgeEventByTradeKey(preparedEvent.trade_key);
+  if (!stored) {
+    throw new Error(`Upserted hedge event could not be reloaded: ${preparedEvent.trade_key}`);
+  }
+  return stored;
 }
 
 export function upsertTokenMetadata(metadata: StoredTokenMetadata): void {

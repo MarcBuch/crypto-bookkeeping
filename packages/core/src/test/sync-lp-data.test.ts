@@ -14,6 +14,7 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 let mockGetAllPositions: () => unknown = async () => [];
 let mockGetPnLView: (config: unknown) => unknown = async () => [];
+let mockSyncHyperliquidHedgeTrades: (config: unknown) => Promise<number> = async () => 0;
 
 await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => mockGetAllPositions(),
@@ -25,6 +26,14 @@ await mock.module("../chain/positions.js", () => ({
 await mock.module("../services/pnl.js", () => ({
   getPnLView: (config: unknown, _tokenId?: unknown, _rawPositions?: unknown) =>
     mockGetPnLView(config),
+}));
+
+await mock.module("../services/hedge.js", () => ({
+  getHedgeView: async () => {
+    throw new Error("not used in this test");
+  },
+  snapshotHedge: () => {},
+  syncHyperliquidHedgeTrades: (config: unknown) => mockSyncHyperliquidHedgeTrades(config),
 }));
 
 await mock.module("../chain/pools.js", () => ({
@@ -175,6 +184,7 @@ beforeEach(() => {
   // Reset mocks to safe defaults
   mockGetAllPositions = async () => [];
   mockGetPnLView = async () => [];
+  mockSyncHyperliquidHedgeTrades = async () => 0;
 });
 
 afterEach(() => {
@@ -377,6 +387,15 @@ describe("syncLpData — summary result", () => {
     expect(result.wallet).toBe(fakeConfig.wallet);
   });
 
+  it("returns hedgeTradesSynced count from hedge discovery", async () => {
+    mockGetAllPositions = async () => [];
+    mockGetPnLView = async () => [];
+    mockSyncHyperliquidHedgeTrades = async () => 3;
+
+    const result = await syncLpData(fakeConfig);
+    expect(result.hedgeTradesSynced).toBe(3);
+  });
+
   it("returns syncedAt as a valid ISO string", async () => {
     mockGetAllPositions = async () => [];
     mockGetPnLView = async () => [];
@@ -395,5 +414,18 @@ describe("syncLpData — summary result", () => {
     const state = getLpSyncState(fakeConfig.wallet);
 
     expect(state!.last_synced_at).toBe(result.syncedAt);
+  });
+
+  it("captures hedgeSyncError while keeping LP sync successful", async () => {
+    mockGetAllPositions = async () => [];
+    mockGetPnLView = async () => [];
+    mockSyncHyperliquidHedgeTrades = async () => {
+      throw new Error("hyperliquid unavailable");
+    };
+
+    const result = await syncLpData(fakeConfig);
+
+    expect(result.hedgeTradesSynced).toBe(0);
+    expect(result.hedgeSyncError).toContain("hyperliquid unavailable");
   });
 });

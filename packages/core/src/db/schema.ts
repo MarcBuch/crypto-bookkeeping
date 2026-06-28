@@ -54,6 +54,14 @@ export function resetDb(): void {
 
 export function initSchema(database: Database): void {
   const taxLabelCheckConstraint = "label IS NULL OR label IN ('Trade', 'Transfer', 'Approval')";
+  const hedgeTradeKeyBackfillSql = `CASE
+    WHEN hl_fill_hash IS NOT NULL THEN 'trade:fill:' || coin || ':' || hl_fill_hash
+    ELSE 'trade:legacy:' || COALESCE(token_id, 'unassigned') || ':' || coin || ':' || opened_at || ':' || printf('%.17g', entry_px) || ':' || printf('%.17g', size) || ':row:' || id
+  END`;
+  const hedgeTaxKeyBackfillSql = `CASE
+    WHEN hl_fill_hash IS NOT NULL THEN 'tax:legacy:' || COALESCE(token_id, 'unassigned') || ':' || coin || ':' || hl_fill_hash
+    ELSE 'tax:legacy:' || COALESCE(token_id, 'unassigned') || ':' || coin || ':' || opened_at || ':' || printf('%.17g', entry_px) || ':' || printf('%.17g', size) || ':row:' || id
+  END`;
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS positions (
@@ -192,7 +200,7 @@ export function initSchema(database: Database): void {
 
     CREATE TABLE IF NOT EXISTS hedge_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      token_id TEXT NOT NULL,
+      token_id TEXT,
       coin TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'open',
       entry_px REAL NOT NULL,
@@ -203,11 +211,20 @@ export function initSchema(database: Database): void {
       realized_pnl REAL,
       funding_earned REAL,
       close_reason TEXT,
-      hl_fill_hash TEXT UNIQUE
+      hl_fill_hash TEXT UNIQUE,
+      trade_key TEXT UNIQUE,
+      tax_key TEXT,
+      current_szi TEXT,
+      mark_px REAL,
+      unrealized_pnl REAL,
+      liquidation_px REAL,
+      leverage_type TEXT,
+      leverage_value REAL,
+      updated_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_hedge_events_token_id ON hedge_events(token_id);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_one_open ON hedge_events(token_id, coin) WHERE status = 'open';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_one_open ON hedge_events(COALESCE(token_id, '__unassigned__'), coin) WHERE status = 'open';
   `);
 
   // Migration: add entry_liquidity column if it doesn't exist
@@ -417,10 +434,150 @@ export function initSchema(database: Database): void {
     CREATE INDEX IF NOT EXISTS idx_tax_transactions_to_address ON tax_transactions(to_address);
   `);
 
-  // Migration: add partial unique index on hedge_events to prevent multiple open events
+  const hedgeEventCols = database
+    .prepare<{ name: string; notnull: number }, []>("PRAGMA table_info(hedge_events)")
+    .all();
+  const tokenIdColumn = hedgeEventCols.find((column) => column.name === "token_id");
+  const needsHedgeEventRebuild = tokenIdColumn?.notnull === 1;
+
+  if (needsHedgeEventRebuild) {
+    database.exec(`
+      DROP INDEX IF EXISTS idx_hedge_events_token_id;
+      DROP INDEX IF EXISTS idx_hedge_events_one_open;
+      DROP INDEX IF EXISTS idx_hedge_events_trade_key;
+
+      CREATE TABLE hedge_events_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token_id TEXT,
+        coin TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        entry_px REAL NOT NULL,
+        size REAL NOT NULL,
+        opened_at TEXT NOT NULL,
+        closed_at TEXT,
+        close_px REAL,
+        realized_pnl REAL,
+        funding_earned REAL,
+        close_reason TEXT,
+        hl_fill_hash TEXT UNIQUE,
+        trade_key TEXT UNIQUE,
+        tax_key TEXT,
+        current_szi TEXT,
+        mark_px REAL,
+        unrealized_pnl REAL,
+        liquidation_px REAL,
+        leverage_type TEXT,
+        leverage_value REAL,
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO hedge_events_new (
+        id,
+        token_id,
+        coin,
+        status,
+        entry_px,
+        size,
+        opened_at,
+        closed_at,
+        close_px,
+        realized_pnl,
+        funding_earned,
+        close_reason,
+        hl_fill_hash,
+        trade_key,
+        tax_key,
+        current_szi,
+        mark_px,
+        unrealized_pnl,
+        liquidation_px,
+        leverage_type,
+        leverage_value,
+        updated_at
+      )
+      SELECT
+        id,
+        token_id,
+        coin,
+        status,
+        entry_px,
+        size,
+        opened_at,
+        closed_at,
+        close_px,
+        realized_pnl,
+        funding_earned,
+        close_reason,
+        hl_fill_hash,
+        ${hedgeTradeKeyBackfillSql},
+        ${hedgeTaxKeyBackfillSql},
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        COALESCE(closed_at, opened_at, datetime('now'))
+      FROM hedge_events;
+
+      DROP TABLE hedge_events;
+      ALTER TABLE hedge_events_new RENAME TO hedge_events;
+    `);
+  }
+
+  const migratedHedgeEventCols = database
+    .prepare<{ name: string }, []>("PRAGMA table_info(hedge_events)")
+    .all();
+  const hedgeEventOptionalColumns = [
+    ["trade_key", "TEXT"],
+    ["tax_key", "TEXT"],
+    ["current_szi", "TEXT"],
+    ["mark_px", "REAL"],
+    ["unrealized_pnl", "REAL"],
+    ["liquidation_px", "REAL"],
+    ["leverage_type", "TEXT"],
+    ["leverage_value", "REAL"],
+    ["updated_at", "TEXT"],
+  ] as const;
+
+  for (const [name, type] of hedgeEventOptionalColumns) {
+    if (!migratedHedgeEventCols.some((column) => column.name === name)) {
+      database.exec(`ALTER TABLE hedge_events ADD COLUMN ${name} ${type}`);
+    }
+  }
+
   database.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_one_open 
-    ON hedge_events(token_id, coin) 
+    UPDATE hedge_events
+    SET trade_key = ${hedgeTradeKeyBackfillSql}
+    WHERE trade_key IS NULL
+      OR (hl_fill_hash IS NOT NULL AND trade_key != ${hedgeTradeKeyBackfillSql})
+      OR (
+        hl_fill_hash IS NULL
+        AND trade_key IN (
+          SELECT trade_key
+          FROM hedge_events
+          WHERE hl_fill_hash IS NULL AND trade_key IS NOT NULL
+          GROUP BY trade_key
+          HAVING COUNT(*) > 1
+        )
+      );
+
+    UPDATE hedge_events
+    SET tax_key = ${hedgeTaxKeyBackfillSql}
+    WHERE tax_key IS NULL;
+
+    UPDATE hedge_events
+    SET updated_at = COALESCE(updated_at, closed_at, opened_at, datetime('now'))
+    WHERE updated_at IS NULL;
+
+    DROP INDEX IF EXISTS idx_hedge_events_one_open;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_one_open
+    ON hedge_events(COALESCE(token_id, '__unassigned__'), coin)
     WHERE status = 'open';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_trade_key
+    ON hedge_events(trade_key);
+
+    CREATE INDEX IF NOT EXISTS idx_hedge_events_token_id ON hedge_events(token_id);
   `);
 }

@@ -25,6 +25,7 @@ let mockGetPositionData: (...args: unknown[]) => Promise<unknown> = async () => 
 let mockGetPnLView: (...args: unknown[]) => Promise<unknown> = async () => [];
 let mockGetHedgeView: (config: unknown, tokenId: string) => Promise<unknown> = async () => ({});
 let mockSnapshotHedge: (view: unknown) => void = () => {};
+let mockSyncHyperliquidHedgeTrades: (config: unknown) => Promise<number> = async () => 0;
 
 await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
@@ -81,6 +82,7 @@ await mock.module("../services/pnl.js", () => ({
 await mock.module("../services/hedge.js", () => ({
   getHedgeView: (config: unknown, tokenId: string) => mockGetHedgeView(config, tokenId),
   snapshotHedge: (view: unknown) => mockSnapshotHedge(view),
+  syncHyperliquidHedgeTrades: (config: unknown) => mockSyncHyperliquidHedgeTrades(config),
 }));
 
 // ---------------------------------------------------------------------------
@@ -142,6 +144,7 @@ beforeEach(() => {
   mockGetPnLView = async () => [];
   mockGetHedgeView = async () => fakeHedgeView;
   mockSnapshotHedge = () => {};
+  mockSyncHyperliquidHedgeTrades = async () => 0;
 });
 
 afterEach(() => {
@@ -217,6 +220,35 @@ describe("hedge sync wiring — getHedgeView throws", () => {
     expect(result).toBeDefined();
     expect(result.wallet).toBe(configWithHedge.wallet);
     expect(result.positionCount).toBeGreaterThanOrEqual(0);
+    expect(result.hedgeTradesSynced).toBe(0);
+  });
+
+  it("syncLpData resolves when hedge trade discovery throws and reports error", async () => {
+    const configWithHedge = {
+      ...fakeConfig,
+      positions: {
+        "12345": {
+          openTx: "0x123",
+          hedge: { coin: "HYPE" },
+        },
+      },
+    };
+
+    await mock.module("../chain/positions.js", () => ({
+      getAllPositions: async () => [fakeRawPosition],
+      getPositionCount: async () => 0n,
+      getTokenId: async () => 0n,
+      getPositionData: (...args: unknown[]) => mockGetPositionData(...args),
+    }));
+
+    mockSyncHyperliquidHedgeTrades = async () => {
+      throw new Error("HL fills unavailable");
+    };
+
+    const result = await syncLpData(configWithHedge);
+
+    expect(result.hedgeTradesSynced).toBe(0);
+    expect(result.hedgeSyncError).toContain("HL fills unavailable");
   });
 });
 
@@ -319,6 +351,7 @@ describe("hedge sync wiring — no hedge config", () => {
 
     // Verify getHedgeView was NOT called
     expect(getHedgeViewCalled).toBe(false);
+    expect(result.hedgeTradesSynced).toBe(0);
   });
 });
 
@@ -401,6 +434,32 @@ describe("hedge sync wiring — happy path", () => {
 
     // Verify snapshotHedge was called with the hedge view
     expect(snapshotHedgeCallsWithArgs[0]).toEqual(fakeHedgeView);
+  });
+
+  it("syncLpData returns hedge trade sync count", async () => {
+    const configWithHedge = {
+      ...fakeConfig,
+      positions: {
+        "12345": {
+          openTx: "0x123",
+          hedge: { coin: "HYPE" },
+        },
+      },
+    };
+
+    await mock.module("../chain/positions.js", () => ({
+      getAllPositions: async () => [fakeRawPosition],
+      getPositionCount: async () => 0n,
+      getTokenId: async () => 0n,
+      getPositionData: (...args: unknown[]) => mockGetPositionData(...args),
+    }));
+
+    mockSyncHyperliquidHedgeTrades = async () => 2;
+
+    const result = await syncLpData(configWithHedge);
+
+    expect(result.hedgeTradesSynced).toBe(2);
+    expect(result.hedgeSyncError).toBeUndefined();
   });
 
   it("syncSinglePosition calls getHedgeView with correct tokenId when hedge config is present", async () => {

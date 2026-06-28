@@ -53,6 +53,10 @@ await mock.module("../services/pnl.js", () => ({
   getPnLView: (arg1: unknown, arg2?: unknown, arg3?: unknown) => mockGetPnLView(arg1, arg2, arg3),
 }));
 
+await mock.module("../services/hedge.js", () => ({
+  syncHyperliquidHedgeTrades: async () => 0,
+}));
+
 await mock.module("../chain/client.js", () => ({
   createClient: () => ({}),
 }));

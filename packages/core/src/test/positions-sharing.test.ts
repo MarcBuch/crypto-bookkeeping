@@ -81,6 +81,10 @@ await mock.module("../services/pnl.js", () => ({
   }),
 }));
 
+await mock.module("../services/hedge.js", () => ({
+  syncHyperliquidHedgeTrades: async () => 0,
+}));
+
 // ---------------------------------------------------------------------------
 // Now import the module under test + DB helpers
 // ---------------------------------------------------------------------------

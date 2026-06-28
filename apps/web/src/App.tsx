@@ -1002,12 +1002,18 @@ function TokenPairIcon({ token0, token1 }: { token0: string; token1: string }) {
 
 function TokenIcon({ symbol, className }: { symbol: string; className: string }) {
   const palette = tokenPalette(symbol);
+  const iconSrc = tokenIconPath(symbol);
+  const backgroundClass = tokenIconBackgroundClass(symbol, palette);
 
   return (
     <span
-      className={`absolute top-0 grid h-8 w-8 place-items-center rounded-full border-2 border-neutral-200 bg-gradient-to-br ${palette} text-[0.62rem] font-black text-white shadow-lg ${className}`}
+      className={`absolute top-0 grid h-8 w-8 place-items-center rounded-full border-2 border-neutral-200 ${backgroundClass} text-[0.62rem] font-black text-white shadow-lg ${className}`}
     >
-      {symbol.slice(0, 1)}
+      {iconSrc ? (
+        <img src={iconSrc} alt={`${symbol} token icon`} className="h-full w-full rounded-full object-cover" />
+      ) : (
+        symbol.slice(0, 1)
+      )}
     </span>
   );
 }
@@ -1491,6 +1497,17 @@ function tokenPalette(symbol: string): string {
   if (/btc/i.test(symbol)) return "from-orange-200 to-orange-500";
   if (/eth|hype/i.test(symbol)) return "from-zinc-100 to-slate-500";
   return "from-emerald-200 to-teal-600";
+}
+
+function tokenIconBackgroundClass(symbol: string, palette: string): string {
+  if (/whype|hype/i.test(symbol)) return "bg-black";
+  return `bg-gradient-to-br ${palette}`;
+}
+
+function tokenIconPath(symbol: string): string | null {
+  if (/usdc/i.test(symbol)) return "/usdc.svg";
+  if (/whype|hype/i.test(symbol)) return "/hype.svg";
+  return null;
 }
 
 function rangeFill(position: DashboardPosition): number {

@@ -23,6 +23,15 @@ export const hedgeQueryKeys = {
   list: (assigned: HedgesAssignedFilter = "all") => ["hedges", assigned] as const,
 };
 
+export async function invalidateHedgeQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.lists }),
+    queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.all }),
+  ]);
+}
+
 export function useHedge(tokenId: string | undefined, enabled = true) {
   return useQuery<HedgeView>({
     queryKey: hedgeQueryKeys.detail(tokenId),
@@ -67,8 +76,7 @@ export function useAssignHedgeEvent() {
       assignHedgeEvent(id, tokenId),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.lists }),
-        queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.all }),
+        invalidateHedgeQueries(queryClient),
         queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions }),
       ]);
     },

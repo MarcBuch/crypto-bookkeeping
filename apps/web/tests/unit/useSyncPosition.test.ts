@@ -33,6 +33,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { QueryClient } from "@tanstack/react-query";
 
 import * as api from "../../src/api";
+import { hedgeQueryKeys } from "../../src/hooks/useHedge";
 import { queryKeys } from "../../src/hooks/useDashboardPositions";
 
 const realSetInterval = globalThis.setInterval;
@@ -82,7 +83,11 @@ function buildSinglePoller(opts: {
           syncStatus = status;
           if (status.status === "completed") {
             stopPolling();
-            void queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions });
+            void Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions }),
+              queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.lists }),
+              queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.all }),
+            ]);
           } else if (status.status === "failed") {
             stopPolling();
             error = new Error(status.error ?? "Sync failed");
@@ -239,10 +244,12 @@ describe("useSyncPosition polling logic (single position)", () => {
     expect(poller.getState().intervalId).toBeNull();
 
     // Cache must have been invalidated
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
-    expect(invalidateSpy.mock.calls[0][0]).toMatchObject({
-      queryKey: queryKeys.dashboardPositions,
-    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
+    expect(invalidateSpy.mock.calls.map((call) => call[0]?.queryKey)).toEqual([
+      queryKeys.dashboardPositions,
+      hedgeQueryKeys.lists,
+      hedgeQueryKeys.all,
+    ]);
 
     // getSinglePositionSyncStatus must NOT be called again after stopping
     const callCountAfterStop = statusMock.mock.calls.length;

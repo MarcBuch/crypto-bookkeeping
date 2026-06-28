@@ -1,7 +1,12 @@
 import { useRef, useState } from "react";
 
 import type { DashboardPosition, HedgeEvent, HedgeView, PnLView } from "./api";
-import { buildNetHedgePnL } from "./hedge-pnl";
+import {
+  buildNetHedgePnL,
+  buildNetHedgePnLFromEvents,
+  dedupeClosedAssignedHedges,
+  sumClosedAssignedHedgePnl,
+} from "./hedge-pnl";
 import {
   useDashboardPositions,
   useSyncPositions,
@@ -567,9 +572,15 @@ function ActivePositionRow({
   const { trigger: syncPosition, isPolling: isSyncingPosition } = useSyncPosition(position.tokenId);
   const { data: hedgeData, isFetching: isFetchingHedge } = useHedge(
     position.tokenId,
-    !(isSyncing || isSyncingPosition),
+    position.hedge != null && assignedHedges.length === 0 && !(isSyncing || isSyncingPosition),
   );
-  const activeAssignedHedges = assignedHedges.filter((hedge) => hedge.status === "open");
+  const hedgeDisplay = buildActivePositionHedgeDisplay({
+    pnl,
+    assignedHedges,
+    fallbackHedge: hedgeData,
+  });
+  const activeAssignedHedges = hedgeDisplay.activeAssignedHedges;
+  const assignedNetHedgePnl = buildNetHedgePnLFromEvents(pnl, assignedHedges);
 
   // Hedge-adjusted ROI — computed via shared helper (same logic as CLI pnl-format.ts)
   const {
@@ -578,15 +589,13 @@ function ActivePositionRow({
     lpEntryUsd,
     combinedPnlUsd: combinedAbsUsd,
     combinedRoiPct,
-  } = hedgeData
-    ? buildNetHedgePnL(pnl, hedgeData)
-    : {
-        lpPnlUsd: null,
-        hedgePnlUsd: null,
-        lpEntryUsd: null,
-        combinedPnlUsd: null,
-        combinedRoiPct: null,
-      };
+  } = hedgeDisplay.net;
+  const combinedRoiUnavailableReason =
+    hedgeDisplay.source === "assigned" && assignedNetHedgePnl.missingUnrealized
+      ? "Active hedge P&L unavailable"
+      : undefined;
+  const hedgeDetailSuffix =
+    hedgeDisplay.source === "assigned" && assignedNetHedgePnl.fundingPartial ? " · funding partial" : "";
 
   const roiDetail = pnl
     ? (() => {
@@ -643,8 +652,10 @@ function ActivePositionRow({
                   if (combinedRoiPct != null) {
                     lines.push(`Net (LP + hedge): ${formatUsd(combinedAbsUsd!)}`);
                     lines.push(`  LP P&L:      ${formatUsd(lpAbsPnlUsd!)}`);
-                    lines.push(`  Hedge P&L:   ${formatUsd(hedgePnlUsd!)}`);
+                    lines.push(`  Hedge P&L:   ${formatUsd(hedgePnlUsd!)}${hedgeDetailSuffix}`);
                     lines.push(`Entry value:   ${formatUsd(lpEntryUsd!)}`);
+                  } else if (combinedRoiUnavailableReason) {
+                    lines.push(combinedRoiUnavailableReason);
                   } else if (lpAbsPnlUsd != null) {
                     lines.push(`LP P&L: ${formatUsd(lpAbsPnlUsd)}`);
                     lines.push(
@@ -714,13 +725,20 @@ function ActivePositionRow({
         </div>
       </article>
 
-      {activeAssignedHedges.length > 0 ? (
-        <AssignedActiveHedgesPanel hedges={activeAssignedHedges} />
+      {hedgeDisplay.source === "assigned" ? (
+        <AssignedActiveHedgesPanel
+          hedges={activeAssignedHedges}
+          combinedPnlUsd={assignedNetHedgePnl.combinedPnlUsd}
+          hedgePnlUsd={assignedNetHedgePnl.hedgePnlUsd}
+          fundingPartial={assignedNetHedgePnl.fundingPartial}
+          missingUnrealized={assignedNetHedgePnl.missingUnrealized}
+          closedCount={assignedNetHedgePnl.closedCount}
+        />
       ) : null}
 
-      {hedgeData && (
+      {hedgeDisplay.source !== "assigned" && hedgeDisplay.fallbackHedge && (
         <HedgePanel
-          hedge={hedgeData}
+          hedge={hedgeDisplay.fallbackHedge}
           pnl={position.pnl ?? undefined}
           isUpdating={isSyncing || isSyncingPosition || isFetchingHedge}
         />
@@ -729,14 +747,50 @@ function ActivePositionRow({
   );
 }
 
-function AssignedActiveHedgesPanel({ hedges }: { hedges: HedgeEvent[] }) {
+function AssignedActiveHedgesPanel({
+  hedges,
+  combinedPnlUsd,
+  hedgePnlUsd,
+  fundingPartial = false,
+  missingUnrealized = false,
+  closedCount = 0,
+}: {
+  hedges: HedgeEvent[];
+  combinedPnlUsd?: number | null;
+  hedgePnlUsd?: number | null;
+  fundingPartial?: boolean;
+  missingUnrealized?: boolean;
+  closedCount?: number;
+}) {
+  const combinedTone =
+    combinedPnlUsd == null
+      ? "text-neutral-500"
+      : combinedPnlUsd >= 0
+        ? "text-emerald-700"
+        : "text-rose-600";
+
   return (
     <div className="border-t border-neutral-300 bg-neutral-250/80 px-5 py-3 sm:px-7">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase">
-        <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-1 text-rose-700">
-          assigned live hedges
-        </span>
-        <span>{hedges.length} open</span>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase">
+          <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-1 text-rose-700">
+            assigned live hedges
+          </span>
+          <span>{hedges.length} open</span>
+          {closedCount > 0 ? <span>{closedCount} closed</span> : null}
+          {fundingPartial ? <span>funding partial</span> : null}
+          {missingUnrealized ? <span>p&amp;l pending</span> : null}
+        </div>
+        {hedgePnlUsd != null ? (
+          <div className="font-mono text-xs font-bold text-neutral-700">
+            hedge <span className={hedgePnlUsd >= 0 ? "text-emerald-700" : "text-rose-600"}>{formatUsd(hedgePnlUsd)}</span>
+            {combinedPnlUsd != null ? (
+              <span className="ml-2 text-neutral-500">
+                net <span className={combinedTone}>{formatUsd(combinedPnlUsd)}</span>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="space-y-1 font-mono text-xs text-neutral-700">
         {hedges.map((hedge) => (
@@ -1029,8 +1083,7 @@ function PositionRow({
   );
   const blotterPnl = buildBlotterPnl(pnl, hedgeData, assignedHedges);
   const activeAssignedHedges = assignedHedges.filter((hedge) => hedge.status === "open");
-  const closedAssignedHedges = [...assignedHedges]
-    .filter((hedge) => hedge.status === "closed")
+  const closedAssignedHedges = dedupeClosedAssignedHedges(assignedHedges)
     .sort((a, b) => {
       const left = new Date(a.closed_at ?? a.opened_at).getTime();
       const right = new Date(b.closed_at ?? b.opened_at).getTime();
@@ -1243,6 +1296,39 @@ export function formatUsd(value: number): string {
   }).format(value);
 }
 
+export function buildActivePositionHedgeDisplay(params: {
+  pnl: PnLView | undefined;
+  assignedHedges?: HedgeEvent[];
+  fallbackHedge?: HedgeView;
+}) {
+  const assignedHedges = params.assignedHedges ?? [];
+  const activeAssignedHedges = assignedHedges.filter((hedge) => hedge.status === "open");
+
+  if (assignedHedges.length > 0) {
+    return {
+      source: "assigned" as const,
+      activeAssignedHedges,
+      fallbackHedge: undefined,
+      net: buildNetHedgePnLFromEvents(params.pnl, assignedHedges),
+    };
+  }
+
+  return {
+    source: params.fallbackHedge ? ("legacy" as const) : null,
+    activeAssignedHedges,
+    fallbackHedge: params.fallbackHedge,
+    net: params.fallbackHedge
+      ? buildNetHedgePnL(params.pnl, params.fallbackHedge)
+      : {
+          lpPnlUsd: null,
+          hedgePnlUsd: null,
+          lpEntryUsd: null,
+          combinedPnlUsd: null,
+          combinedRoiPct: null,
+        },
+  };
+}
+
 export interface BlotterPnlView {
   lpPnlInToken1: number | null;
   displayedPnlInToken1: number | null;
@@ -1258,27 +1344,6 @@ export interface ClosedAssignedHedgePnlSummary {
   totalUsd: number | null;
   fundingUnknown: boolean;
   count: number;
-}
-
-export function sumClosedAssignedHedgePnl(hedges: HedgeEvent[]): ClosedAssignedHedgePnlSummary {
-  const closedHedges = hedges.filter((hedge) => hedge.status === "closed");
-  if (closedHedges.length === 0) {
-    return { totalUsd: null, fundingUnknown: false, count: 0 };
-  }
-
-  return closedHedges.reduce<ClosedAssignedHedgePnlSummary>(
-    (acc, hedge) => {
-      acc.totalUsd = (acc.totalUsd ?? 0) + (hedge.realized_pnl ?? 0);
-      if (hedge.funding_earned != null) {
-        acc.totalUsd += hedge.funding_earned;
-      } else {
-        acc.fundingUnknown = true;
-      }
-      acc.count += 1;
-      return acc;
-    },
-    { totalUsd: 0, fundingUnknown: false, count: 0 },
-  );
 }
 
 export function buildBlotterPnl(

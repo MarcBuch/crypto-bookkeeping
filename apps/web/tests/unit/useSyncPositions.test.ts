@@ -30,6 +30,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { QueryClient } from "@tanstack/react-query";
 
 import * as api from "../../src/api";
+import { hedgeQueryKeys } from "../../src/hooks/useHedge";
 import { queryKeys } from "../../src/hooks/useDashboardPositions";
 
 const realSetInterval = globalThis.setInterval;
@@ -78,7 +79,11 @@ function buildPoller(opts: {
           syncStatus = status;
           if (status.status === "completed") {
             stopPolling();
-            void queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions });
+            void Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions }),
+              queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.lists }),
+              queryClient.invalidateQueries({ queryKey: hedgeQueryKeys.all }),
+            ]);
           } else if (status.status === "failed") {
             stopPolling();
             error = new Error(status.error ?? "Sync failed");
@@ -265,10 +270,40 @@ describe("useSyncPositions polling logic", () => {
     capturedIntervalCallback!();
     await flushPromises();
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
     expect(invalidateSpy.mock.calls[0][0]).toMatchObject({
       queryKey: queryKeys.dashboardPositions,
     });
+  });
+
+  it("also invalidates hedge queries on completed", async () => {
+    const syncMock = mock(async () => ({ message: "ok" }));
+    const completedStatus: api.SyncStatus = {
+      status: "completed",
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      positionCount: 2,
+    };
+    const statusMock = mock(async () => completedStatus);
+    const invalidateSpy = spyOn(queryClient, "invalidateQueries");
+
+    const poller = buildPoller({
+      queryClient,
+      syncFn: syncMock,
+      statusFn: statusMock,
+    });
+
+    await poller.trigger();
+    capturedIntervalCallback!();
+    await flushPromises();
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
+    expect(invalidateSpy.mock.calls.map((call) => call[0]?.queryKey)).toEqual([
+      queryKeys.dashboardPositions,
+      hedgeQueryKeys.lists,
+      hedgeQueryKeys.all,
+    ]);
   });
 
   // -------------------------------------------------------------------------

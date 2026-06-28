@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import type { HedgeEvent, HedgeView, PnLView } from "../../src/api";
-import { buildBlotterPnl, sumClosedAssignedHedgePnl } from "../../src/App";
+import { buildBlotterPnl } from "../../src/App";
+import { dedupeClosedAssignedHedges, sumClosedAssignedHedgePnl } from "../../src/hedge-pnl";
 
 const pnl: PnLView = {
   tokenId: "123",
@@ -492,5 +493,65 @@ describe("sumClosedAssignedHedgePnl", () => {
     expect(result.totalUsd).toBe(22.5);
     expect(result.count).toBe(3);
     expect(result.fundingUnknown).toBe(true);
+  });
+
+  it("deduplicates the same closed lifecycle imported under two fill hashes", () => {
+    const duplicateLifecycle: HedgeEvent[] = [
+      {
+        id: 1,
+        token_id: "123",
+        trade_key: "trade:fill:HYPE:legacy",
+        tax_key: "tax:legacy:123:HYPE:legacy",
+        coin: "HYPE",
+        status: "closed",
+        entry_px: 58.37,
+        size: 30.1,
+        opened_at: "2026-06-11T18:43:20.016Z",
+        closed_at: "2026-06-12T17:09:46.918Z",
+        close_px: 61.6444631229236,
+        realized_pnl: -98.56134,
+        funding_earned: null,
+        close_reason: "manual_close",
+        hl_fill_hash: "794235780488404",
+        current_szi: null,
+        mark_px: null,
+        unrealized_pnl: null,
+        liquidation_px: null,
+        leverage_type: null,
+        leverage_value: null,
+        updated_at: null,
+      },
+      {
+        id: 2,
+        token_id: "123",
+        trade_key: "trade:fill:HYPE:discovered",
+        tax_key: "tax:fill:HYPE:discovered",
+        coin: "HYPE",
+        status: "closed",
+        entry_px: 58.37,
+        size: 30.1,
+        opened_at: "2026-06-11T18:43:20.016Z",
+        closed_at: "2026-06-12T17:09:46.918Z",
+        close_px: 61.6444631229236,
+        realized_pnl: -98.56134,
+        funding_earned: null,
+        close_reason: "manual_close",
+        hl_fill_hash: "1012244346261642",
+        current_szi: null,
+        mark_px: null,
+        unrealized_pnl: null,
+        liquidation_px: null,
+        leverage_type: null,
+        leverage_value: null,
+        updated_at: null,
+      },
+    ];
+
+    expect(dedupeClosedAssignedHedges(duplicateLifecycle).map((hedge) => hedge.id)).toEqual([1]);
+    expect(sumClosedAssignedHedgePnl(duplicateLifecycle)).toMatchObject({
+      totalUsd: -98.56134,
+      count: 1,
+      fundingUnknown: true,
+    });
   });
 });

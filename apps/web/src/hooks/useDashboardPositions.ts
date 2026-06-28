@@ -9,6 +9,7 @@ import {
   syncSinglePosition,
   SyncStatus,
 } from "../api";
+import { invalidateHedgeQueries } from "./useHedge";
 
 export const queryKeys = {
   dashboardPositions: ["dashboardPositions"] as const,
@@ -61,7 +62,10 @@ export function useSyncPositions() {
           setSyncStatus(status);
           if (status.status === "completed") {
             stopPolling();
-            void queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions });
+            void Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions }),
+              invalidateHedgeQueries(queryClient),
+            ]);
           } else if (status.status === "failed") {
             stopPolling();
             setError(new Error(status.error ?? "Sync failed"));
@@ -117,7 +121,10 @@ export function useSyncPosition(tokenId: string) {
           setSyncStatus(status);
           if (status.status === "completed") {
             stopPolling();
-            void queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions });
+            void Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.dashboardPositions }),
+              invalidateHedgeQueries(queryClient),
+            ]);
           } else if (status.status === "failed") {
             stopPolling();
             setError(new Error(status.error ?? "Sync failed"));

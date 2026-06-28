@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 
-import type { DashboardPosition, HedgeView, PnLView } from "./api";
+import type { DashboardPosition, HedgeEvent, HedgeView, PnLView } from "./api";
 import { buildNetHedgePnL } from "./hedge-pnl";
 import {
   useDashboardPositions,
   useSyncPositions,
   useSyncPosition,
 } from "./hooks/useDashboardPositions";
-import { useHedge, useHedges } from "./hooks/useHedge";
+import { useAssignHedgeEvent, useHedge, useHedgeEventsList } from "./hooks/useHedge";
 
 export function App() {
   const { data, error, isLoading, isFetching } = useDashboardPositions();
@@ -17,8 +17,14 @@ export function App() {
     syncStatus,
     error: syncError,
   } = useSyncPositions();
+  const {
+    data: unassignedHedgesData,
+    error: unassignedHedgesError,
+    isLoading: isLoadingUnassignedHedges,
+  } = useHedgeEventsList("unassigned");
   const positions = data?.positions;
   const syncedAt = data?.syncedAt ?? null;
+  const unassignedHedges = unassignedHedgesData?.hedges ?? [];
 
   return (
     <main className="min-h-screen bg-white text-neutral-950">
@@ -71,7 +77,13 @@ export function App() {
           </p>
         ) : null}
         {!isLoading && !error && positions ? (
-          <Dashboard positions={positions} isSyncing={isSyncing} />
+          <Dashboard
+            positions={positions}
+            isSyncing={isSyncing}
+            unassignedHedges={unassignedHedges}
+            isLoadingUnassignedHedges={isLoadingUnassignedHedges}
+            unassignedHedgesError={unassignedHedgesError}
+          />
         ) : null}
       </section>
     </main>
@@ -158,28 +170,28 @@ function FeesHeaderTooltip() {
 export function Dashboard({
   positions,
   isSyncing = false,
+  unassignedHedges = [],
+  isLoadingUnassignedHedges = false,
+  unassignedHedgesError,
 }: {
   positions: DashboardPosition[];
   isSyncing?: boolean;
+  unassignedHedges?: HedgeEvent[];
+  isLoadingUnassignedHedges?: boolean;
+  unassignedHedgesError?: unknown;
 }) {
-  const hedgedTokenIds = positions
-    .filter((position) => position.hedge)
-    .map((position) => position.tokenId);
-  const hedgeQueries = useHedges(hedgedTokenIds, !isSyncing);
-  const hedgesByTokenId = new Map(
-    hedgedTokenIds.map((tokenId, index) => [tokenId, hedgeQueries[index]?.data]),
-  );
-
-  if (positions.length === 0) {
-    return <EmptyState />;
-  }
+  const {
+    data: assignedHedgesData,
+    error: assignedHedgesError,
+  } = useHedgeEventsList("assigned", !isSyncing);
+  const assignedHedgesByTokenId = groupAssignedHedgesByTokenId(assignedHedgesData?.hedges ?? []);
 
   const openPositions = positions.filter((position) => position.status !== "closed");
   const totals = positions.reduce(
     (acc, position) => {
       acc.pnl +=
-        buildBlotterPnl(position.pnl, hedgesByTokenId.get(position.tokenId)).displayedPnlInToken1 ??
-        0;
+        buildBlotterPnl(position.pnl, undefined, assignedHedgesByTokenId.get(position.tokenId) ?? [])
+          .displayedPnlInToken1 ?? 0;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
       if (typeof position.pnl?.feesValueUsd === "number") {
         acc.feesUsd += position.pnl.feesValueUsd;
@@ -194,74 +206,289 @@ export function Dashboard({
 
   return (
     <>
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Book Positions"
-          value={positions.length.toString()}
-          detail="Tracked NFTs"
-        />
-        <MetricCard
-          label="Total MTM P&L"
-          value={`${formatNumber(totals.pnl)} ${token1Symbol}`}
-          detail="Mark-to-market"
-          valueClassName={pnlToneClass(totals.pnl)}
-        />
-        <MetricCard
-          label="Carry Run Rate"
-          value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
-          detail="30-day normalized"
-          tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
-        />
-        <MetricCard
-          label="Fee Income USD"
-          value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
-          detail={`${formatNumber(totals.fees)} ${token1Symbol}`}
-          tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
-        />
-      </section>
-
-      {openPositions.length > 0 ? (
-        <ActivePositions positions={openPositions} isSyncing={isSyncing} />
+      {positions.length > 0 ? (
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Book Positions"
+            value={positions.length.toString()}
+            detail="Tracked NFTs"
+          />
+          <MetricCard
+            label="Total MTM P&L"
+            value={`${formatNumber(totals.pnl)} ${token1Symbol}`}
+            detail="Mark-to-market"
+            valueClassName={pnlToneClass(totals.pnl)}
+          />
+          <MetricCard
+            label="Carry Run Rate"
+            value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
+            detail="30-day normalized"
+            tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
+          />
+          <MetricCard
+            label="Fee Income USD"
+            value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
+            detail={`${formatNumber(totals.fees)} ${token1Symbol}`}
+            tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
+          />
+        </section>
       ) : null}
 
-      <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
-          <div>
-            <p className="text-[0.65rem] font-semibold tracking-[0.28em] text-neutral-500 uppercase">
-              Blotter
-            </p>
-            <h2 className="mt-1 text-lg font-bold text-neutral-950">Position Detail Ledger</h2>
+      <UnassignedHedgeTradesPanel
+        hedges={unassignedHedges}
+        positions={positions}
+        isLoading={isLoadingUnassignedHedges}
+        error={unassignedHedgesError}
+      />
+
+      {openPositions.length > 0 ? (
+        <ActivePositions
+          positions={openPositions}
+          isSyncing={isSyncing}
+          assignedHedgesByTokenId={assignedHedgesByTokenId}
+        />
+      ) : null}
+
+      {positions.length === 0 ? <EmptyState /> : null}
+
+      {positions.length > 0 ? (
+        <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
+            <div>
+              <p className="text-[0.65rem] font-semibold tracking-[0.28em] text-neutral-500 uppercase">
+                Blotter
+              </p>
+              <h2 className="mt-1 text-lg font-bold text-neutral-950">Position Detail Ledger</h2>
+            </div>
+            <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-semibold text-neutral-600">
+              {positions.length} instruments
+            </span>
           </div>
-          <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-semibold text-neutral-600">
-            {positions.length} instruments
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead className="bg-neutral-50 text-left text-[0.68rem] tracking-[0.18em] text-neutral-500 uppercase">
-              <tr>
-                <th className="px-5 py-3">Pair</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Price</th>
-                <th className="px-5 py-3">Range</th>
-                <th className="px-5 py-3">
-                  <PnlHeaderTooltip />
-                </th>
-                <th className="px-5 py-3">
-                  <FeesHeaderTooltip />
-                </th>
-                <th className="px-5 py-3" aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-200">
-              {positions.map((position) => (
-                <PositionRow key={position.tokenId} position={position} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-neutral-200 text-sm">
+              <thead className="bg-neutral-50 text-left text-[0.68rem] tracking-[0.18em] text-neutral-500 uppercase">
+                <tr>
+                  <th className="px-5 py-3">Pair</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Price</th>
+                  <th className="px-5 py-3">Range</th>
+                  <th className="px-5 py-3">
+                    <PnlHeaderTooltip />
+                  </th>
+                  <th className="px-5 py-3">
+                    <FeesHeaderTooltip />
+                  </th>
+                  <th className="px-5 py-3" aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-200">
+                {positions.map((position) => (
+                  <PositionRow
+                    key={position.tokenId}
+                    position={position}
+                    assignedHedges={assignedHedgesByTokenId.get(position.tokenId) ?? []}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {assignedHedgesError ? (
+        <section className="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 shadow-sm">
+          Assigned hedge history unavailable: {errorMessage(assignedHedgesError)}
+        </section>
+      ) : null}
     </>
+  );
+}
+
+export function UnassignedHedgeTradesPanel({
+  hedges,
+  positions,
+  isLoading = false,
+  error,
+}: {
+  hedges: HedgeEvent[];
+  positions: DashboardPosition[];
+  isLoading?: boolean;
+  error?: unknown;
+}) {
+  if (error) {
+    return (
+      <section className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 shadow-sm">
+        Could not load unassigned hedge trades: {errorMessage(error)}
+      </section>
+    );
+  }
+
+  if (isLoading && hedges.length === 0) {
+    return (
+      <section className="rounded-3xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600 shadow-sm">
+        Loading unassigned hedge trades…
+      </section>
+    );
+  }
+
+  if (hedges.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
+        <div>
+          <p className="text-[0.65rem] font-semibold tracking-[0.28em] text-neutral-500 uppercase">
+            Hedge Review
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-neutral-950">Unassigned Hedge Trades</h2>
+        </div>
+        <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-semibold text-neutral-600">
+          {hedges.length} pending
+        </span>
+      </div>
+      <div className="divide-y divide-neutral-200">
+        {hedges.map((hedge) => (
+          <UnassignedHedgeTradeRow key={hedge.id} hedge={hedge} positions={positions} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function UnassignedHedgeTradeRow({
+  hedge,
+  positions,
+}: {
+  hedge: HedgeEvent;
+  positions: DashboardPosition[];
+}) {
+  const [selectedTokenId, setSelectedTokenId] = useState("");
+  const assignMutation = useAssignHedgeEvent();
+
+  return (
+    <UnassignedHedgeTradeRowView
+      hedge={hedge}
+      positions={positions}
+      selectedTokenId={selectedTokenId}
+      isAssigning={assignMutation.isPending}
+      error={assignMutation.error}
+      onSelectedTokenIdChange={setSelectedTokenId}
+      onAssign={() => assignMutation.mutate({ id: hedge.id, tokenId: selectedTokenId })}
+    />
+  );
+}
+
+export function UnassignedHedgeTradeRowView({
+  hedge,
+  positions,
+  selectedTokenId,
+  isAssigning = false,
+  error,
+  onSelectedTokenIdChange,
+  onAssign,
+}: {
+  hedge: HedgeEvent;
+  positions: DashboardPosition[];
+  selectedTokenId: string;
+  isAssigning?: boolean;
+  error?: unknown;
+  onSelectedTokenIdChange: (tokenId: string) => void;
+  onAssign: () => void;
+}) {
+  return (
+    <div className="px-5 py-4 sm:px-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[0.65rem] font-semibold tracking-[0.14em] text-sky-700 uppercase">
+              {hedge.coin}
+            </span>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold tracking-[0.14em] uppercase ${hedge.status === "closed" ? "border-neutral-300 bg-neutral-100 text-neutral-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}
+            >
+              {hedge.status}
+            </span>
+            <span className="text-xs font-medium text-neutral-500">trade #{hedge.id}</span>
+          </div>
+          <div className="grid gap-2 text-sm text-neutral-700 sm:grid-cols-2 xl:grid-cols-3">
+            <InlineKeyValue label="Size" value={formatHedgeEventSize(hedge)} />
+            <InlineKeyValue label="Opened" value={formatDateTime(hedge.opened_at)} />
+            <InlineKeyValue label="Closed" value={formatDateTime(hedge.closed_at)} />
+            <InlineKeyValue label="Entry" value={`$${formatPrice(hedge.entry_px)}`} />
+            <InlineKeyValue
+              label={hedge.status === "closed" ? "Realized" : "Unrealized"}
+              value={formatHedgePnlValue(
+                hedge.status === "closed" ? hedge.realized_pnl : hedge.unrealized_pnl,
+              )}
+              valueClassName={darkToneClass(
+                hedge.status === "closed"
+                  ? (hedge.realized_pnl ?? undefined)
+                  : (hedge.unrealized_pnl ?? undefined),
+              )}
+            />
+            <InlineKeyValue
+              label="Funding"
+              value={formatHedgePnlValue(hedge.funding_earned)}
+              valueClassName={darkToneClass(hedge.funding_earned ?? undefined)}
+            />
+          </div>
+        </div>
+
+        <div className="w-full max-w-md space-y-2 lg:w-80">
+          <label className="block text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+            Assign to LP position
+          </label>
+          <div className="flex gap-2">
+            <select
+              value={selectedTokenId}
+              onChange={(event) => onSelectedTokenIdChange(event.target.value)}
+              disabled={isAssigning || positions.length === 0}
+              className="min-w-0 flex-1 rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-neutral-950 disabled:opacity-60"
+            >
+              <option value="">Select position…</option>
+              {positions.map((position) => (
+                <option key={position.tokenId} value={position.tokenId}>
+                  {position.token0.symbol}/{position.token1.symbol} #{position.tokenId} · {position.status}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={onAssign}
+              disabled={isAssigning || selectedTokenId.length === 0}
+              className="rounded-full border border-neutral-300 bg-white px-4 py-2 text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-700 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-50"
+            >
+              {isAssigning ? "Assigning…" : "Assign"}
+            </button>
+          </div>
+          {positions.length === 0 ? (
+            <p className="text-xs text-neutral-500">No LP positions available to assign.</p>
+          ) : null}
+          {error ? <p className="text-xs text-rose-600">{errorMessage(error)}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InlineKeyValue({
+  label,
+  value,
+  valueClassName = "text-neutral-950",
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div>
+      <span className="text-xs font-semibold tracking-[0.12em] text-neutral-500 uppercase">
+        {label}
+      </span>
+      <p className={`mt-0.5 font-mono text-sm font-bold ${valueClassName}`}>{value}</p>
+    </div>
   );
 }
 
@@ -299,15 +526,22 @@ function MetricCard({
 function ActivePositions({
   positions,
   isSyncing = false,
+  assignedHedgesByTokenId,
 }: {
   positions: DashboardPosition[];
   isSyncing?: boolean;
+  assignedHedgesByTokenId: Map<string, HedgeEvent[]>;
 }) {
   return (
     <section className="overflow-hidden rounded-[1.75rem] border border-neutral-300 bg-neutral-200 shadow-sm">
       <div className="divide-y divide-neutral-300">
         {positions.map((position) => (
-          <ActivePositionRow key={position.tokenId} position={position} isSyncing={isSyncing} />
+          <ActivePositionRow
+            key={position.tokenId}
+            position={position}
+            isSyncing={isSyncing}
+            assignedHedges={assignedHedgesByTokenId.get(position.tokenId) ?? []}
+          />
         ))}
       </div>
     </section>
@@ -317,9 +551,11 @@ function ActivePositions({
 function ActivePositionRow({
   position,
   isSyncing = false,
+  assignedHedges = [],
 }: {
   position: DashboardPosition;
   isSyncing?: boolean;
+  assignedHedges?: HedgeEvent[];
 }) {
   const pnl = position.pnl;
   const balance = currentBalanceUsd(position);
@@ -333,6 +569,7 @@ function ActivePositionRow({
     position.tokenId,
     !(isSyncing || isSyncingPosition),
   );
+  const activeAssignedHedges = assignedHedges.filter((hedge) => hedge.status === "open");
 
   // Hedge-adjusted ROI — computed via shared helper (same logic as CLI pnl-format.ts)
   const {
@@ -477,6 +714,10 @@ function ActivePositionRow({
         </div>
       </article>
 
+      {activeAssignedHedges.length > 0 ? (
+        <AssignedActiveHedgesPanel hedges={activeAssignedHedges} />
+      ) : null}
+
       {hedgeData && (
         <HedgePanel
           hedge={hedgeData}
@@ -484,6 +725,27 @@ function ActivePositionRow({
           isUpdating={isSyncing || isSyncingPosition || isFetchingHedge}
         />
       )}
+    </div>
+  );
+}
+
+function AssignedActiveHedgesPanel({ hedges }: { hedges: HedgeEvent[] }) {
+  return (
+    <div className="border-t border-neutral-300 bg-neutral-250/80 px-5 py-3 sm:px-7">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase">
+        <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-1 text-rose-700">
+          assigned live hedges
+        </span>
+        <span>{hedges.length} open</span>
+      </div>
+      <div className="space-y-1 font-mono text-xs text-neutral-700">
+        {hedges.map((hedge) => (
+          <div key={hedge.id}>
+            #{hedge.id} {formatHedgeEventSize(hedge)} {hedge.coin} @ {formatPrice(hedge.entry_px)} · mark{" "}
+            {hedge.mark_px != null ? formatPrice(hedge.mark_px) : "—"} · {formatAssignedOpenHedgePnl(hedge)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -748,7 +1010,13 @@ export function DarkStat({
   );
 }
 
-function PositionRow({ position }: { position: DashboardPosition }) {
+function PositionRow({
+  position,
+  assignedHedges = [],
+}: {
+  position: DashboardPosition;
+  assignedHedges?: HedgeEvent[];
+}) {
   const pnl = position.pnl;
   const {
     trigger: syncPosition,
@@ -759,7 +1027,16 @@ function PositionRow({ position }: { position: DashboardPosition }) {
     position.hedge ? position.tokenId : undefined,
     !isSyncingPosition,
   );
-  const blotterPnl = buildBlotterPnl(pnl, hedgeData);
+  const blotterPnl = buildBlotterPnl(pnl, hedgeData, assignedHedges);
+  const activeAssignedHedges = assignedHedges.filter((hedge) => hedge.status === "open");
+  const closedAssignedHedges = [...assignedHedges]
+    .filter((hedge) => hedge.status === "closed")
+    .sort((a, b) => {
+      const left = new Date(a.closed_at ?? a.opened_at).getTime();
+      const right = new Date(b.closed_at ?? b.opened_at).getTime();
+      return right - left;
+    });
+  const hasAssignedHedges = assignedHedges.length > 0;
   const hedgeStatusPnlUsd =
     hedgeData?.status === "active"
       ? hedgeData.unrealizedPnl + hedgeData.fundingEarned
@@ -776,22 +1053,56 @@ function PositionRow({ position }: { position: DashboardPosition }) {
           <StatusBadge status={position.status} />
           <RangeBadge inRange={position.inRange} />
         </div>
-        {position.hedge ? (
-          <div className="mt-2 flex flex-wrap gap-2 text-[0.65rem] font-semibold tracking-[0.12em] uppercase">
-            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">
-              hedge {position.hedge.coin}
-            </span>
-            {hedgeData ? (
-              <span
-                className={`rounded-full border px-2 py-1 ${
-                  hedgeData.status === "closed"
-                    ? "border-neutral-300 bg-neutral-100 text-neutral-700"
-                    : "border-rose-200 bg-rose-50 text-rose-700"
-                }`}
-              >
-                {hedgeData.status}
-                {hedgeStatusPnlUsd != null ? ` ${formatUsd(hedgeStatusPnlUsd)}` : ""}
-              </span>
+        {position.hedge || hasAssignedHedges ? (
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap gap-2 text-[0.65rem] font-semibold tracking-[0.12em] uppercase">
+              {position.hedge ? (
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">
+                  hedge {position.hedge.coin}
+                </span>
+              ) : null}
+              {activeAssignedHedges.length > 0 ? (
+                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">
+                  {activeAssignedHedges.length} active assigned
+                </span>
+              ) : hedgeData ? (
+                <span
+                  className={`rounded-full border px-2 py-1 ${
+                    hedgeData.status === "closed"
+                      ? "border-neutral-300 bg-neutral-100 text-neutral-700"
+                      : "border-rose-200 bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  {hedgeData.status}
+                  {hedgeStatusPnlUsd != null ? ` ${formatUsd(hedgeStatusPnlUsd)}` : ""}
+                </span>
+              ) : null}
+              {closedAssignedHedges.length > 0 ? (
+                <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-1 text-neutral-700">
+                  {closedAssignedHedges.length} closed assigned
+                </span>
+              ) : null}
+            </div>
+
+            {activeAssignedHedges.length > 0 ? (
+              <div className="space-y-1 text-xs text-neutral-500">
+                {activeAssignedHedges.map((hedge) => (
+                  <div key={hedge.id} className="font-mono">
+                    live #{hedge.id} {formatHedgeEventSize(hedge)} {hedge.coin} @
+                    {formatPrice(hedge.entry_px)} · {formatAssignedOpenHedgePnl(hedge)}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {closedAssignedHedges.length > 0 ? (
+              <div className="space-y-1 text-xs text-neutral-500">
+                {closedAssignedHedges.map((hedge) => (
+                  <div key={hedge.id} className="font-mono">
+                    closed #{hedge.id} {formatDateTime(hedge.closed_at)} · {formatAssignedClosedHedgePnl(hedge)}
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -817,6 +1128,8 @@ function PositionRow({ position }: { position: DashboardPosition }) {
             {blotterPnl.closedHedgePnlInToken1 != null
               ? `${formatNumber(blotterPnl.closedHedgePnlInToken1)} ${pnl.token1Symbol}`
               : formatUsd(blotterPnl.closedHedgePnlUsd)}
+            {blotterPnl.closedHedgeCount > 0 ? ` (${blotterPnl.closedHedgeCount}x)` : ""}
+            {blotterPnl.closedHedgeFundingUnknown ? " · funding partial" : ""}
           </div>
         ) : null}
       </td>
@@ -936,17 +1249,50 @@ export interface BlotterPnlView {
   displayedPnlUsd: number | null;
   closedHedgePnlUsd: number | null;
   closedHedgePnlInToken1: number | null;
+  closedHedgeFundingUnknown: boolean;
+  closedHedgeCount: number;
   includesClosedHedge: boolean;
+}
+
+export interface ClosedAssignedHedgePnlSummary {
+  totalUsd: number | null;
+  fundingUnknown: boolean;
+  count: number;
+}
+
+export function sumClosedAssignedHedgePnl(hedges: HedgeEvent[]): ClosedAssignedHedgePnlSummary {
+  const closedHedges = hedges.filter((hedge) => hedge.status === "closed");
+  if (closedHedges.length === 0) {
+    return { totalUsd: null, fundingUnknown: false, count: 0 };
+  }
+
+  return closedHedges.reduce<ClosedAssignedHedgePnlSummary>(
+    (acc, hedge) => {
+      acc.totalUsd = (acc.totalUsd ?? 0) + (hedge.realized_pnl ?? 0);
+      if (hedge.funding_earned != null) {
+        acc.totalUsd += hedge.funding_earned;
+      } else {
+        acc.fundingUnknown = true;
+      }
+      acc.count += 1;
+      return acc;
+    },
+    { totalUsd: 0, fundingUnknown: false, count: 0 },
+  );
 }
 
 export function buildBlotterPnl(
   pnl: PnLView | undefined,
   hedge: HedgeView | undefined,
+  assignedHedges: HedgeEvent[] = [],
 ): BlotterPnlView {
+  const assignedClosedHedge = sumClosedAssignedHedgePnl(assignedHedges);
   const closedHedgePnlUsd =
-    hedge?.status === "closed" && hedge.realizedPnl != null
-      ? hedge.realizedPnl + hedge.fundingEarned
-      : null;
+    assignedClosedHedge.count > 0
+      ? assignedClosedHedge.totalUsd
+      : hedge?.status === "closed" && hedge.realizedPnl != null
+        ? hedge.realizedPnl + hedge.fundingEarned
+        : null;
 
   const closedHedgePnlInToken1 =
     closedHedgePnlUsd != null && pnl?.token1UsdPrice != null && pnl.token1UsdPrice > 0
@@ -967,14 +1313,57 @@ export function buildBlotterPnl(
     displayedPnlUsd,
     closedHedgePnlUsd,
     closedHedgePnlInToken1,
+    closedHedgeFundingUnknown: assignedClosedHedge.count > 0 && assignedClosedHedge.fundingUnknown,
+    closedHedgeCount: assignedClosedHedge.count > 0 ? assignedClosedHedge.count : closedHedgePnlUsd != null ? 1 : 0,
     includesClosedHedge: lpPnlInToken1 != null && closedHedgePnlInToken1 != null,
   };
+}
+
+function groupAssignedHedgesByTokenId(hedges: HedgeEvent[]): Map<string, HedgeEvent[]> {
+  return hedges.reduce((map, hedge) => {
+    if (!hedge.token_id) {
+      return map;
+    }
+    const existing = map.get(hedge.token_id);
+    if (existing) {
+      existing.push(hedge);
+    } else {
+      map.set(hedge.token_id, [hedge]);
+    }
+    return map;
+  }, new Map<string, HedgeEvent[]>());
 }
 
 function formatPrice(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumSignificantDigits: 6,
   }).format(value);
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString() : "—";
+}
+
+function formatHedgePnlValue(value: number | null | undefined): string {
+  return typeof value === "number" ? formatUsd(value) : "—";
+}
+
+function formatHedgeEventSize(hedge: HedgeEvent): string {
+  return hedge.current_szi ?? formatNumber(hedge.size);
+}
+
+function formatAssignedClosedHedgePnl(hedge: HedgeEvent): string {
+  const realized = hedge.realized_pnl ?? 0;
+  const funding = hedge.funding_earned;
+  const total = realized + (funding ?? 0);
+  return `${formatUsd(total)}${funding == null ? " (funding unknown)" : ""}`;
+}
+
+function formatAssignedOpenHedgePnl(hedge: HedgeEvent): string {
+  const unrealized = hedge.unrealized_pnl ?? 0;
+  const funding = hedge.funding_earned ?? 0;
+  const total = unrealized + funding;
+  return `${formatUsd(total)}${hedge.funding_earned == null ? " (funding unknown)" : ""}`;
 }
 
 function formatPercent(value: number): string {

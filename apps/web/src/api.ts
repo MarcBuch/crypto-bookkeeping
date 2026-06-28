@@ -78,7 +78,9 @@ export interface HedgeView {
 
 export interface HedgeEvent {
   id: number;
-  token_id: string;
+  token_id: string | null;
+  trade_key: string | null;
+  tax_key: string | null;
   coin: string;
   status: "open" | "closed";
   entry_px: number;
@@ -90,7 +92,16 @@ export interface HedgeEvent {
   funding_earned: number | null;
   close_reason: string | null;
   hl_fill_hash: string | null;
+  current_szi: string | null;
+  mark_px: number | null;
+  unrealized_pnl: number | null;
+  liquidation_px: number | null;
+  leverage_type: string | null;
+  leverage_value: number | null;
+  updated_at: string | null;
 }
+
+export type HedgesAssignedFilter = "assigned" | "unassigned" | "all";
 
 export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | null;
 
@@ -436,4 +447,35 @@ export async function getHedgeEvents(tokenId: string): Promise<HedgeEvent[]> {
     throw new ApiError("API response did not include events.");
   }
   return data.events;
+}
+
+export async function getHedges(
+  options: { assigned?: HedgesAssignedFilter } = {},
+): Promise<{ hedges: HedgeEvent[] }> {
+  const params = new URLSearchParams();
+  if (options.assigned) {
+    params.set("assigned", options.assigned);
+  }
+
+  const query = params.toString();
+  const data = await fetchJson<{ hedges?: HedgeEvent[] }>(`/hedges${query ? `?${query}` : ""}`);
+
+  if (!Array.isArray(data.hedges)) {
+    throw new ApiError("API response did not include hedges.");
+  }
+
+  return { hedges: data.hedges };
+}
+
+export async function assignHedgeEvent(id: number, tokenId: string | null): Promise<{ hedge: HedgeEvent }> {
+  const data = await fetchJson<{ hedge?: HedgeEvent }>(`/hedges/${id}/assignment`, {
+    method: "PATCH",
+    body: { tokenId },
+  });
+
+  if (!isObject(data.hedge)) {
+    throw new ApiError("API response did not include hedge.");
+  }
+
+  return { hedge: data.hedge as HedgeEvent };
 }

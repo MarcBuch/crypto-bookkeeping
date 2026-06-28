@@ -3,8 +3,9 @@ import { describe, expect, it } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { DashboardPosition } from "../../src/api";
+import type { DashboardPosition, HedgeEvent } from "../../src/api";
 import { Dashboard, EmptyState, ErrorState, LoadingState } from "../../src/App";
+import { hedgeQueryKeys } from "../../src/hooks/useHedge";
 
 const activePosition: DashboardPosition = {
   tokenId: "123",
@@ -99,8 +100,9 @@ function withoutUsdFee(
   };
 }
 
-function renderDashboard(positions: DashboardPosition[]): string {
+function renderDashboard(positions: DashboardPosition[], assignedHedges: HedgeEvent[] = []): string {
   const queryClient = new QueryClient();
+  queryClient.setQueryData(hedgeQueryKeys.list("assigned"), { hedges: assignedHedges });
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <Dashboard positions={positions} />
@@ -266,9 +268,135 @@ describe("dashboard rendering", () => {
   });
 
   it("includes closed hedge P&L in Total MTM P&L when the LP row has hedge metadata", () => {
-    const html = renderDashboard([activePosition, closedPositionWithClosedHedge]);
+    const html = renderDashboard(
+      [activePosition, closedPositionWithClosedHedge],
+      [
+        {
+          id: 7,
+          token_id: "456",
+          trade_key: "trade:fill:HYPE:7",
+          tax_key: "tax:fill:HYPE:7",
+          coin: "HYPE",
+          status: "closed",
+          entry_px: 24,
+          size: 10,
+          opened_at: "2026-05-30T12:00:00.000Z",
+          closed_at: "2026-05-30T13:00:00.000Z",
+          close_px: 22,
+          realized_pnl: 20,
+          funding_earned: 1.5,
+          close_reason: "manual",
+          hl_fill_hash: "0xfill",
+          current_szi: null,
+          mark_px: 22,
+          unrealized_pnl: null,
+          liquidation_px: null,
+          leverage_type: "cross",
+          leverage_value: 1,
+          updated_at: "2026-05-30T13:00:00.000Z",
+        },
+      ],
+    );
 
     expect(html).toContain("Total MTM P&amp;L");
-    expect(html).toContain("15.5 USDC");
+    expect(html).toContain("37 USDC");
+  });
+
+  it("uses only closed assigned hedge totals in dashboard MTM while still showing active assigned context", () => {
+    const html = renderDashboard(
+      [activePosition, closedPositionWithClosedHedge],
+      [
+        {
+          id: 7,
+          token_id: "456",
+          trade_key: "trade:fill:HYPE:7",
+          tax_key: "tax:fill:HYPE:7",
+          coin: "HYPE",
+          status: "closed",
+          entry_px: 24,
+          size: 10,
+          opened_at: "2026-05-30T12:00:00.000Z",
+          closed_at: "2026-05-30T13:00:00.000Z",
+          close_px: 22,
+          realized_pnl: 20,
+          funding_earned: 2,
+          close_reason: "manual",
+          hl_fill_hash: "0xfill-1",
+          current_szi: null,
+          mark_px: 22,
+          unrealized_pnl: null,
+          liquidation_px: null,
+          leverage_type: "cross",
+          leverage_value: 1,
+          updated_at: "2026-05-30T13:00:00.000Z",
+        },
+        {
+          id: 8,
+          token_id: "456",
+          trade_key: "trade:fill:HYPE:8",
+          tax_key: "tax:fill:HYPE:8",
+          coin: "HYPE",
+          status: "closed",
+          entry_px: 21,
+          size: 5,
+          opened_at: "2026-05-31T12:00:00.000Z",
+          closed_at: "2026-05-31T13:00:00.000Z",
+          close_px: 23,
+          realized_pnl: -5,
+          funding_earned: null,
+          close_reason: "manual",
+          hl_fill_hash: "0xfill-2",
+          current_szi: null,
+          mark_px: 23,
+          unrealized_pnl: null,
+          liquidation_px: null,
+          leverage_type: "cross",
+          leverage_value: 1,
+          updated_at: "2026-05-31T13:00:00.000Z",
+        },
+        {
+          id: 9,
+          token_id: "456",
+          trade_key: "trade:fill:HYPE:9",
+          tax_key: "tax:fill:HYPE:9",
+          coin: "HYPE",
+          status: "open",
+          entry_px: 19,
+          size: 3,
+          opened_at: "2026-06-01T12:00:00.000Z",
+          closed_at: null,
+          close_px: null,
+          realized_pnl: 999,
+          funding_earned: 999,
+          close_reason: null,
+          hl_fill_hash: "0xfill-3",
+          current_szi: "3",
+          mark_px: 18,
+          unrealized_pnl: 15,
+          liquidation_px: 30,
+          leverage_type: "cross",
+          leverage_value: 2,
+          updated_at: "2026-06-01T13:00:00.000Z",
+        },
+      ],
+    );
+
+    expect(html).toContain("Total MTM P&amp;L");
+    expect(html).toContain("32.5 USDC");
+    expect(html).toContain("1 active assigned");
+    expect(html).toContain("2 closed assigned");
+    expect(html).toContain("funding partial");
+  });
+
+  it("renders unassigned hedge load errors at the panel level", () => {
+    const queryClient = new QueryClient();
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <Dashboard positions={[activePosition]} unassignedHedgesError={new Error("hedge api down")} />
+      </QueryClientProvider>,
+    );
+
+    expect(html).toContain("Could not load unassigned hedge trades");
+    expect(html).toContain("hedge api down");
   });
 });

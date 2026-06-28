@@ -2,13 +2,16 @@ import { afterEach, describe, expect, it } from "bun:test";
 
 import {
   ApiError,
+  assignHedgeEvent,
   createTaxTransaction,
   getDashboardPositions,
+  getHedges,
   getPnL,
   getPositions,
   getTaxTransactions,
   syncTaxTransactions,
   updateTaxTransaction,
+  type HedgeEvent,
   type PnLView,
   type PositionView,
   type TaxTransaction,
@@ -167,6 +170,31 @@ const taxTransaction: TaxTransaction = {
   synced_at: "2026-05-30T12:00:00.000Z",
   created_at: "2026-05-30T12:00:00.000Z",
   updated_at: "2026-05-30T12:00:00.000Z",
+};
+
+const hedgeEvent: HedgeEvent = {
+  id: 7,
+  token_id: null,
+  trade_key: "trade:fill:HYPE:7",
+  tax_key: "tax:fill:HYPE:7",
+  coin: "HYPE",
+  status: "closed",
+  entry_px: 24,
+  size: 10,
+  opened_at: "2026-05-30T12:00:00.000Z",
+  closed_at: "2026-05-30T13:00:00.000Z",
+  close_px: 22,
+  realized_pnl: 20,
+  funding_earned: 1.5,
+  close_reason: "manual",
+  hl_fill_hash: "0xfill",
+  current_szi: null,
+  mark_px: 22,
+  unrealized_pnl: null,
+  liquidation_px: null,
+  leverage_type: "cross",
+  leverage_value: 1,
+  updated_at: "2026-05-30T13:00:00.000Z",
 };
 
 describe("API client", () => {
@@ -347,6 +375,51 @@ describe("API client", () => {
     const result = await getDashboardPositions();
     expect(result).toMatchObject({
       positions: [{ ...position, pnl: undefined }],
+    });
+  });
+
+  it("fetches hedges filtered by assignment state", async () => {
+    mockFetch((url, init) => {
+      expect(init?.method).toBeUndefined();
+      expect(url).toBe("http://localhost:3000/hedges?assigned=unassigned");
+      return jsonResponse({ hedges: [hedgeEvent] });
+    });
+
+    const result = await getHedges({ assigned: "unassigned" });
+    expect(result).toEqual({ hedges: [hedgeEvent] });
+  });
+
+  it("throws when hedges response lacks a hedges array", async () => {
+    mockFetch(() => jsonResponse({}));
+
+    const error = await captureError(getHedges());
+    expect(error).toMatchObject({
+      name: "ApiError",
+      message: "API response did not include hedges.",
+    });
+  });
+
+  it("assigns a hedge event with PATCH", async () => {
+    const assignedHedge = { ...hedgeEvent, token_id: "123" };
+    mockFetch((url, init) => {
+      expect(url).toBe("http://localhost:3000/hedges/7/assignment");
+      expect(init?.method).toBe("PATCH");
+      expect(init?.headers).toEqual({ "content-type": "application/json" });
+      expect(init?.body).toBe(JSON.stringify({ tokenId: "123" }));
+      return jsonResponse({ hedge: assignedHedge });
+    });
+
+    const result = await assignHedgeEvent(7, "123");
+    expect(result).toEqual({ hedge: assignedHedge });
+  });
+
+  it("throws when hedge assignment response lacks a hedge object", async () => {
+    mockFetch(() => jsonResponse({}));
+
+    const error = await captureError(assignHedgeEvent(7, "123"));
+    expect(error).toMatchObject({
+      name: "ApiError",
+      message: "API response did not include hedge.",
     });
   });
 

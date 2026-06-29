@@ -666,7 +666,7 @@ export function TaxTransactionLedger({
       {transactions.length === 0 ? <TaxEmptyState /> : null}
       {transactions.length > 0 ? (
         <>
-          <div className="relative mb-2 flex justify-end px-5 pt-3">
+          <div className="relative z-20 mb-2 flex justify-end px-5 pt-3">
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm shadow-sm">
               <label className="flex items-center gap-2 font-semibold text-neutral-600">
                 Rows per page
@@ -714,7 +714,7 @@ export function TaxTransactionLedger({
                 Columns
               </button>
               {showColumnMenu && (
-                <div className="absolute top-10 right-5 z-10 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+                <div className="absolute top-10 right-5 z-30 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
                   {table.getAllLeafColumns().map((column) => (
                     <label
                       key={column.id}

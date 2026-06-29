@@ -1,50 +1,82 @@
 ---
 name: run-mission
-description: Run a long-horizon goal as a structured mission. Use when a task spans multiple milestones and subagents. Provides shared state between orchestrator and subagents via mission tools.
+description: Run a long-horizon goal after an approved plan-mission plan as a structured mission. Use when work spans multiple milestones or subagents and needs explicit progress tracking.
 ---
 
 # Run Mission
 
 ## Overview
 
-A mission is a long-running goal broken into **milestones**, each containing **tasks**. The orchestrator owns all state transitions. Subagents do work and report results — they never update mission state directly.
+A mission is a long-running goal broken into **milestones**, each containing **tasks**. The orchestrator owns all state transitions. Worker subagents do task work and report evidence. Scrutiny Validators review completed task work without blindly rerunning the whole verification stack.
 
 **Announce at start:** "I'm using the run-mission skill to manage this as a structured mission."
 
-## Hierarchy
+The core invariant: a task stays `in_progress` until the worker has reported, the task-scoped diff has been derived, and the Scrutiny Validator has returned `PASS` or `PASS WITH NOTES`.
 
-```
-Mission        — the overall goal
-└── Milestone  — a meaningful checkpoint (e.g. "Token security tests")
-    └── Task   — a unit of work delegated to one subagent
-```
+## Reference Pointers
+
+Read these only when their branch is reached:
+- [`VERIFICATION.md`](VERIFICATION.md): verification modes, test budget, and task/milestone/mission verification cadence.
+- [`HANDOFF.md`](HANDOFF.md): worker `mission_handoff` schema and field rules.
+- [`VALIDATOR.md`](VALIDATOR.md): Scrutiny Validator behavior, verdicts, and prompt template.
+- [`REFERENCE.md`](REFERENCE.md): IDs, statuses, clean-worktree and diff criteria, and failure handling.
 
 ## Orchestrator Responsibilities
 
 The orchestrator:
-1. Defines the full mission structure upfront via `mission_init`
-2. Marks tasks `in_progress` before delegating them
-3. Delegates each task to a subagent, passing full context and prior handoffs
-4. Receives the subagent's result, reads the handoff record, then marks the task `completed` or `failed`
-5. **Immediately spawns a Scrutiny Validator subagent** after every completed task (see [Scrutiny Validator](#scrutiny-validator))
-6. If the validator returns `FAIL`, spawns a Fix subagent then re-validates before proceeding
-7. Reviews progress after each milestone before starting the next
-8. Decides whether to retry, skip, or abort on failure
+1. Loads `plan-mission` first and gets an approved plan.
+2. Always checks for an existing mission before calling `mission_init`.
+3. Uses the verification mode from the approved plan: `fast`, `standard`, or `exhaustive`.
+4. Defines the full mission structure upfront via `mission_init`.
+5. Marks tasks `in_progress` before delegating them.
+6. Verifies the mission starts from a clean worktree before any code-changing task.
+7. Delegates each task to a worker subagent, passing full context and prior handoffs.
+8. Receives the worker result, reads the handoff, and derives the task-scoped diff.
+9. Spawns a Scrutiny Validator before marking the task `completed`.
+10. Reviews progress after each milestone before starting the next.
+11. Runs milestone and mission-end verification at the cadence defined by the selected mode.
+12. Decides whether to retry, skip, or abort on failure.
 
-Subagents **never** call `mission_update_task`. They call `mission_handoff` as their last action, then return results to the orchestrator, which records the final status.
+Worker subagents **never** call `mission_update_task`. They call `mission_handoff` as their last action, then return results to the orchestrator.
+
+Scrutiny Validator subagents are reviewers. They do **not** call `mission_handoff` unless explicitly asked to modify files, in which case they are no longer acting as validators.
+
+---
 
 ## Workflow
 
 ### Prerequisite: Plan the mission first
 
 Before calling `mission_init`, load and complete the **`plan-mission`** skill:
+1. Load the skill: `skill("plan-mission")`.
+2. Follow its protocol to decompose the goal and choose a verification mode.
+3. Present the plan to the user and wait for explicit approval.
+4. Only after approval, call `mission_init` with a structure that matches the approved plan exactly.
 
-1. Load the skill: `skill("plan-mission")`
-2. Follow its protocol to decompose the goal, analyse adversarial scenarios, and produce a written plan
-3. Present the plan to the user and wait for explicit approval
-4. Only after approval: call `mission_init` with a structure that matches the approved plan exactly
+**Completion criterion:** the user has explicitly approved a plan that includes every milestone, task ID, task title, and verification mode.
 
-**Do not call `mission_init` until `plan-mission` produces an approved plan.** This is a hard prerequisite, not a recommendation.
+**Do not call `mission_init` until `plan-mission` produces an approved plan.**
+
+### Prerequisite: Check for an existing mission
+
+`mission_init` overwrites the current mission file.
+
+Before calling it:
+1. Always read the current mission state with `mission_read`.
+2. If the existing mission is still `pending` or `in_progress`, stop and ask the user whether to resume it or explicitly replace it.
+3. Only call `mission_init` when there is no active mission, or the user has clearly approved replacement.
+
+**Completion criterion:** either no active mission exists, or the user has explicitly approved replacing the active mission.
+
+Do not silently replace an in-flight mission.
+
+### Prerequisite: Set the verification mode
+
+Use the verification mode from the approved mission plan. If the plan omits a mode, default to `fast`; do not upgrade or downgrade the approved mode without explicit user approval.
+
+For mode definitions, read [`VERIFICATION.md`](VERIFICATION.md#verification-modes).
+
+**Completion criterion:** the selected mode is recorded in the orchestrator context and passed to every worker and validator prompt.
 
 ### Step 1: Initialize the Mission
 
@@ -52,35 +84,41 @@ Call `mission_init` with the full milestone and task tree before spawning any su
 
 ```
 mission_init(
-  title: "Add auth adversarial tests",
+  title: "Auth hardening",
   milestones: [
     {
       id: "m1",
-      title: "Token security tests",
+      title: "Token handling",
       tasks: [
-        { id: "m1t1", title: "Write token expiry tests" },
-        { id: "m1t2", title: "Write token replay tests" }
+        { id: "m1t1", title: "Implement token expiry handling" },
+        { id: "m1t2", title: "Verify token expiry edge cases" }
       ]
     },
     {
       id: "m2",
-      title: "CSRF and session tests",
+      title: "CSRF flow",
       tasks: [
-        { id: "m2t1", title: "Write CSRF tests" },
-        { id: "m2t2", title: "Run full test suite and verify" }
+        { id: "m2t1", title: "Implement CSRF route checks" }
       ]
     }
   ]
 )
 ```
 
-**Rules:**
-- Define all milestones and tasks upfront — do not add tasks mid-mission
-- Use short, stable IDs (`m1`, `m1t1`, `m2t3`, etc.)
-- Order milestones and tasks in execution order
-- `mission_init` always overwrites any existing mission file
+Rules:
+- Define all milestones and tasks upfront.
+- Match the approved task IDs and titles exactly.
+- Use short, stable IDs such as `m1`, `m1t1`, `m2t3`.
+- Order milestones and tasks in execution order.
+- Do not add new task IDs mid-mission; if a worker returns a partial result, continue under the same task ID.
+
+**Completion criterion:** `mission_init` has been called once with the approved mission tree and verification mode retained in context.
 
 ### Step 2: Execute Milestones in Order
+
+Before the first code-changing task in the mission, confirm the worktree is clean. If the worktree is not clean, stop and ask the user whether to clean it up, commit it, or switch to another workspace before proceeding.
+
+**Completion criterion:** the orchestrator has confirmed a clean worktree before delegating the first code-changing task.
 
 Work through milestones sequentially. Within a milestone, tasks may be parallelized if they are independent, but default to sequential unless parallelism is clearly safe.
 
@@ -92,88 +130,110 @@ For each task:
 mission_update_task(taskId: "m1t1", status: "in_progress")
 ```
 
-#### 2b. Delegate to a subagent
+**Completion criterion:** the task status is `in_progress` before any worker subagent receives the task.
 
-Before delegating, read prior handoffs for the current milestone so the subagent has full context on what prior workers discovered:
+#### 2b. Record the task's Git diff base
+
+Before delegating a code-changing task, record the task's Git diff base so the validator can review only that task's diff.
+
+Diff-base rule:
+- Use the current Git state at the moment the task is marked `in_progress` as the task's diff base.
+- Keep the task `in_progress` until validation is complete so later tasks do not overlap its diff window.
+- If the task is read-only, record that no diff base is needed.
+
+**Completion criterion:** the task's diff base is recorded in task context before delegation. If the task is read-only, record that no diff base is needed.
+
+For precise clean-worktree and diff criteria, read [`REFERENCE.md`](REFERENCE.md#clean-worktree-and-task-diffs).
+
+#### 2c. Delegate to a worker subagent
+
+Before delegating, read current mission state and prior handoffs for the current milestone:
 
 ```
-mission_read_handoffs()   ← returns all handoffs for the current in_progress milestone
+mission_read()
+mission_read_handoffs()
 ```
 
-Include in the subagent's prompt:
-- The task ID and title
-- The full mission context from `mission_read`
-- Prior handoffs from `mission_read_handoffs` (paste the output)
-- Any relevant files, constraints, or prior results
-- The instruction to call `mission_handoff` as the last action before reporting back
+Include in the worker prompt:
+- The task ID and title.
+- The verification mode.
+- The full mission context from `mission_read`.
+- Prior handoffs from `mission_read_handoffs`.
+- Any relevant files, constraints, or prior results.
+- The instruction to follow repo-required procedures from `AGENTS.md`.
+- The instruction to run the task-level verification required by the verification mode.
+- The instruction to call `mission_handoff` as the last action before reporting back.
 
-Example subagent prompt:
+Example worker prompt:
 ```
-Your task is m1t1: "Write token expiry tests".
+Your task is m1t1: "Implement token expiry handling".
+
+Verification mode: standard
 
 Mission context:
 <paste mission_read output here>
 
 Prior handoffs for this milestone:
-<paste mission_read_handoffs output here — or "none yet" if first task>
+<paste mission_read_handoffs output here, or "none yet" if first task>
 
 Instructions:
-- Implement the tests described in your task
+- Implement the task
 - Do not update mission state
-- After making changes, run the two-phase test strategy (do NOT run the full suite):
-    Phase 1 — targeted:  bun test <your-modified-file>
-    Phase 2 — smoke:     bun test test/integration/health.test.ts test/integration/static.test.ts test/unit/architecture-boundaries.test.ts
-    Typecheck:           bun run check
+- Follow any repo-required procedures from AGENTS.md for the code you touched
+- Run the task-level verification required by verification mode `standard`
+- Prefer updating existing tests or adding only the smallest number of high-value tests needed to prove the change
 - Call mission_handoff as your last action before reporting back
 - After calling mission_handoff, report your result to me
 ```
 
-#### 2c. Record the result
+For worker reporting rules, read [`HANDOFF.md`](HANDOFF.md).
 
-After the subagent calls `mission_handoff` and returns, read the handoff to review what was done:
+**Completion criterion:** the worker prompt includes every required context item and explicitly forbids mission state updates.
+
+#### 2d. Record the worker result and derive the task diff
+
+After the worker subagent calls `mission_handoff` and returns, read the handoff:
 
 ```
 mission_read_handoffs(taskId: "m1t1")
 ```
 
-Then update the task status, using the handoff summary as notes:
+Then derive `<TASK_DIFF>` from the recorded Git diff base:
+1. Start with the concrete file paths listed in the handoff's `implemented` entries.
+2. Compare only those paths between the recorded diff base and the current workspace state.
+3. Include new files, deleted files, and renames if present.
+4. Account for every implemented path in the validator input; if a path cannot be compared, state why.
+5. If the handoff shows no file changes, pass an empty diff and let the validator review the handoff and verification evidence only.
+
+**Completion criterion:** every implemented path is represented in `<MODIFIED_FILES>` and either appears in `<TASK_DIFF>` or has an explicit reason why no diff exists.
+
+Keep the task `in_progress` while validation is pending. Use `failed` only if the worker subagent could not complete the task.
+
+For diff criteria, read [`REFERENCE.md`](REFERENCE.md#clean-worktree-and-task-diffs).
+
+#### 2e. Run the Scrutiny Validator
+
+After every worker-completed task, spawn a Scrutiny Validator before proceeding.
+
+Use the validator prompt and verdict rules in [`VALIDATOR.md`](VALIDATOR.md).
+
+```
+PASS              -> mark completed and proceed to next task
+PASS WITH NOTES   -> mark completed with validator notes, then proceed
+FAIL              -> keep or mark in_progress, spawn Fix worker subagent, re-run validator
+```
+
+When recording a validator result, append the verdict to the task notes.
+
+**Completion criterion:** the task status is `completed` only after validator `PASS` or `PASS WITH NOTES`; validator `FAIL` leaves the task `in_progress` until a fix validates.
+
+Example accepted completion update:
 
 ```
 mission_update_task(
   taskId: "m1t1",
   status: "completed",
-  notes: "6 tests written, all passing. Covers 15min and 24h expiry windows."
-)
-```
-
-Use `failed` if the subagent could not complete the task:
-
-```
-mission_update_task(
-  taskId: "m1t1",
-  status: "failed",
-  notes: "Could not locate auth token middleware. Needs investigation."
-)
-```
-
-#### 2d. Run the Scrutiny Validator
-
-After every `completed` task, **always** spawn a Scrutiny Validator subagent before proceeding to the next task. See the [Scrutiny Validator](#scrutiny-validator) section for the full prompt template and verdict handling.
-
-```
-PASS          → proceed to next task
-PASS WITH NOTES → record findings in task notes via mission_update_task, proceed
-FAIL          → mark task in_progress, spawn Fix subagent, re-run Scrutiny Validator
-               → loop until PASS or PASS WITH NOTES
-```
-
-When recording a validator result, append the verdict to the task notes:
-
-```
-mission_update_task(
-  taskId: "m1t1",
-  status: "completed",
-  notes: "6 tests written, all passing. [Scrutiny: PASS]"
+  notes: "Implemented token expiry handling with one focused regression test. Validator: PASS."
 )
 ```
 
@@ -181,29 +241,17 @@ mission_update_task(
 
 After all tasks in a milestone are done:
 
-#### 3a. Run the full test suite for affected workspaces
+#### 3a. Run milestone verification for affected workspaces
 
-Before calling `mission_summary`, determine which workspaces were modified during
-this milestone by reviewing the `implemented` fields from all task handoffs.
+Determine which workspaces were modified during this milestone by reviewing the concrete paths in task handoffs and task diffs.
 
-Then run the full test suite **only** in affected workspaces:
+Then verify only the affected workspaces according to the selected mode. For the mode-specific cadence, read [`VERIFICATION.md`](VERIFICATION.md#milestone-verification).
 
-```bash
-# If apps/api was modified:
-bun test test                    # from apps/api/
+Do not run root-wide tests unless multiple workspaces were modified and there is no narrower equivalent.
 
-# If apps/web was modified:
-bun test src                     # from apps/web/
+If milestone verification fails, investigate before proceeding.
 
-# If packages/contracts was modified:
-bun test src                     # from packages/contracts/
-```
-
-Do NOT run `bun run test` from root (which tests all workspaces) unless multiple
-workspaces were modified. If only one workspace was touched, test only that one.
-
-If the full suite fails, investigate before proceeding. Do not advance to the
-next milestone with a broken suite.
+**Completion criterion:** every workspace touched by a handoff path has an appropriate milestone check result, or a recorded reason why no check applies.
 
 #### 3b. Call mission_summary
 
@@ -212,266 +260,65 @@ mission_summary()
 ```
 
 Review the output. If any tasks failed:
-- Decide whether to retry (re-run the task), skip (`skipped` status), or abort
-- Do not proceed to the next milestone with unresolved failures unless explicitly acceptable
+- Decide whether to retry, skip, or abort.
+- Do not proceed to the next milestone with unresolved failures unless explicitly acceptable.
+
+**Completion criterion:** all tasks in the milestone are `completed` or explicitly `skipped`, and unresolved failures have a recorded user-approved decision.
 
 ### Step 4: Complete the Mission
 
-When all milestones are completed, call `mission_summary` one final time and report the outcome to the user.
+When all milestones are completed, run mission-end verification for the affected workspaces across the mission, then call `mission_summary` and report the outcome to the user.
 
----
+For mission-end verification, read [`VERIFICATION.md`](VERIFICATION.md#mission-end-verification).
 
-## Subagent Reporting
-
-Every subagent must call `mission_handoff` as its **last action** before returning results to the orchestrator. This is not optional.
-
-### What to report
-
-```
-mission_handoff(
-  taskId: "m1t1",
-  taskTitle: "Write token expiry tests",
-  milestoneId: "m1",
-  implemented: [
-    "tests/auth/token-expiry.test.ts — 6 tests covering 15min, 1h, 24h expiry windows",
-    "tests/helpers/auth.ts — added generateExpiredToken() helper"
-  ],
-  leftUndone: [
-    "Refresh token expiry not tested — refresh token logic is in a separate middleware not yet located"
-  ],
-  commands: [
-    { cmd: "bun run test --filter token-expiry", exit: 0, note: "All 6 new tests passing" },
-    { cmd: "bun run typecheck", exit: 0 }
-  ],
-  issues: [
-    "Token middleware imports from apps/api/src/modules/auth/token.ts, not the route layer — future workers should read that file first"
-  ],
-  proceduresFollowed: {
-    readArchitectureMd: true,
-    ranBaselineTests: true,
-    noDirectDependencyEdits: true
-  }
-)
-```
-
-### Field rules
-
-**`implemented`**
-- One entry per file or logical unit changed
-- Include the file path and a short description of what changed
-- Never leave empty unless the task genuinely produced no output
-
-**`leftUndone`**
-- Be honest — this is the most valuable field for the next worker
-- Include the reason why something was not done
-- Empty array only if genuinely nothing was left undone
-
-**`commands`**
-- Record every command run, in execution order
-- Use the full command as run, including flags and arguments
-- Record the actual exit code — do not normalize failures to 0
-
-**`issues`**
-- Discoveries, gotchas, unexpected behaviours, or structural findings
-- Anything that would have saved you time if a prior worker had told you
-- Empty array only if there are genuinely no issues to report
-
-**`proceduresFollowed`**
-These map directly to the rules in `AGENTS.md`:
-
-| Field | Rule |
-|---|---|
-| `readArchitectureMd` | Read `apps/api/ARCHITECTURE.md` before editing API code |
-| `ranBaselineTests` | Run the two-phase test strategy after making changes: targeted file + smoke tests + typecheck. Do NOT run the full suite per-task. |
-| `noDirectDependencyEdits` | Use `bun install` / `bun remove` — never edit `package.json` or `bun.lock` directly |
-
-If a procedure was not applicable (e.g. no API code was touched), set the boolean to `true` and explain in `note`. Only set `false` if the procedure was applicable but was not followed — and always explain why in `note`.
-
----
-
-## Scrutiny Validator
-
-After every completed task, spawn a **Scrutiny Validator** subagent. This is not optional — every task must pass validation before the next task starts.
-
-### What the validator does
-
-1. **Quality gate** — two-phase test strategy (fast, targeted — do NOT run the full suite):
-
-   **Phase 1 — Targeted (always run):** run only the file(s) modified by the task:
-   ```bash
-   bun test <modified-test-file>   # e.g. bun test test/integration/auth-adversarial.test.ts
-   ```
-
-   **Phase 2 — Smoke test (always run):** run fast non-integration tests to catch obvious cross-cutting regressions:
-   ```bash
-   bun test test/integration/health.test.ts test/integration/static.test.ts test/unit/architecture-boundaries.test.ts
-   ```
-
-   **Typecheck (always run):**
-   ```bash
-   bun run check
-   ```
-
-   **Lint (run if script exists, skip with a note if not):**
-   ```bash
-   bun run lint
-   ```
-
-   > The full suite is **not** run per-task — it is reserved for the mandatory milestone-end verification in Step 3 (scoped to affected workspaces). Running it per-task is too expensive for integration-heavy suites.
-
-2. **Code review** — review only the diff introduced by the just-completed task (not the full file). Assess each finding with a severity:
-   - `critical` — correctness bug or security hole
-   - `major` — type unsafety, incorrect assertion, misleading invariant
-   - `minor` — hygiene, missing assertion, connection leak
-   - `nit` — duplication, comment accuracy, weak assertion
-
-### Verdict rules
-
-| Verdict | Condition | Action |
-|---------|-----------|--------|
-| `PASS` | Quality gate clean, no critical/major findings | Proceed to next task |
-| `PASS WITH NOTES` | Quality gate clean, only minor/nit findings | Record findings in task notes, proceed |
-| `FAIL` | Quality gate fails **or** any critical/major finding | Spawn Fix subagent, re-validate |
-
-### Scrutiny Validator prompt template
-
-Use this template when spawning the validator. Fill in `<TASK_ID>`, `<TASK_TITLE>`, `<MODIFIED_FILES>`, and `<DIFF>`:
-
-```
-You are the Scrutiny Validator for task <TASK_ID>: "<TASK_TITLE>".
-
-## Step 1 — Quality gate (two-phase — do NOT run the full suite)
-
-Run from the relevant app directory (e.g. apps/api/):
-
-Phase 1 — Targeted (only the modified files):
-  bun test <MODIFIED_FILES>   e.g. bun test test/integration/auth-adversarial.test.ts
-
-Phase 2 — Smoke test (fast non-integration tests):
-  bun test test/integration/health.test.ts test/integration/static.test.ts test/unit/architecture-boundaries.test.ts
-
-Typecheck:
-  bun run check
-
-Lint (skip with a note if the script does not exist):
-  bun run lint
-
-Record every command and its exit code.
-
-## Step 2 — Code review
-Review only the diff below. Do not review the full file.
-Assess each finding with severity: critical | major | minor | nit.
-
-<DIFF>
-
-## Step 3 — Verdict
-Return one of:
-  PASS          — quality gate clean, no critical/major findings
-  PASS WITH NOTES — quality gate clean, only minor/nit findings
-  FAIL          — quality gate fails OR any critical/major finding
-
-## Report format
-1. Quality gate results (pass/fail per command, errors quoted verbatim)
-2. Code review findings (severity, file:line, description, suggested fix)
-3. Overall verdict: PASS | PASS WITH NOTES | FAIL
-```
-
-### Fix subagent
-
-When the validator returns `FAIL`:
-1. Mark the task `in_progress`
-2. Spawn a Fix subagent with the validator's full findings as input
-3. After the fix subagent completes, re-spawn the Scrutiny Validator
-4. Repeat until `PASS` or `PASS WITH NOTES`
-
----
-
-## Failure Handling
-
-| Situation | Action |
-|---|---|
-| Task failed, retryable | Mark `failed` with notes, re-delegate |
-| Task failed, non-blocking | Mark `skipped` with reason, continue |
-| Task failed, blocks milestone | Stop, report to user, wait for guidance |
-| Subagent returns partial result | Mark `in_progress`, delegate a follow-up task |
-| Scrutiny Validator returns FAIL | Mark `in_progress`, spawn Fix subagent, re-validate |
-
----
-
-## ID Conventions
-
-| Level | Format | Example |
-|---|---|---|
-| Milestone | `m<N>` | `m1`, `m2`, `m3` |
-| Task | `m<N>t<N>` | `m1t1`, `m1t2`, `m2t3` |
-
-Keep IDs short and stable. Do not reuse IDs within a mission.
-
----
-
-## Status Reference
-
-| Status | Meaning |
-|---|---|
-| `pending` | Not started |
-| `in_progress` | Delegated to a subagent, awaiting result |
-| `completed` | Subagent returned a successful result |
-| `failed` | Subagent could not complete the task |
-| `skipped` | Intentionally bypassed |
-
-Milestone and mission status are **derived automatically** — never set them directly.
+**Completion criterion:** mission-end verification has a recorded result for every affected workspace, `mission_summary` shows no unresolved task failures, and the user receives the final outcome.
 
 ---
 
 ## Quick Reference
 
 ```
-── Orchestrator ──────────────────────────────────────────────
-Plan the mission     → load plan-mission skill first    ← hard prerequisite
-Start mission        → mission_init(title, milestones)  ← only after user approves plan
-Before delegate      → mission_update_task(id, "in_progress")
-Read prior handoffs  → mission_read_handoffs()              ← current milestone
-After subagent done  → mission_read_handoffs(taskId: id)    ← specific task
-Record outcome       → mission_update_task(id, "completed"|"failed", notes)
-After every complete → spawn Scrutiny Validator             ← always, no exceptions
-  PASS/NOTES         → mission_update_task(id, notes append "[Scrutiny: PASS]")
-  FAIL               → mission_update_task(id, "in_progress"), spawn Fix subagent
-End of milestone     → bun test (affected workspaces only) ← mandatory before mission_summary
-Check progress       → mission_summary()
-Full state           → mission_read()
+-- Orchestrator ------------------------------------------------
+Plan first         -> load plan-mission -> get approval + verification mode
+Check existing     -> always mission_read() before mission_init
+Start mission      -> mission_init(title, milestones)
+Before delegate    -> mission_update_task(id, "in_progress")
+Confirm clean tree -> before first code-changing task
+Record diff base   -> current Git state for the task
+Read handoffs      -> mission_read() + mission_read_handoffs()
+After worker done  -> mission_read_handoffs(taskId: id)
+Derive task diff   -> every implemented path accounted for
+Validate task      -> spawn Scrutiny Validator before completed status
+Record outcome     -> mission_update_task(id, "completed"|"failed"|"skipped", notes)
+Milestone review   -> mode-aware verification for affected workspaces
+Mission complete   -> mission-end verification, then mission_summary()
 
-── Subagent / Scrutiny Validator (per-task tests) ────────────
-Targeted tests       → bun test <modified-file>
-Smoke tests          → bun test test/integration/health.test.ts test/integration/static.test.ts test/unit/architecture-boundaries.test.ts
-Typecheck            → bun run check
-Full suite           → NEVER per-task; only at milestone end
-
-── Subagent (last action before returning) ───────────────────
-Report handoff       → mission_handoff(taskId, taskTitle, milestoneId, ...)
+-- Worker subagent ---------------------------------------------
+Run lean proof     -> smallest verification that proves the change
+Keep test count low -> prefer existing coverage or 1-3 targeted tests
+Last action        -> mission_handoff(...)
 ```
-
----
 
 ## Red Flags
 
-**Never:**
-- Call `mission_update_task` from a subagent — only the orchestrator updates state
-- Skip `mission_handoff` at the end of a task — the orchestrator depends on it
-- Skip `mission_init` — subagents call `mission_read` and expect the file to exist
-- Add milestones or tasks after `mission_init` — define the full structure upfront
-- Proceed past a failed milestone without an explicit decision
-- Leave `leftUndone` or `issues` empty as a shortcut — empty arrays must reflect reality
-- Skip the Scrutiny Validator after a completed task — it is mandatory, not optional
-- Proceed to the next task while the validator verdict is `FAIL`
-- Call `mission_init` without first completing the `plan-mission` skill and receiving user approval
+Never:
+- Call `mission_update_task` from a worker subagent.
+- Skip `mission_handoff` at the end of a worker task.
+- Overwrite an active mission without explicit user approval.
+- Override the verification mode from the approved plan without explicit user approval.
+- Mark a task `completed` before validator `PASS` or `PASS WITH NOTES`.
+- Add task IDs after `mission_init`.
+- Turn every task into a large new test matrix by default.
+- Rerun the full verification stack in the validator when review evidence is already sufficient.
+- Run root-wide test commands when a narrower affected-workspace command exists.
 
-**Always:**
-- Mark a task `in_progress` before delegating it
-- Include `mission_read` output in every subagent prompt
-- Include `mission_read_handoffs` output in every subagent prompt
-- Instruct every subagent to call `mission_handoff` before reporting back
-- Read the handoff with `mission_read_handoffs(taskId)` before calling `mission_update_task`
-- Spawn the Scrutiny Validator immediately after marking a task `completed`
-- Append the validator verdict (`[Scrutiny: PASS]`, `[Scrutiny: PASS WITH NOTES]`, or `[Scrutiny: FAIL → fixed]`) to the task notes
-- Call `mission_summary` after each milestone to verify progress before continuing
-- Set `proceduresFollowed` fields honestly — use `note` to explain any false value
+Always:
+- Get an approved plan and verification mode first.
+- Confirm a clean worktree before delegating the first code-changing task.
+- Record the task's Git diff base before delegating code-changing work.
+- Account for every implemented path in the task diff or explain why no diff exists.
+- Include `mission_read` and `mission_read_handoffs` context in worker prompts.
+- Tell worker subagents to follow `AGENTS.md`.
+- Tell worker subagents to use the selected task-level verification mode.
+- Keep verification proportional to risk.
+- Append validator verdicts to task notes.

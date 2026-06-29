@@ -1,113 +1,112 @@
 ---
 name: commit
-description: Git commit workflow using conventional commit messages. Use this when asked to make commits.
+description: Create conventional git commits for the current work.
+disable-model-invocation: true
 ---
 
-# Commit Changes Skill
+# Commit
 
-## Overview
+Create git commits after the user has explicitly asked for a commit. Run the workflow without an extra confirmation step unless the commit boundaries are ambiguous.
 
-Create git commits for changes made during a session with user approval and no Claude attribution. Every commit must include a body that explains why the change was made so later agents can understand the intent behind the diff.
+## Rules
 
-## Context
-
-- You are tasked with creating meaningful git commits for all changes
-- The user trusts your judgment on grouping related changes
-- Commits must be authored solely by the user
-- All changes should follow conventional commit message style
-- Every commit must include a non-empty body that captures the rationale for the change
+- Commit only when the user has explicitly asked you to commit.
+- Inspect `git status`, `git diff`, and `git log --oneline -10` before committing.
+- Stage only intended files with explicit `git add <path ...>` commands. Never use `git add .` or `git add -A`.
+- Do not stage or commit unrelated dirty files.
+- Use conventional commit messages with a scope.
+- Every commit must include a non-empty body that explains why the change was made.
+- Write commit messages in the user's voice.
+- Do not add tool or vendor attribution.
+- Do not add co-author lines.
 
 ## Workflow
 
-### Step 1: Review Changes
+### Step 1: Inspect
 
-- Review the conversation history to understand what was accomplished
-- Run `git status` to see current changes
-- Run `git diff` to understand the modifications
-- Determine if changes should be one commit or multiple logical commits
+- Review the conversation history to understand what changed and why.
+- Run `git status`.
+- Run `git diff`.
+- Run `git log --oneline -10`.
+- Identify whether the worktree contains unrelated changes you must leave untouched.
 
-### Step 2: Plan Commits
+Done when you can name every file you plan to commit and every dirty file you plan to leave out.
 
-- Identify which files belong together logically
-- Draft clear, descriptive commit messages using imperative mood
-- Draft both a conventional commit subject and a short body
-- Focus on why the changes were made, not just what
-- Make the body explain at least one of: the problem being solved, the new use case being supported, the reason something was removed, or the constraint/tradeoff that motivated the change
-- Follow the Conventional Commit format with scope notation
+### Step 2: Partition
 
-### Step 3: Present Plan to User
+- Group the intended changes into one or more atomic commits.
+- Keep related files together.
+- Exclude unrelated files from every commit.
+- If a file contains mixed unrelated edits that cannot be safely committed together, stop and ask the user how to split it.
+- If there are multiple reasonable commit groupings and the correct boundary is unclear from the conversation, stop and ask the user.
 
-- List the files you plan to add for each commit
-- Show the full commit message(s), including body, you'll use
-- Ask for confirmation: "I plan to create [N] commit(s) with these changes. Shall I proceed?"
+Done when every changed file is assigned to exactly one planned commit or explicitly excluded with a reason.
 
-### Step 4: Execute Upon Confirmation
+### Step 3: Draft
 
-- Use `git add` with specific files (never use `-A` or `.`)
-- Create commits with the planned messages
-- Show results with `git log --oneline -n [number]`
+- Draft a conventional commit subject for each planned commit.
+- Use a scope that matches the area being changed.
+- Write a short body that explains the motivation, user need, bug, constraint, or tradeoff behind the change.
 
-## Conventions
+Done when each planned commit has a subject and a non-empty body that explains why, not just what.
 
-### Commit Message Format
+### Step 4: Execute
 
-```
+- Stage only the files for the first planned commit with explicit `git add` paths.
+- Create the commit.
+- Repeat for remaining planned commits.
+
+Done when all planned commits have been created and no excluded files were staged.
+
+### Step 5: Verify
+
+- Run `git status`.
+- Run `git log --oneline -n <count>` for the number of commits you created.
+- Report the created commits and any remaining uncommitted files.
+
+Done when you have verified the new commits exist and surfaced any leftover worktree changes.
+
+## Commit Format
+
+```text
 <type>(<scope>): <subject>
 
 <body>
 ```
 
-### Body Requirements
+## Message Rules
 
-- Every commit must include a non-empty body
-- The body must explain why the change was made, not just restate what changed
-- Prefer 1-3 short sentences in natural language
-- Include useful context for future agents and reviewers, such as:
-  - the bug, limitation, or user need that motivated the change
-  - the reason something was added, removed, or refactored
-  - any important tradeoff, constraint, or follow-up implication
-- For removals, explain why the old behavior or code was no longer wanted
-- For additions, explain the use case or capability being introduced
-- For modifications, explain what was insufficient or broken about the previous behavior
+- Prefer 1-3 short sentences in the body.
+- Explain why the previous behavior, structure, or state was insufficient.
+- For additions, explain the use case or capability being introduced.
+- For removals, explain why the old behavior or code was no longer wanted.
 
-### Type Prefixes
+## Types
 
-- `feat`: A new feature
-- `fix`: A bug fix
-- `docs`: Documentation changes
-- `chore`: Other changes
-- `refactor`: Code changes that neither fix a bug nor add a feature
-- `test`: Adding or updating tests
+- `feat`: new feature
+- `fix`: bug fix
+- `docs`: documentation change
+- `chore`: maintenance or project housekeeping
+- `refactor`: structural code change without feature or bug behavior change
+- `test`: test change
 
-### Scope Format
+## Scopes
 
-- For changes affecting the api, use: `(api/[topic])`
-- For changes affecting the web, use: `(web/[topic])`
-- For changes affecting shared contracts, use: `(contracts/[topic])`
+- API changes: `(api/[topic])`
+- Web changes: `(web/[topic])`
+- Shared contracts: `(contracts/[topic])`
 
-Examples of valid scopes:
+Examples:
 
 - `(api/authentication)`
 - `(web/dashboard)`
 - `(web/components/button)`
 
-### Message Example
+## Example
 
 `feat(web/excel-upload): add excel upload validation`
-
-Example body:
 
 ```text
 Prevent invalid spreadsheet formats from reaching the import flow.
 This gives users earlier feedback in the UI and reduces avoidable backend validation failures.
 ```
-
-## Important Constraints
-
-- **User-only authorship**: Commits must be authored solely by the user
-- **No attribution**: Do not include "Generated with Claude" messages
-- **No co-authoring**: Do not add "Co-Authored-By" lines
-- **Natural voice**: Write commit messages as if the user wrote them
-- **Atomic commits**: Group related changes together; keep commits focused
-- **Conventional style**: Always use the conventional commit format
-- **Required rationale**: Always include a body that explains why something was changed, added, or removed

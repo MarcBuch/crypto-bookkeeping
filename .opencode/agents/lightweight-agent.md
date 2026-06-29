@@ -4,7 +4,7 @@ description: Lightweight subagent for fast, focused tasks, short edits, single-f
   general agent when the task is self-contained and does not require
   multi-step reasoning or broad codebase exploration.
 mode: subagent
-model: github-copilot/claude-haiku-4.5
+model: github-copilot/gpt-5.4-mini
 temperature: 0.1
 tools:
   write: true

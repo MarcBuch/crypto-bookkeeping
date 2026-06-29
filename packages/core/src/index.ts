@@ -40,6 +40,7 @@ export {
   getAllClosedHedgeEvents,
   upsertSyncedTaxTransaction,
   createManualTaxTransaction,
+  countTaxTransactions,
   getTaxTransaction,
   listTaxTransactions,
   listGermanTaxableTransactions,

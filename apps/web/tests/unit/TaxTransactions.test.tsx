@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { TaxTransaction } from "../../src/api";
-import { taxTransactionQueryKeys } from "../../src/hooks/useTaxTransactions";
 import {
   buildManualTaxTransactionCreateInput,
   buildManualTaxTransactionUpdate,
@@ -22,6 +21,7 @@ import {
   taxCommentDraftState,
   taxTransactionLabelOptions,
   submitManualTaxTransactionForm,
+  updateTaxLedgerRowsPerPage,
   TransactionHashLink,
   updateTaxTransactionGroup,
 } from "../../src/TaxTransactions";
@@ -101,16 +101,75 @@ describe("tax transactions rendering", () => {
   });
 
   it("renders the tax screen with cached empty transactions", () => {
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(taxTransactionQueryKeys.list({ limit: 200 }), []);
-
-    const html = renderTaxScreen(queryClient);
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[]}
+        pagination={{ limit: 200, offset: 0, label: null, total: 0 }}
+        page={0}
+        rowsPerPage={200}
+        updateTransaction={() => undefined}
+        setPage={() => undefined}
+        setRowsPerPage={() => undefined}
+      />,
+    );
 
     expect(html).toContain("Synced Transactions");
     expect(html).toContain("Add manual transaction");
     expect(html).toContain("Sync blockchain data");
     expect(html).toContain("No tax transactions synced");
     expect(html).not.toContain("Loading tax transactions");
+  });
+
+  it("renders blotter pagination controls and disables edge buttons", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        pagination={{ limit: 50, offset: 0, label: null, total: 125 }}
+        page={0}
+        rowsPerPage={50}
+        updateTransaction={() => undefined}
+        setPage={() => undefined}
+        setRowsPerPage={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Rows per page"');
+    expect(html).toContain('Showing 1-50 of 125');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('Previous');
+    expect(html).toContain('Next');
+  });
+
+  it("shows the current page range and enables both navigation buttons in the middle", () => {
+    const html = renderToStaticMarkup(
+      <TaxTransactionLedger
+        transactions={[taxTransaction]}
+        pagination={{ limit: 50, offset: 50, label: null, total: 125 }}
+        page={1}
+        rowsPerPage={50}
+        updateTransaction={() => undefined}
+        setPage={() => undefined}
+        setRowsPerPage={() => undefined}
+        isUpdating={false}
+      />,
+    );
+
+    expect(html).toContain('Showing 51-100 of 125');
+    expect(html).toContain('>Previous<');
+    expect(html).toContain('>Next<');
+    expect(html).not.toContain('disabled="" type="button">Previous');
+    expect(html).not.toContain('disabled="" type="button">Next');
+  });
+
+  it("resets to the first page when rows per page changes", () => {
+    const setPage = mock(() => undefined);
+    const setRowsPerPage = mock(() => undefined);
+
+    updateTaxLedgerRowsPerPage(100, setPage, setRowsPerPage);
+
+    expect(setPage).toHaveBeenCalledWith(0);
+    expect(setRowsPerPage).toHaveBeenCalledWith(100);
   });
 
   it("renders the manual tax transaction form fields", () => {
@@ -1012,7 +1071,7 @@ describe("tax transactions rendering", () => {
       />,
     );
 
-    expect(html.match(/<select/g)?.length).toBe(2);
+    expect(html.match(/<select/g)?.length).toBe(3);
     expect(html.match(/<textarea/g)?.length).toBe(2);
     expect(html.match(/Save comment/g)?.length).toBe(2);
   });

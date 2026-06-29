@@ -447,11 +447,17 @@ describe("API client", () => {
     mockFetch((url, init) => {
       expect(init?.method).toBeUndefined();
       expect(url).toBe("http://localhost:3000/tax/transactions?limit=10&offset=5&label=Trade");
-      return jsonResponse({ transactions: [taxTransaction] });
+      return jsonResponse({
+        transactions: [taxTransaction],
+        pagination: { limit: 10, offset: 5, label: "Trade", total: 1 },
+      });
     });
 
     const result = await getTaxTransactions({ limit: 10, offset: 5, label: "Trade" });
-    expect(result).toEqual([taxTransaction]);
+    expect(result).toEqual({
+      transactions: [taxTransaction],
+      pagination: { limit: 10, offset: 5, label: "Trade", total: 1 },
+    });
   });
 
   it("fetches tax transactions filtered by Approval label", async () => {
@@ -459,21 +465,50 @@ describe("API client", () => {
     mockFetch((url, init) => {
       expect(init?.method).toBeUndefined();
       expect(url).toBe("http://localhost:3000/tax/transactions?label=Approval");
-      return jsonResponse({ transactions: [approvalTaxTransaction] });
+      return jsonResponse({
+        transactions: [approvalTaxTransaction],
+        pagination: { limit: 200, offset: 0, label: "Approval", total: 1 },
+      });
     });
 
     const result = await getTaxTransactions({ label: "Approval" });
-    expect(result).toEqual([approvalTaxTransaction]);
+    expect(result).toEqual({
+      transactions: [approvalTaxTransaction],
+      pagination: { limit: 200, offset: 0, label: "Approval", total: 1 },
+    });
+  });
+
+  it("accepts null pagination labels for unfiltered tax transactions", async () => {
+    mockFetch((url, init) => {
+      expect(init?.method).toBeUndefined();
+      expect(url).toBe("http://localhost:3000/tax/transactions");
+      return jsonResponse({
+        transactions: [taxTransaction],
+        pagination: { limit: 50, offset: 0, label: null, total: 1 },
+      });
+    });
+
+    const result = await getTaxTransactions();
+    expect(result).toEqual({
+      transactions: [taxTransaction],
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
   });
 
   it("omits null tax labels while preserving zero offset and provided limit", async () => {
     mockFetch((url) => {
       expect(url).toBe("http://localhost:3000/tax/transactions?limit=25&offset=0");
-      return jsonResponse({ transactions: [] });
+      return jsonResponse({
+        transactions: [],
+        pagination: { limit: 25, offset: 0, label: null, total: 0 },
+      });
     });
 
     const result = await getTaxTransactions({ limit: 25, offset: 0, label: null });
-    expect(result).toEqual([]);
+    expect(result).toEqual({
+      transactions: [],
+      pagination: { limit: 25, offset: 0, label: null, total: 0 },
+    });
   });
 
   it("throws when tax transactions response lacks a transactions array", async () => {
@@ -486,6 +521,16 @@ describe("API client", () => {
     });
   });
 
+  it("throws when tax transactions response lacks pagination", async () => {
+    mockFetch(() => jsonResponse({ transactions: [taxTransaction] }));
+
+    const error = await captureError(getTaxTransactions());
+    expect(error).toMatchObject({
+      name: "ApiError",
+      message: "API response did not include tax transactions pagination.",
+    });
+  });
+
   it("throws when tax transactions response has null transactions", async () => {
     mockFetch(() => jsonResponse({ transactions: null }));
 
@@ -495,7 +540,12 @@ describe("API client", () => {
   });
 
   it("throws when tax transactions contain missing id or hash", async () => {
-    mockFetch(() => jsonResponse({ transactions: [{ ...taxTransaction, hash: undefined }] }));
+    mockFetch(() =>
+      jsonResponse({
+        transactions: [{ ...taxTransaction, hash: undefined }],
+        pagination: { limit: 200, offset: 0, label: null, total: 1 },
+      }),
+    );
 
     const error = await captureError(getTaxTransactions());
     expect(error).toBeInstanceOf(Error);

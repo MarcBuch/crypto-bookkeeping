@@ -5,6 +5,7 @@ import {
   getTaxTransactions,
   syncTaxTransactions,
   updateTaxTransaction,
+  type TaxTransactionsResponse,
   type ManualTaxTransactionCreateInput,
   type TaxTransactionUpdate,
   type TaxTransactionsOptions,
@@ -22,6 +23,8 @@ export function useTaxTransactions(options: TaxTransactionsOptions = {}) {
     queryFn: () => getTaxTransactions(options),
   });
 }
+
+export type UseTaxTransactionsResult = TaxTransactionsResponse;
 
 export function useSyncTaxTransactions() {
   const queryClient = useQueryClient();

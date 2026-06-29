@@ -1,5 +1,6 @@
 import {
   createManualTaxTransaction,
+  countTaxTransactions,
   getTaxSyncState,
   getTaxTransaction,
   getTaxTransactionsNeedingEurEnrichment,
@@ -20,6 +21,7 @@ import {
 
 type TaxLedgerStoreDeps = {
   createManualTaxTransaction: typeof createManualTaxTransaction;
+  countTaxTransactions: typeof countTaxTransactions;
   getTaxSyncState: typeof getTaxSyncState;
   getTaxTransaction: typeof getTaxTransaction;
   getTaxTransactionsNeedingEurEnrichment: typeof getTaxTransactionsNeedingEurEnrichment;
@@ -41,6 +43,7 @@ export interface TaxLedgerStore {
     offset?: number,
     label?: TaxTransactionLabelFilter,
   ): StoredTaxTransaction[];
+  countTransactions(label?: TaxTransactionLabelFilter): number;
   listGermanTaxableTransactions(limit?: number, offset?: number): StoredTaxTransaction[];
   listTransactionsNeedingGermanTaxReview(limit?: number, offset?: number): StoredTaxTransaction[];
   updateTransaction(id: string, update: TaxTransactionUpdate): StoredTaxTransaction | null;
@@ -69,6 +72,10 @@ export function createTaxLedgerStore(deps: TaxLedgerStoreDeps): TaxLedgerStore {
 
     listTransactions(limit, offset, label) {
       return deps.listTaxTransactions(limit, offset, label);
+    },
+
+    countTransactions(label) {
+      return deps.countTaxTransactions(label);
     },
 
     listGermanTaxableTransactions(limit, offset) {
@@ -103,6 +110,7 @@ export function createTaxLedgerStore(deps: TaxLedgerStoreDeps): TaxLedgerStore {
 
 export const sqliteTaxLedgerStore = createTaxLedgerStore({
   createManualTaxTransaction,
+  countTaxTransactions,
   getTaxSyncState,
   getTaxTransaction,
   getTaxTransactionsNeedingEurEnrichment,

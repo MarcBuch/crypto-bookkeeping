@@ -1,5 +1,6 @@
 import {
   createManualTaxTransaction,
+  countTaxTransactions,
   enrichTaxTransactionsEurValues,
   listTaxTransactions,
   syncTaxTransactions,
@@ -134,6 +135,13 @@ const manualTaxTransactionIntegerFields = [
 ] as const;
 const manualTaxTransactionPatchStringFields = manualTaxTransactionStringFields;
 const maxTaxTransactionCommentLength = 1000;
+
+type TaxTransactionPagination = {
+  limit: number;
+  offset: number;
+  label: "Trade" | "Transfer" | "Approval" | undefined;
+  total: number | null;
+};
 
 type ManualTaxTransactionStringField = (typeof manualTaxTransactionStringFields)[number];
 type ManualTaxTransactionIntegerField = (typeof manualTaxTransactionIntegerFields)[number];
@@ -416,7 +424,15 @@ export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const transactions = listTaxTransactions(limit, offset, label);
-      return { transactions };
+      const total = countTaxTransactions(label);
+      const pagination: TaxTransactionPagination = {
+        limit,
+        offset,
+        label: label ?? null,
+        total,
+      };
+
+      return { transactions, pagination };
     },
   );
 

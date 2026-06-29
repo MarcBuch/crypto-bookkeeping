@@ -157,6 +157,18 @@ export interface TaxTransactionsOptions {
   label?: TaxTransactionLabel;
 }
 
+export interface TaxTransactionsPagination {
+  limit: number;
+  offset: number;
+  label: TaxTransactionLabel;
+  total: number;
+}
+
+export interface TaxTransactionsResponse {
+  transactions: TaxTransaction[];
+  pagination: TaxTransactionsPagination;
+}
+
 export interface TaxTransactionUpdate {
   hash?: string;
   block_number?: number | null;
@@ -358,7 +370,7 @@ export async function getDashboardPositions(): Promise<{
 
 export async function getTaxTransactions(
   options: TaxTransactionsOptions = {},
-): Promise<TaxTransaction[]> {
+): Promise<TaxTransactionsResponse> {
   const params = new URLSearchParams();
   if (options.limit !== undefined) {
     params.set("limit", options.limit.toString());
@@ -371,7 +383,10 @@ export async function getTaxTransactions(
   }
 
   const query = params.toString();
-  const data = await fetchJson<{ transactions?: unknown }>(
+  const data = await fetchJson<{
+    transactions?: unknown;
+    pagination?: unknown;
+  }>(
     `/tax/transactions${query ? `?${query}` : ""}`,
   );
 
@@ -383,7 +398,24 @@ export async function getTaxTransactions(
     throw new ApiError("API response included malformed tax transactions.");
   }
 
-  return data.transactions;
+  if (!isObject(data.pagination)) {
+    throw new ApiError("API response did not include tax transactions pagination.");
+  }
+
+  const { limit, offset, label, total } = data.pagination;
+  if (
+    typeof limit !== "number" ||
+    typeof offset !== "number" ||
+    typeof total !== "number" ||
+    (label !== null && label !== "Trade" && label !== "Transfer" && label !== "Approval")
+  ) {
+    throw new ApiError("API response included malformed tax transactions pagination.");
+  }
+
+  return {
+    transactions: data.transactions,
+    pagination: { limit, offset, label, total },
+  };
 }
 
 export async function syncTaxTransactions(): Promise<TaxSyncSummary> {

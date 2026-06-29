@@ -14,6 +14,7 @@ import { createHedgeStore } from "../db/hedge-store.js";
 import {
   closeHedgeEvent,
   createManualTaxTransaction,
+  countTaxTransactions,
   getAllClosedHedgeEvents,
   getAllPositions,
   getEarliestHedgeSnapshot,
@@ -42,6 +43,7 @@ import { getHistoricalPrice } from "./pricing.js";
 function getTaxLedgerStore() {
   return createTaxLedgerStore({
     createManualTaxTransaction,
+    countTaxTransactions,
     getTaxSyncState,
     getTaxTransaction,
     getTaxTransactionsNeedingEurEnrichment,

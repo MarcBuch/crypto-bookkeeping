@@ -15,6 +15,7 @@ import type {
   TaxTransaction,
   TaxTransactionLabel,
   TaxTransactionUpdate,
+  TaxTransactionsResponse,
 } from "./api";
 import {
   useCreateTaxTransaction,
@@ -347,6 +348,15 @@ function manualFieldLabel(field: string): string {
     .join(" ");
 }
 
+export function updateTaxLedgerRowsPerPage(
+  nextRowsPerPage: number,
+  setPage?: (page: number) => void,
+  setRowsPerPage?: (rowsPerPage: number) => void,
+) {
+  setPage?.(0);
+  setRowsPerPage?.(nextRowsPerPage);
+}
+
 export function submitManualTaxTransactionForm({
   form,
   createTransaction,
@@ -472,7 +482,12 @@ export function updateTaxTransactionGroup(
 }
 
 export function TaxTransactions() {
-  const { data: transactions, error, isLoading, isFetching } = useTaxTransactions({ limit: 200 });
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
+  const { data, error, isLoading, isFetching } = useTaxTransactions({
+    limit: rowsPerPage,
+    offset: page * rowsPerPage,
+  });
   const createMutation = useCreateTaxTransaction();
   const syncMutation = useSyncTaxTransactions();
   const updateMutation = useUpdateTaxTransaction();
@@ -482,15 +497,20 @@ export function TaxTransactions() {
       <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
         {isLoading ? <TaxLoadingState /> : null}
         {error ? <TaxErrorState error={error} /> : null}
-        {!isLoading && !error && transactions ? (
+        {!isLoading && !error && data ? (
           <TaxTransactionLedger
-            transactions={transactions}
+            transactions={data.transactions}
+            pagination={data.pagination}
+            page={page}
+            rowsPerPage={rowsPerPage}
             createTransaction={(input, options) => createMutation.mutate(input, options)}
             createError={createMutation.error}
             isCreating={createMutation.isPending}
             isCreateSuccess={createMutation.isSuccess}
             syncMutation={syncMutation}
             isSyncFetching={isFetching && !isLoading}
+            setPage={setPage}
+            setRowsPerPage={setRowsPerPage}
             updateTransaction={(id, update) => updateMutation.mutate({ id, update })}
             updateError={updateMutation.error}
             isUpdating={updateMutation.isPending}
@@ -503,6 +523,9 @@ export function TaxTransactions() {
 
 export function TaxTransactionLedger({
   transactions,
+  pagination,
+  page,
+  rowsPerPage,
   createTransaction = () => undefined,
   createError,
   isCreating,
@@ -512,11 +535,16 @@ export function TaxTransactionLedger({
   updateTransaction,
   updateError,
   isUpdating,
+  setPage,
+  setRowsPerPage,
   defaultExpandedGroups = [],
   defaultSorting,
   defaultColumnVisibility,
 }: {
   transactions: TaxTransaction[];
+  pagination?: TaxTransactionsResponse["pagination"];
+  page?: number;
+  rowsPerPage?: number;
   createTransaction?: CreateManualTaxTransaction;
   createError?: unknown;
   isCreating?: boolean;
@@ -533,6 +561,8 @@ export function TaxTransactionLedger({
   updateTransaction: UpdateTaxTransaction;
   updateError?: unknown;
   isUpdating?: boolean;
+  setPage?: (page: number) => void;
+  setRowsPerPage?: (rowsPerPage: number) => void;
   defaultExpandedGroups?: string[];
   defaultSorting?: SortingState;
   defaultColumnVisibility?: VisibilityState;
@@ -589,6 +619,15 @@ export function TaxTransactionLedger({
     meta: { updateTransaction, isUpdating } satisfies TableMeta,
   });
 
+  const paginationTotal = pagination?.total ?? transactions.length;
+  const currentPage = page ?? 0;
+  const currentRowsPerPage = rowsPerPage ?? 50;
+  const lastPage = Math.max(Math.ceil(paginationTotal / currentRowsPerPage) - 1, 0);
+  const currentStart = paginationTotal === 0 ? 0 : Math.min(currentPage * currentRowsPerPage + 1, paginationTotal);
+  const currentEnd = paginationTotal === 0 ? 0 : Math.min((currentPage + 1) * currentRowsPerPage, paginationTotal);
+  const canGoPrevious = currentPage > 0;
+  const canGoNext = currentPage < lastPage;
+
   return (
     <section className="overflow-x-clip rounded-3xl border border-neutral-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
@@ -628,37 +667,77 @@ export function TaxTransactionLedger({
       {transactions.length > 0 ? (
         <>
           <div className="relative mb-2 flex justify-end px-5 pt-3">
-            <button
-              type="button"
-              onClick={() => setShowColumnMenu((v) => !v)}
-              className="rounded border border-neutral-300 bg-white px-3 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-800"
-            >
-              Columns
-            </button>
-            {showColumnMenu && (
-              <div className="absolute top-10 right-5 z-10 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
-                {table.getAllLeafColumns().map((column) => (
-                  <label
-                    key={column.id}
-                    className="flex cursor-pointer items-center gap-2 py-1 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={
-                        typeof column.columnDef.header === "string"
-                          ? column.columnDef.header
-                          : column.id
-                      }
-                      checked={column.getIsVisible()}
-                      onChange={column.getToggleVisibilityHandler()}
-                    />
-                    {typeof column.columnDef.header === "string"
-                      ? column.columnDef.header
-                      : column.id}
-                  </label>
-                ))}
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm shadow-sm">
+              <label className="flex items-center gap-2 font-semibold text-neutral-600">
+                Rows per page
+                <select
+                  aria-label="Rows per page"
+                  className="rounded border border-neutral-300 bg-white px-2 py-1 font-semibold text-neutral-950"
+                  value={currentRowsPerPage}
+                  onChange={(event) => {
+                    updateTaxLedgerRowsPerPage(Number(event.target.value), setPage, setRowsPerPage);
+                  }}
+                >
+                  {[25, 50, 100, 200].map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="font-semibold text-neutral-600">
+                Showing {currentStart}-{currentEnd} of {paginationTotal}
               </div>
-            )}
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400"
+                  disabled={!canGoPrevious}
+                  type="button"
+                  onClick={() => setPage?.(Math.max(currentPage - 1, 0))}
+                >
+                  Previous
+                </button>
+                <button
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs font-bold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400"
+                  disabled={!canGoNext}
+                  type="button"
+                  onClick={() => setPage?.(Math.min(currentPage + 1, lastPage))}
+                >
+                  Next
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowColumnMenu((v) => !v)}
+                className="rounded border border-neutral-300 bg-white px-3 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-800"
+              >
+                Columns
+              </button>
+              {showColumnMenu && (
+                <div className="absolute top-10 right-5 z-10 rounded border border-neutral-300 bg-white p-3 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+                  {table.getAllLeafColumns().map((column) => (
+                    <label
+                      key={column.id}
+                      className="flex cursor-pointer items-center gap-2 py-1 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={
+                          typeof column.columnDef.header === "string"
+                            ? column.columnDef.header
+                            : column.id
+                        }
+                        checked={column.getIsVisible()}
+                        onChange={column.getToggleVisibilityHandler()}
+                      />
+                      {typeof column.columnDef.header === "string"
+                        ? column.columnDef.header
+                        : column.id}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="hidden lg:block">
             <table className="w-full table-fixed divide-y divide-neutral-200 text-sm">

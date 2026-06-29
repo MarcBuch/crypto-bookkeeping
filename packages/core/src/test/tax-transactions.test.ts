@@ -4,6 +4,7 @@ import { describe, it, expect } from "bun:test";
 import { getDb, resolveDbPath } from "../db/schema.js";
 import {
   createManualTaxTransaction,
+  countTaxTransactions,
   getTaxTransactionsNeedingGermanTaxReview,
   listGermanTaxableTransactions,
   getTaxSyncState,
@@ -659,6 +660,11 @@ describe("tax transaction persistence", () => {
       "unlabeled-1",
     ]);
     expect(listTaxTransactions(2, 1, "unlabeled").map((row) => row.id)).toEqual(["unlabeled-1"]);
+    expect(countTaxTransactions()).toBe(7);
+    expect(countTaxTransactions("Trade")).toBe(2);
+    expect(countTaxTransactions("Transfer")).toBe(2);
+    expect(countTaxTransactions("Approval")).toBe(1);
+    expect(countTaxTransactions("unlabeled")).toBe(2);
   });
 
   it("returns null when getting or updating an unknown id", () => {

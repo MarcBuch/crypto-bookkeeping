@@ -609,7 +609,28 @@ export function listTaxTransactions(
        ORDER BY time_stamp DESC, block_number DESC
         LIMIT ? OFFSET ?`,
     )
-    .all(limit, offset);
+      .all(limit, offset);
+}
+
+export function countTaxTransactions(label?: TaxTransactionLabelFilter): number {
+  const db = getDb();
+
+  if (label === "unlabeled") {
+    return db
+      .query<{ total: number }, []>("SELECT COUNT(*) AS total FROM tax_transactions WHERE label IS NULL")
+      .get()!.total;
+  }
+
+  if (label !== undefined) {
+    return db
+      .query<{ total: number }, [TaxTransactionLabelFilter]>(
+        "SELECT COUNT(*) AS total FROM tax_transactions WHERE label = ?",
+      )
+      .get(label)!.total;
+  }
+
+  return db.query<{ total: number }, []>("SELECT COUNT(*) AS total FROM tax_transactions").get()!
+    .total;
 }
 
 export function listGermanTaxableTransactions(limit = 100, offset = 0): StoredTaxTransaction[] {

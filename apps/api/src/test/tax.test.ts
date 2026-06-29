@@ -23,6 +23,7 @@ const fakeTransaction = {
 };
 
 let lastListArgs: unknown[] = [];
+let lastCountArgs: unknown[] = [];
 let lastSyncArgs: unknown[] = [];
 let lastUpdateArgs: unknown[] = [];
 let lastCreateArgs: unknown[] = [];
@@ -31,6 +32,7 @@ let allSyncArgs: unknown[][] = [];
 let allUpdateArgs: unknown[][] = [];
 let allCreateArgs: unknown[][] = [];
 let mockListTaxTransactions: (...args: unknown[]) => unknown = () => [fakeTransaction];
+let mockCountTaxTransactions: (...args: unknown[]) => unknown = () => 1;
 let mockSyncTaxTransactions: (...args: unknown[]) => unknown = () => ({
   scanned: 2,
   inserted: 1,
@@ -53,15 +55,12 @@ function expectJson(response: { json(): unknown }) {
 await mock.module("@lp-tracker/core", () => ({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
-  getPositionsView: async () => [],
+  syncLpData: async () => ({ synced: 0 }),
+  syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
   listCachedPositionViews: () => [],
   listCachedPnLViews: () => [],
   getPositionsCacheSyncedAt: () => null,
-  syncLpData: async () => ({ synced: 0 }),
-  syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
-  getPnLView: async () => [],
-  getILView: async () => [],
-  getHistoryView: async () => [],
+  getHedgeEvents: async () => [],
   getHedgeView: async () => ({
     tokenId: "42",
     coin: "HYPE",
@@ -77,13 +76,22 @@ await mock.module("@lp-tracker/core", () => ({
     closedAt: null,
     closeReason: null,
   }),
-  getHedgeEvents: async () => [],
+  getPnLView: async () => [],
+  getPosition: () => null,
+  createClient: () => ({ getBlock: async () => ({ timestamp: 0n }) }),
+  updateCachedPnLView: () => undefined,
   listHedgeEvents: () => [],
   assignHedgeEvent: () => null,
+  getILView: async () => [],
+  getHistoryView: async () => [],
   listTaxTransactions: (...args: unknown[]) => {
     lastListArgs = args;
     allListArgs.push(args);
     return mockListTaxTransactions(...args);
+  },
+  countTaxTransactions: (...args: unknown[]) => {
+    lastCountArgs = args;
+    return mockCountTaxTransactions(...args);
   },
   syncTaxTransactions: (...args: unknown[]) => {
     lastSyncArgs = args;
@@ -95,14 +103,6 @@ await mock.module("@lp-tracker/core", () => ({
     allUpdateArgs.push(args);
     return mockUpdateTaxTransaction(...args);
   },
-  createManualTaxTransaction: (...args: unknown[]) => {
-    lastCreateArgs = args;
-    allCreateArgs.push(args);
-    return mockCreateManualTaxTransaction(...args);
-  },
-  enrichTaxTransactionsEurValues: (...args: unknown[]) => {
-    return mockEnrichTaxTransactionsEurValues(...args);
-  },
   NotFoundError: class NotFoundError extends Error {},
   RpcError: class RpcError extends Error {
     code?: number;
@@ -112,6 +112,14 @@ await mock.module("@lp-tracker/core", () => ({
     }
   },
   ValidationError: class ValidationError extends Error {},
+  createManualTaxTransaction: (...args: unknown[]) => {
+    lastCreateArgs = args;
+    allCreateArgs.push(args);
+    return mockCreateManualTaxTransaction(...args);
+  },
+  enrichTaxTransactionsEurValues: (...args: unknown[]) => {
+    return mockEnrichTaxTransactionsEurValues(...args);
+  },
 }));
 
 let server: FastifyInstance;
@@ -124,6 +132,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   lastListArgs = [];
+  lastCountArgs = [];
   lastSyncArgs = [];
   lastUpdateArgs = [];
   lastCreateArgs = [];
@@ -132,6 +141,7 @@ beforeEach(() => {
   allUpdateArgs = [];
   allCreateArgs = [];
   mockListTaxTransactions = () => [fakeTransaction];
+  mockCountTaxTransactions = () => 1;
   mockSyncTaxTransactions = () => ({
     scanned: 2,
     inserted: 1,
@@ -154,8 +164,12 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(res.statusCode).toBe(200);
-    expectJson(res).toEqual({ transactions: [fakeTransaction] });
+    expectJson(res).toEqual({
+      transactions: [fakeTransaction],
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
     expect(lastListArgs).toEqual([50, 0, undefined]);
+    expect(lastCountArgs).toEqual([undefined]);
     expect(lastSyncArgs).toEqual([]);
   });
 
@@ -170,6 +184,7 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(200);
     expect(lastListArgs).toEqual([10, 5, "Transfer"]);
+    expect(lastCountArgs).toEqual(["Transfer"]);
   });
 
   it("clamps limit to 200", async () => {
@@ -179,6 +194,10 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(200);
     expect(lastListArgs[0]).toBe(200);
+    expectJson(res).toEqual({
+      transactions: [fakeTransaction],
+      pagination: { limit: 200, offset: 0, label: null, total: 1 },
+    });
   });
 
   it("rejects invalid label filters", async () => {
@@ -265,7 +284,10 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(res.statusCode).toBe(200);
-    expectJson(res).toEqual({ transactions: [] });
+    expectJson(res).toEqual({
+      transactions: [],
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
   });
 
   it("passes malformed transaction rows through without crashing", async () => {
@@ -278,7 +300,10 @@ describe("GET /tax/transactions", () => {
     const res = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(res.statusCode).toBe(200);
-    expectJson(res).toEqual({ transactions: malformedRows });
+    expectJson(res).toEqual({
+      transactions: malformedRows,
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
   });
 
   it("returns 404 for unknown nested transaction routes", async () => {
@@ -341,7 +366,10 @@ describe("POST /tax/transactions/sync", () => {
     const getRes = await server.inject({ method: "GET", url: "/tax/transactions" });
 
     expect(getRes.statusCode).toBe(200);
-    expectJson(getRes).toEqual({ transactions: [fakeTransaction] });
+    expectJson(getRes).toEqual({
+      transactions: [fakeTransaction],
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
     expect(allSyncArgs).toEqual([[fakeConfig]]);
     expect(allListArgs).toEqual([[50, 0, undefined]]);
   });
@@ -612,7 +640,10 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(getRes.statusCode).toBe(200);
-    expectJson(getRes).toEqual({ transactions: [fakeTransaction] });
+    expectJson(getRes).toEqual({
+      transactions: [fakeTransaction],
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
     expect(patchRes.statusCode).toBe(200);
     expectJson(patchRes).toEqual({
       transaction: { ...fakeTransaction, comment: "Updated comment" },
@@ -1070,7 +1101,10 @@ describe("POST /tax/transactions/enrich", () => {
 
     const getRes = await server.inject({ method: "GET", url: "/tax/transactions" });
     expect(getRes.statusCode).toBe(200);
-    expectJson(getRes).toEqual({ transactions: [fakeTransaction] });
+    expectJson(getRes).toEqual({
+      transactions: [fakeTransaction],
+      pagination: { limit: 50, offset: 0, label: null, total: 1 },
+    });
   });
 
   it("returns a controlled 503 error response when enrich throws", async () => {

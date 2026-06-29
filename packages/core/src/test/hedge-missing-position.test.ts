@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, mock, beforeEach } from "bun:test";
 
 import type { Config } from "../config.js";
 import { initSchema } from "../db/schema.js";
+import { listHedgeEvents } from "../db/store.js";
 import { getHedgeView } from "../services/hedge.js";
 import { captureError, expectError } from "./helpers/errors.js";
 import { getRequestType, jsonResponse, setFetchMock } from "./helpers/http.js";
@@ -32,8 +33,8 @@ const originalFetch = globalThis.fetch;
 function mockFetchJson(data: unknown, responseInit: ResponseInit = {}): void {
   setFetchMock(async (_input, requestInit) => {
     // For the secondary userFillsByTime call (triggered when position is absent),
-    // return an empty array so resolveAbsentPosition finds no fills and falls
-    // through to the throw — preserving the expected error behaviour.
+    // return an empty array so hedge discovery finds no fills and falls through
+    // to the throw — preserving the expected error behaviour.
     const responseData = getRequestType(requestInit) === "userFillsByTime" ? [] : data;
     return jsonResponse(responseData, responseInit);
   });
@@ -162,6 +163,92 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
 
     const error = await captureError(getHedgeView(config, "123"));
     expect(expectError(error).message).toMatch(/no open/i);
+  });
+
+  it("does not write an aggregate closed hedge event when an absent config hedge has multiple historical closes", async () => {
+    const config = makeConfig({
+      positions: {
+        "123": {
+          openTx: "0xOPEN",
+          hedge: { coin: "HYPE" },
+        },
+      },
+    });
+
+    setFetchMock(async (_input, requestInit) => {
+      const requestType = getRequestType(requestInit);
+      if (requestType === "clearinghouseState") {
+        return jsonResponse({ assetPositions: [] });
+      }
+      if (requestType === "userFillsByTime") {
+        return jsonResponse([
+          {
+            coin: "HYPE",
+            px: "100",
+            sz: "1",
+            side: "A",
+            time: Date.parse("2024-01-01T00:00:00.000Z"),
+            closedPnl: "0",
+            oid: 1,
+            tid: 1001,
+            dir: "Open Short",
+          },
+          {
+            coin: "HYPE",
+            px: "90",
+            sz: "1",
+            side: "B",
+            time: Date.parse("2024-01-02T00:00:00.000Z"),
+            closedPnl: "10",
+            oid: 2,
+            tid: 2002,
+            dir: "Close Short",
+          },
+          {
+            coin: "HYPE",
+            px: "110",
+            sz: "1",
+            side: "A",
+            time: Date.parse("2024-01-03T00:00:00.000Z"),
+            closedPnl: "0",
+            oid: 3,
+            tid: 3003,
+            dir: "Open Short",
+          },
+          {
+            coin: "HYPE",
+            px: "120",
+            sz: "1",
+            side: "B",
+            time: Date.parse("2024-01-04T00:00:00.000Z"),
+            closedPnl: "-5",
+            oid: 4,
+            tid: 4004,
+            dir: "Close Short",
+          },
+        ]);
+      }
+      throw new Error(`unexpected request type: ${requestType}`);
+    });
+
+    const error = await captureError(getHedgeView(config, "123"));
+
+    expect(expectError(error).message).toMatch(/no open/i);
+    expect(listHedgeEvents()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: "closed",
+        realized_pnl: 10,
+        hl_fill_hash: "2002",
+        token_id: null,
+      }),
+      expect.objectContaining({
+        status: "closed",
+        realized_pnl: -5,
+        hl_fill_hash: "4004",
+        token_id: null,
+      }),
+    ]));
+    expect(listHedgeEvents()).toHaveLength(2);
   });
 
   // =========================================================================

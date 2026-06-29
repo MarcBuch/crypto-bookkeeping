@@ -578,6 +578,32 @@ export function initSchema(database: Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_hedge_events_trade_key
     ON hedge_events(trade_key);
 
+    DELETE FROM hedge_events
+    WHERE status = 'closed'
+      AND hl_fill_hash IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM hedge_events AS keep
+        WHERE keep.status = 'closed'
+          AND keep.hl_fill_hash IS NOT NULL
+          AND keep.id != hedge_events.id
+          AND keep.coin = hedge_events.coin
+          AND keep.opened_at = hedge_events.opened_at
+          AND keep.closed_at IS hedge_events.closed_at
+          AND keep.entry_px = hedge_events.entry_px
+          AND keep.size = hedge_events.size
+          AND keep.close_px IS hedge_events.close_px
+          AND keep.realized_pnl IS hedge_events.realized_pnl
+          AND keep.funding_earned IS hedge_events.funding_earned
+          AND (
+            (keep.token_id IS NOT NULL AND hedge_events.token_id IS NULL)
+            OR (
+              (keep.token_id IS NOT NULL) = (hedge_events.token_id IS NOT NULL)
+              AND keep.id < hedge_events.id
+            )
+          )
+      );
+
     CREATE INDEX IF NOT EXISTS idx_hedge_events_token_id ON hedge_events(token_id);
   `);
 }

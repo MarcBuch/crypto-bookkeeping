@@ -364,6 +364,13 @@ function lastFill(fills: HyperliquidFill[]): HyperliquidFill | null {
   return fills.at(-1) ?? null;
 }
 
+function largestFill(fills: HyperliquidFill[]): HyperliquidFill | null {
+  return fills.reduce<HyperliquidFill | null>(
+    (max, fill) => (max == null || parseFloat(fill.sz) > parseFloat(max.sz) ? fill : max),
+    null,
+  );
+}
+
 function isoTime(fill: HyperliquidFill | null, fallback: string): string {
   return fill ? new Date(fill.time).toISOString() : fallback;
 }
@@ -539,7 +546,7 @@ function buildClosedDiscoveredEvent(
   const openingFills = lifecycle.openingFills.length > 0 ? lifecycle.openingFills : lifecycle.fills;
   const closingFills = lifecycle.closingFills.length > 0 ? lifecycle.closingFills : lifecycle.fills;
   const firstOpenFill = firstFill(openingFills) ?? firstFill(lifecycle.fills);
-  const representativeCloseFill = lastFill(closingFills) ?? lastFill(lifecycle.fills);
+  const representativeCloseFill = largestFill(closingFills) ?? lastFill(lifecycle.fills);
   const openedAt = isoTime(firstOpenFill, new Date().toISOString());
   const entryPx = vwapFills(openingFills);
   const size = lifecycle.maxAbsInventory || openingFills.reduce((sum, fill) => sum + parseFloat(fill.sz), 0);
@@ -748,76 +755,8 @@ async function resolveAbsentPosition(
     return buildClosedView(tokenId, coin, existingClosed);
   }
 
-  // Fetch all fills for this wallet (no startTime filter — no local open event to anchor to)
-  const fillsJson = await postHyperliquid(
-    config,
-    {
-      type: "userFillsByTime",
-      user: config.wallet,
-      startTime: 0,
-    },
-    "fetching fills for absent hedge resolution",
-  );
-  const fills = Array.isArray(fillsJson) ? fillsJson.filter(isHyperliquidFill) : [];
-  const coinFills = fills.filter((f) => f.coin === coin);
-  if (coinFills.length === 0) return null;
-
-  // Derive entry from the earliest open fill
-  const openFills = coinFills.filter((f) => f.dir.includes("Open"));
-  const closingFills = coinFills.filter((f) => f.dir.includes("Close"));
-  if (closingFills.length === 0) return null;
-
-  const entryPx =
-    openFills.length > 0 ? parseFloat(openFills.reduce((e, f) => (f.time < e.time ? f : e)).px) : 0;
-
-  const totalClosedPnl = closingFills.reduce((s, f) => s + parseFloat(f.closedPnl), 0);
-  const closePx = vwapClose(closingFills);
-  const largestFill = closingFills.reduce((m, f) => (parseFloat(f.sz) > parseFloat(m.sz) ? f : m));
-  const totalSize =
-    openFills.length > 0
-      ? openFills.reduce((s, f) => s + parseFloat(f.sz), 0)
-      : closingFills.reduce((s, f) => s + parseFloat(f.sz), 0);
-
-  // Write the open event (bootstrap) then close it
-  const openedAt =
-    openFills.length > 0
-      ? new Date(Math.min(...openFills.map((f) => f.time))).toISOString()
-      : new Date(Math.min(...closingFills.map((f) => f.time))).toISOString();
-
-  // Insert open event (idempotent — partial unique index guards duplicates)
-  try {
-    sqliteHedgeStore.recordEvent({
-      token_id: tokenId,
-      coin,
-      status: "open",
-      entry_px: entryPx,
-      size: totalSize,
-      opened_at: openedAt,
-      closed_at: null,
-      close_px: null,
-      realized_pnl: null,
-      funding_earned: null,
-      close_reason: null,
-      hl_fill_hash: null,
-    });
-  } catch {
-    // Race or already exists — continue
-  }
-
-  const closedEvent = sqliteHedgeStore.closeOpenEvent({
-    token_id: tokenId,
-    coin,
-    closed_at: new Date(largestFill.time).toISOString(),
-    close_px: closePx,
-    realized_pnl: totalClosedPnl,
-    // funding_earned is unknown here — no snapshots available. Store null so
-    // callers can distinguish "zero" from "not recorded".
-    funding_earned: null,
-    close_reason: inferCloseReason(closingFills),
-    hl_fill_hash: String(largestFill.tid),
-  });
-
-  const finalEvent = closedEvent ?? sqliteHedgeStore.findClosedEvent(tokenId, coin) ?? null;
+  await syncHyperliquidHedgeTrades(config, coin);
+  const finalEvent = sqliteHedgeStore.findClosedEvent(tokenId, coin) ?? null;
 
   return finalEvent ? buildClosedView(tokenId, coin, finalEvent) : null;
 }

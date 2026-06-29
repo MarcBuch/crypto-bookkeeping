@@ -435,6 +435,62 @@ describe("hedge-db — listHedgeSnapshots and insertHedgeSnapshot", () => {
         .find((index) => index.name === "idx_hedge_events_trade_key");
       expect(tradeIndex?.unique).toBe(1);
     });
+
+    it("deduplicates closed hedge lifecycle rows while preserving the earliest assigned row", () => {
+      const legacyDb = new Database(":memory:");
+      initSchema(legacyDb);
+
+      const insertDuplicate = legacyDb.query(
+        `INSERT INTO hedge_events
+         (token_id, coin, status, entry_px, size, opened_at, closed_at, close_px, realized_pnl, funding_earned, close_reason, hl_fill_hash, trade_key, tax_key)
+         VALUES (?, ?, 'closed', ?, ?, ?, ?, ?, ?, ?, 'manual_close', ?, ?, ?)`,
+      );
+
+      insertDuplicate.run(
+        "484645",
+        "HYPE",
+        58.37,
+        30.1,
+        "2026-06-11T18:43:20.016Z",
+        "2026-06-12T17:09:46.918Z",
+        61.6444631229236,
+        -98.56134,
+        null,
+        "legacy-fill",
+        "trade:fill:HYPE:legacy-fill",
+        "tax:legacy:484645:HYPE:legacy-fill",
+      );
+      insertDuplicate.run(
+        "484645",
+        "HYPE",
+        58.37,
+        30.1,
+        "2026-06-11T18:43:20.016Z",
+        "2026-06-12T17:09:46.918Z",
+        61.6444631229236,
+        -98.56134,
+        null,
+        "discovery-fill",
+        "trade:fill:HYPE:discovery-fill",
+        "tax:fill:HYPE:discovery-fill",
+      );
+
+      initSchema(legacyDb);
+
+      const rows = legacyDb
+        .query<Pick<StoredHedgeEvent, "id" | "token_id" | "hl_fill_hash" | "tax_key">, []>(
+          "SELECT id, token_id, hl_fill_hash, tax_key FROM hedge_events ORDER BY id",
+        )
+        .all();
+      expect(rows).toEqual([
+        {
+          id: 1,
+          token_id: "484645",
+          hl_fill_hash: "legacy-fill",
+          tax_key: "tax:legacy:484645:HYPE:legacy-fill",
+        },
+      ]);
+    });
   });
 
   // Cluster A: listHedgeSnapshots — empty / boundary

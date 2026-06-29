@@ -422,6 +422,7 @@ export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransac
     const existing = groups.get(groupKey);
     if (existing) {
       existing.transactions.push(transaction);
+      existing.primary = chooseTaxTransactionGroupPrimary(existing.primary, transaction);
       continue;
     }
 
@@ -434,6 +435,36 @@ export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransac
   }
 
   return sortTaxTransactionGroupsNewestFirst([...groups.values()]);
+}
+
+function chooseTaxTransactionGroupPrimary(left: TaxTransaction, right: TaxTransaction): TaxTransaction {
+  if (compareTaxTransactionGroupPrimary(left, right) <= 0) return left;
+  return right;
+}
+
+function compareTaxTransactionGroupPrimary(left: TaxTransaction, right: TaxTransaction): number {
+  const leftHasFee = left.fee != null;
+  const rightHasFee = right.fee != null;
+  if (leftHasFee !== rightHasFee) return leftHasFee ? -1 : 1;
+
+  const leftLogIndex = taxTransactionLogIndex(left);
+  const rightLogIndex = taxTransactionLogIndex(right);
+  if (leftLogIndex != null && rightLogIndex != null && leftLogIndex !== rightLogIndex) {
+    return leftLogIndex - rightLogIndex;
+  }
+  if (leftLogIndex != null && rightLogIndex == null) return -1;
+  if (leftLogIndex == null && rightLogIndex != null) return 1;
+
+  return left.id.localeCompare(right.id);
+}
+
+function taxTransactionLogIndex(transaction: TaxTransaction): number | null {
+  const parts = transaction.id.split(":");
+  const suffix = parts.length > 0 ? parts[parts.length - 1] : null;
+  if (!suffix) return null;
+
+  const index = Number.parseInt(suffix, 10);
+  return Number.isFinite(index) ? index : null;
 }
 
 function sortTaxTransactionGroupsNewestFirst(groups: TaxTransactionGroup[]): TaxTransactionGroup[] {

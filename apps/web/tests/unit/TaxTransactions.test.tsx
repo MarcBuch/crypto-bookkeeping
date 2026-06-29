@@ -1,6 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { TaxTransaction } from "../../src/api";
@@ -17,7 +16,6 @@ import {
   TaxErrorState,
   TaxLoadingState,
   TaxTransactionLedger,
-  TaxTransactions,
   taxCommentDraftState,
   taxTransactionLabelOptions,
   submitManualTaxTransactionForm,
@@ -61,14 +59,6 @@ const taxTransaction: TaxTransaction = {
   created_at: "2026-05-30T12:00:00.000Z",
   updated_at: "2026-05-30T12:00:00.000Z",
 };
-
-function renderTaxScreen(queryClient: QueryClient): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>
-      <TaxTransactions />
-    </QueryClientProvider>,
-  );
-}
 
 describe("tax transactions rendering", () => {
   it("renders loading and empty states", () => {
@@ -652,12 +642,40 @@ describe("tax transactions rendering", () => {
     const groups = groupTaxTransactions([nativePart, whypePart, standalone]);
 
     expect(groups).toHaveLength(2);
-    expect(groups[0]).toMatchObject({ hash: nativePart.hash, primary: nativePart });
+    expect(groups[0]).toMatchObject({ hash: nativePart.hash, primary: whypePart });
     expect(groups[0].transactions.map((transaction) => transaction.id)).toEqual([
       nativePart.id,
       whypePart.id,
     ]);
     expect(groups[1].transactions.map((transaction) => transaction.id)).toEqual([standalone.id]);
+  });
+
+  it("prefers the fee-bearing row as the primary grouped tax transaction", () => {
+    const hash = "0xfee-primary";
+    const feeLess: TaxTransaction = {
+      ...taxTransaction,
+      id: "hyperevmscan:tokentx:0xfee-primary:0",
+      hash,
+      time_stamp: "1760000000",
+      block_number: 123,
+      fee: null,
+    };
+    const feeBearing: TaxTransaction = {
+      ...taxTransaction,
+      id: "hyperevmscan:tokentx:0xfee-primary:1",
+      hash,
+      time_stamp: "1760000000",
+      block_number: 123,
+      fee: "42000",
+    };
+
+    const [group] = groupTaxTransactions([feeLess, feeBearing]);
+
+    expect(group.primary.id).toBe(feeBearing.id);
+    expect(group.transactions.map((transaction) => transaction.id)).toEqual([
+      feeLess.id,
+      feeBearing.id,
+    ]);
   });
 
   it("sorts tax transaction groups newest first by date and time", () => {

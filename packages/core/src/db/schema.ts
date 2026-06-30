@@ -53,7 +53,8 @@ export function resetDb(): void {
 }
 
 export function initSchema(database: Database): void {
-  const taxLabelCheckConstraint = "label IS NULL OR label IN ('Trade', 'Transfer', 'Approval')";
+  const taxLabelCheckConstraint =
+    "label IS NULL OR label IN ('Trade', 'Transfer', 'Approval', 'Repay Loan')";
   const hedgeTradeKeyBackfillSql = `CASE
     WHEN hl_fill_hash IS NOT NULL THEN 'trade:fill:' || coin || ':' || hl_fill_hash
     ELSE 'trade:legacy:' || COALESCE(token_id, 'unassigned') || ':' || coin || ':' || opened_at || ':' || printf('%.17g', entry_px) || ':' || printf('%.17g', size) || ':row:' || id
@@ -364,10 +365,12 @@ export function initSchema(database: Database): void {
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'",
     )
     .get();
-  const needsApprovalLabelMigration =
-    createTableSqlRow?.sql.includes("label IN ('Trade', 'Transfer')") ?? false;
+  const taxTableSql = createTableSqlRow?.sql ?? "";
+  const needsTaxLabelMigration =
+    taxTableSql.includes("label IN ('Trade', 'Transfer')") ||
+    taxTableSql.includes("label IN ('Trade', 'Transfer', 'Approval')");
 
-  if (needsApprovalLabelMigration) {
+  if (needsTaxLabelMigration) {
     database.exec(`
       CREATE TABLE tax_transactions_new (
         id TEXT PRIMARY KEY,

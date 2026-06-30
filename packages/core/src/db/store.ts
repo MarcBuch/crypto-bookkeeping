@@ -116,7 +116,7 @@ type PreparedHedgeEvent = {
   updated_at: string;
 };
 
-export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | null;
+export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | "Repay Loan" | null;
 export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
 
 export interface StoredTaxTransaction {
@@ -257,9 +257,12 @@ function assertValidTaxTransactionLabel(label: TaxTransactionLabel | undefined):
     label !== null &&
     label !== "Trade" &&
     label !== "Transfer" &&
-    label !== "Approval"
+    label !== "Approval" &&
+    label !== "Repay Loan"
   ) {
-    throw new Error("Tax transaction label must be 'Trade', 'Transfer', 'Approval', or null");
+    throw new Error(
+      "Tax transaction label must be 'Trade', 'Transfer', 'Approval', 'Repay Loan', or null",
+    );
   }
 }
 

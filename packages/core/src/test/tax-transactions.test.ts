@@ -388,16 +388,19 @@ describe("tax transaction persistence", () => {
     expect(getTaxTransaction("tx-1:external")?.label).toBeNull();
   });
 
-  it("accepts Trade, Transfer, Approval, and null labels", () => {
+  it("accepts Trade, Transfer, Approval, Repay Loan, and null labels", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
 
     expect(updateTaxTransaction("tx-1:external", { label: "Trade" })?.label).toBe("Trade");
     expect(updateTaxTransaction("tx-1:external", { label: "Transfer" })?.label).toBe("Transfer");
     expect(updateTaxTransaction("tx-1:external", { label: "Approval" })?.label).toBe("Approval");
+    expect(updateTaxTransaction("tx-1:external", { label: "Repay Loan" })?.label).toBe(
+      "Repay Loan",
+    );
     expect(updateTaxTransaction("tx-1:external", { label: null })?.label).toBeNull();
   });
 
-  it("migrates legacy label constraint and allows Approval labels", () => {
+  it("migrates legacy label constraint and allows newer labels", () => {
     const dbPath = resolveDbPath();
     const legacyDb = new Database(dbPath, { create: true });
     legacyDb.exec(`
@@ -450,8 +453,11 @@ describe("tax transaction persistence", () => {
       .get();
 
     expect(tableSql?.sql).toContain("Approval");
-    expect(updateTaxTransaction("legacy-row", { label: "Approval" })?.label).toBe("Approval");
-    expect(getTaxTransaction("legacy-row")?.label).toBe("Approval");
+    expect(tableSql?.sql).toContain("Repay Loan");
+    expect(updateTaxTransaction("legacy-row", { label: "Repay Loan" })?.label).toBe(
+      "Repay Loan",
+    );
+    expect(getTaxTransaction("legacy-row")?.label).toBe("Repay Loan");
   });
 
   it("stores empty comments as empty strings and clears null comments to null", () => {
@@ -636,6 +642,7 @@ describe("tax transaction persistence", () => {
     updateTaxTransaction("trade-middle", { label: "Trade" });
     updateTaxTransaction("transfer-old", { label: "Transfer" });
     updateTaxTransaction("unlabeled-2", { label: "Approval" });
+    updateTaxTransaction("unlabeled-3", { label: "Repay Loan" });
 
     expect(listTaxTransactions(50, 0).map((row) => row.id)).toEqual([
       "trade-newest",
@@ -655,16 +662,15 @@ describe("tax transaction persistence", () => {
       "transfer-old",
     ]);
     expect(listTaxTransactions(50, 0, "Approval").map((row) => row.id)).toEqual(["unlabeled-2"]);
-    expect(listTaxTransactions(50, 0, "unlabeled").map((row) => row.id)).toEqual([
-      "unlabeled-3",
-      "unlabeled-1",
-    ]);
-    expect(listTaxTransactions(2, 1, "unlabeled").map((row) => row.id)).toEqual(["unlabeled-1"]);
+    expect(listTaxTransactions(50, 0, "Repay Loan").map((row) => row.id)).toEqual(["unlabeled-3"]);
+    expect(listTaxTransactions(50, 0, "unlabeled").map((row) => row.id)).toEqual(["unlabeled-1"]);
+    expect(listTaxTransactions(2, 1, "unlabeled").map((row) => row.id)).toEqual([]);
     expect(countTaxTransactions()).toBe(7);
     expect(countTaxTransactions("Trade")).toBe(2);
     expect(countTaxTransactions("Transfer")).toBe(2);
     expect(countTaxTransactions("Approval")).toBe(1);
-    expect(countTaxTransactions("unlabeled")).toBe(2);
+    expect(countTaxTransactions("Repay Loan")).toBe(1);
+    expect(countTaxTransactions("unlabeled")).toBe(1);
   });
 
   it("returns null when getting or updating an unknown id", () => {

@@ -205,7 +205,7 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({
-      error: "label must be Trade, Transfer, or Approval, got: Income",
+      error: "label must be Trade, Transfer, Approval, or Repay Loan, got: Income",
     });
   });
 
@@ -216,7 +216,7 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({
-      error: "label must be Trade, Transfer, or Approval, got: trade",
+      error: "label must be Trade, Transfer, Approval, or Repay Loan, got: trade",
     });
     expect(lastListArgs).toEqual([]);
   });
@@ -513,7 +513,7 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
+    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, Repay Loan, or null" });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -530,6 +530,21 @@ describe("POST /tax/transactions", () => {
     expect(res.statusCode).toBe(201);
     expectJson(res).toEqual({ transaction: createdTransaction });
     expect(allCreateArgs).toEqual([[{ label: "Approval" }]]);
+  });
+
+  it("accepts Repay Loan labels", async () => {
+    const createdTransaction = { ...fakeTransaction, label: "Repay Loan" };
+    mockCreateManualTaxTransaction = () => createdTransaction;
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { label: "Repay Loan" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expectJson(res).toEqual({ transaction: createdTransaction });
+    expect(allCreateArgs).toEqual([[{ label: "Repay Loan" }]]);
   });
 
   it.each([
@@ -883,7 +898,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
+    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, Repay Loan, or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -900,7 +915,7 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, or null" });
+    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, Repay Loan, or null" });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -917,6 +932,21 @@ describe("PATCH /tax/transactions/:id", () => {
     expect(res.statusCode).toBe(200);
     expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Approval" }]]);
+  });
+
+  it("accepts Repay Loan labels", async () => {
+    const updatedTransaction = { ...fakeTransaction, label: "Repay Loan" };
+    mockUpdateTaxTransaction = () => updatedTransaction;
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/tx-1%3Aexternal",
+      payload: { label: "Repay Loan" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expectJson(res).toEqual({ transaction: updatedTransaction });
+    expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Repay Loan" }]]);
   });
 
   it.each([

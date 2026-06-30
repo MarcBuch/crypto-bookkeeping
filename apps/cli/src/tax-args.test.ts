@@ -43,7 +43,7 @@ async function seedTaxTransaction(
   dataDir: string,
   overrides: {
     id?: string;
-    label?: "Trade" | "Transfer" | "Approval" | null;
+    label?: "Trade" | "Transfer" | "Approval" | "Repay Loan" | null;
     comment?: string | null;
     incoming_quantity?: string | null;
     incoming_asset?: string | null;
@@ -159,7 +159,7 @@ describe("tax CLI argument handling", () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(parseJsonStdout(result)).toEqual({
-      error: "label must be Trade, Transfer, Approval, or unlabeled",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, or unlabeled",
     });
   });
 
@@ -177,12 +177,19 @@ describe("tax CLI argument handling", () => {
     expect(parseJsonStdout(result)).toEqual({ transactions: [] });
   });
 
+  it("accepts Repay Loan list labels", async () => {
+    const result = await runCli(["--json", "tax", "list", "--label", "Repay Loan"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(parseJsonStdout(result)).toEqual({ transactions: [] });
+  });
+
   it("rejects invalid update labels with controlled JSON", async () => {
     const result = await runCli(["--json", "tax", "label", "tx-1:external", "--label", "Income"]);
 
     expect(result.exitCode).not.toBe(0);
     expect(parseJsonStdout(result)).toEqual({
-      error: "label must be Trade, Transfer, Approval, null, clear, none, or unlabeled",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
     });
   });
 
@@ -198,6 +205,21 @@ describe("tax CLI argument handling", () => {
     expect(result.exitCode).toBe(0);
     expect(parseJsonStdout(result)).toMatchObject({
       transaction: { id: "tx-1:external", label: "Approval" },
+    });
+  });
+
+  it("accepts Repay Loan update labels", async () => {
+    const dataDir = makeDataDir();
+    await seedTaxTransaction(dataDir);
+
+    const result = await runCli(
+      ["--json", "tax", "label", "tx-1:external", "--label", "Repay Loan"],
+      dataDir,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(parseJsonStdout(result)).toMatchObject({
+      transaction: { id: "tx-1:external", label: "Repay Loan" },
     });
   });
 
@@ -224,7 +246,7 @@ describe("tax CLI argument handling", () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(parseJsonStdout(result)).toEqual({
-      error: "label must be Trade, Transfer, Approval, null, clear, none, or unlabeled",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
     });
   });
 

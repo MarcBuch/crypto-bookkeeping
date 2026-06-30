@@ -33,6 +33,7 @@ export const taxTransactionLabelOptions: Array<{
   { label: "Trade", value: "Trade" },
   { label: "Transfer", value: "Transfer" },
   { label: "Approval", value: "Approval" },
+  { label: "Repay Loan", value: "Repay Loan" },
 ];
 
 export function taxCommentDraftState(transactionComment: string | null, draft: string) {
@@ -398,7 +399,13 @@ function assignField<T extends object, K extends keyof T>(target: T, field: K, v
 }
 
 function isEditableTaxTransactionLabel(value: string): value is EditableTaxTransactionLabel {
-  return value === "" || value === "Trade" || value === "Transfer" || value === "Approval";
+  return (
+    value === "" ||
+    value === "Trade" ||
+    value === "Transfer" ||
+    value === "Approval" ||
+    value === "Repay Loan"
+  );
 }
 
 export function isManualTaxTransaction(transaction: TaxTransaction): boolean {

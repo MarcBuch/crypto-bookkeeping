@@ -478,6 +478,24 @@ describe("API client", () => {
     });
   });
 
+  it("fetches tax transactions filtered by Repay Loan label", async () => {
+    const repayLoanTaxTransaction = { ...taxTransaction, label: "Repay Loan" as const };
+    mockFetch((url, init) => {
+      expect(init?.method).toBeUndefined();
+      expect(url).toBe("http://localhost:3000/tax/transactions?label=Repay+Loan");
+      return jsonResponse({
+        transactions: [repayLoanTaxTransaction],
+        pagination: { limit: 200, offset: 0, label: "Repay Loan", total: 1 },
+      });
+    });
+
+    const result = await getTaxTransactions({ label: "Repay Loan" });
+    expect(result).toEqual({
+      transactions: [repayLoanTaxTransaction],
+      pagination: { limit: 200, offset: 0, label: "Repay Loan", total: 1 },
+    });
+  });
+
   it("accepts null pagination labels for unfiltered tax transactions", async () => {
     mockFetch((url, init) => {
       expect(init?.method).toBeUndefined();

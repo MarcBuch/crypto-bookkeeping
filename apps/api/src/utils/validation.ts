@@ -32,8 +32,15 @@ export function parseOffset(raw: string | undefined, defaultVal = 0): number {
 
 export function parseTaxTransactionLabel(
   raw: string | undefined,
-): "Trade" | "Transfer" | "Approval" | undefined {
+): "Trade" | "Transfer" | "Approval" | "Repay Loan" | undefined {
   if (raw === undefined) return undefined;
-  if (raw === "Trade" || raw === "Transfer" || raw === "Approval") return raw;
-  throw new ValidationError(`label must be Trade, Transfer, or Approval, got: ${raw}`);
+  if (
+    raw === "Trade" ||
+    raw === "Transfer" ||
+    raw === "Approval" ||
+    raw === "Repay Loan"
+  ) {
+    return raw;
+  }
+  throw new ValidationError(`label must be Trade, Transfer, Approval, or Repay Loan, got: ${raw}`);
 }

@@ -972,6 +972,7 @@ describe("tax transactions rendering", () => {
       { label: "Trade", value: "Trade" },
       { label: "Transfer", value: "Transfer" },
       { label: "Approval", value: "Approval" },
+      { label: "Repay Loan", value: "Repay Loan" },
     ]);
     for (const option of taxTransactionLabelOptions) {
       expect(html).toContain(`>${option.label}</option>`);

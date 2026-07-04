@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web App Architecture: LP Positions and P&amp;L Data Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+  </head>
+  <body class="bg-neutral-100 text-neutral-900">
+    <main class="mx-auto max-w-7xl px-6 py-10 lg:px-10">
+      <header class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <p class="text-sm font-semibold uppercase tracking-[0.24em] text-neutral-500">
+          Software Architecture Documentation
+        </p>
+        <h1 class="mt-3 text-4xl font-semibold tracking-tight text-neutral-950">
+          How the Web App Fetches LP Positions and P&amp;L Data
+        </h1>
+        <p class="mt-4 max-w-4xl text-base leading-7 text-neutral-700">
+          This page documents the actual runtime path used by the web application to load,
+          refresh, cache, and display ProjectX LP position and P&amp;L data.
+        </p>
+      </header>
+
+      <section class="mb-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Frontend</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            React + React Query fetches cached LP and P&amp;L views from the API and merges them in
+            the browser by <code>tokenId</code>.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">API</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            Fastify exposes read endpoints for cached data and write endpoints that trigger async
+            background sync jobs.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Core</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            Shared services fetch on-chain position state, resolve lifecycle events, price tokens,
+            compute LP economics, and persist normalized view caches.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Storage</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            SQLite is the read path for the dashboard. The web app does not hit chain RPCs or
+            CoinGecko directly.
+          </p>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">System Overview</h2>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <div class="mermaid min-w-[900px]">
+flowchart LR
+    UI[React dashboard\napps/web/src/App.tsx] --> HOOK[React Query hook\nuseDashboardPositions]
+    HOOK --> API[apps/web/src/api.ts\ngetDashboardPositions]
+    API --> POS[GET /positions]
+    API --> PNL[GET /pnl]
+
+    POS --> FASTIFY[Fastify API\napps/api/src/routes]
+    PNL --> FASTIFY
+
+    FASTIFY --> POSCACHE[listCachedPositionViews\nSQLite cache]
+    FASTIFY --> PNLCACHE[listCachedPnLViews\nSQLite cache]
+
+    POSCACHE --> DB[(data/lp-tracker.db)]
+    PNLCACHE --> DB
+
+    SYNC[POST /positions/sync] --> JOB[syncLpData]
+    JOB --> CHAIN[HyperEVM RPC / logs]
+    JOB --> PRICE[CoinGecko pricing]
+    JOB --> ECON[Lifecycle + LP economics]
+    JOB --> WRITE[replaceLpCaches]
+    WRITE --> DB
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-10 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Primary Runtime Flow</h2>
+          <ol class="mt-5 space-y-4 text-sm leading-7 text-neutral-700 list-decimal pl-5">
+            <li>
+              The dashboard mounts in <code>apps/web/src/App.tsx</code> and calls
+              <code>useDashboardPositions()</code>.
+            </li>
+            <li>
+              <code>useDashboardPositions()</code> in
+              <code>apps/web/src/hooks/useDashboardPositions.ts</code> runs a React Query
+              <code>useQuery</code> with <code>getDashboardPositions</code>.
+            </li>
+            <li>
+              <code>getDashboardPositions()</code> in <code>apps/web/src/api.ts</code> performs
+              <code>Promise.all([getPositions(), getPnL()])</code>.
+            </li>
+            <li>
+              <code>GET /positions</code> and <code>GET /pnl</code> return cached JSON views from
+              SQLite through Fastify route handlers.
+            </li>
+            <li>
+              The browser merges both result sets by <code>tokenId</code>, producing
+              <code>DashboardPosition</code> objects.
+            </li>
+            <li>
+              The UI renders position cards and portfolio totals, and applies a few display-only
+              calculations such as carry run rate and current balance in USD.
+            </li>
+          </ol>
+        </article>
+
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Key Point</h2>
+          <div class="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-5 text-sm leading-7 text-sky-950">
+            The dashboard is intentionally cache-backed. Normal page loads read from
+            <code>positions_view_cache</code> and <code>pnl_view_cache</code>. Live chain reads only
+            happen during explicit sync operations or selected auxiliary endpoints such as IL.
+          </div>
+          <dl class="mt-6 space-y-4 text-sm leading-6 text-neutral-700">
+            <div>
+              <dt class="font-semibold text-neutral-950">API base URL</dt>
+              <dd><code>VITE_API_BASE_URL</code> or default <code>http://localhost:3000</code></dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-neutral-950">Frontend transport</dt>
+              <dd><code>fetchJson()</code> in <code>apps/web/src/api.ts</code></dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-neutral-950">Server bootstrap</dt>
+              <dd><code>apps/api/src/index.ts</code></dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-neutral-950">Persistent store</dt>
+              <dd><code>packages/core/src/db/store.ts</code> backed by <code>data/lp-tracker.db</code></dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Read Path by Layer</h2>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <table class="min-w-full text-left text-sm text-neutral-700">
+            <thead class="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              <tr>
+                <th class="px-4 py-3">Layer</th>
+                <th class="px-4 py-3">File</th>
+                <th class="px-4 py-3">Responsibility</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">App shell</td>
+                <td class="px-4 py-3"><code>apps/web/src/App.tsx</code></td>
+                <td class="px-4 py-3">Shows loading, error, sync state, and renders the dashboard.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Data hook</td>
+                <td class="px-4 py-3"><code>apps/web/src/hooks/useDashboardPositions.ts</code></td>
+                <td class="px-4 py-3">Owns the React Query cache entry <code>["dashboardPositions"]</code>.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Browser API client</td>
+                <td class="px-4 py-3"><code>apps/web/src/api.ts</code></td>
+                <td class="px-4 py-3">Calls <code>/positions</code> and <code>/pnl</code>, validates response shape, merges by <code>tokenId</code>.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">API routes</td>
+                <td class="px-4 py-3"><code>apps/api/src/routes/positions.ts</code>, <code>apps/api/src/routes/pnl.ts</code></td>
+                <td class="px-4 py-3">Serve cached views; no live RPC during normal dashboard reads.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Cache access</td>
+                <td class="px-4 py-3"><code>packages/core/src/db/store.ts</code></td>
+                <td class="px-4 py-3">Reads JSON blobs from <code>positions_view_cache</code> and <code>pnl_view_cache</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Sync and Cache Refresh Flow</h2>
+        <p class="mt-4 max-w-4xl text-sm leading-7 text-neutral-700">
+          The dashboard does not continuously poll LP positions. Refresh is user-driven. Clicking
+          <code>Sync</code> starts a background server job, then the client polls sync status every
+          2 seconds until the job completes or fails.
+        </p>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <div class="mermaid min-w-[980px]">
+sequenceDiagram
+    participant U as User
+    participant W as Web app
+    participant A as API route
+    participant C as Core syncLpData
+    participant X as Chain + Pricing
+    participant D as SQLite caches
+
+    U->>W: Click Sync
+    W->>A: POST /positions/sync
+    A-->>W: 202 Sync started
+    A->>C: fire-and-forget syncLpData(config)
+    loop every 2s
+      W->>A: GET /positions/sync/status
+      A-->>W: running | completed | failed
+    end
+    C->>X: Read positions, lifecycle events, USD prices
+    C->>C: Build PositionView[] and PnLView[]
+    C->>D: replaceLpCaches(..., syncedAt)
+    C->>D: upsertLpSyncState(...)
+    A-->>W: completed
+    W->>W: invalidate dashboardPositions query
+    W->>A: GET /positions and GET /pnl
+    A-->>W: fresh cached views
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-10 grid gap-6 lg:grid-cols-2">
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Where Position Data Comes From</h2>
+          <ol class="mt-5 space-y-4 text-sm leading-7 text-neutral-700 list-decimal pl-5">
+            <li>
+              <code>syncLpData(config)</code> in
+              <code>packages/core/src/services/positions.ts</code> starts by enumerating on-chain
+              positions with <code>getAllPositions()</code>.
+            </li>
+            <li>
+              <code>getPositionsView()</code> projects each raw position into a normalized
+              <code>PositionView</code> using lifecycle-aware current-state projection.
+            </li>
+            <li>
+              The resulting view contains the current token balances, price range, current price,
+              range status, and whether the position is currently in range.
+            </li>
+            <li>
+              The API route <code>GET /positions</code> later reads these materialized views from
+              <code>positions_view_cache</code>.
+            </li>
+          </ol>
+        </article>
+
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Where P&amp;L Data Comes From</h2>
+          <ol class="mt-5 space-y-4 text-sm leading-7 text-neutral-700 list-decimal pl-5">
+            <li>
+              During the same sync, <code>getPnLView(config)</code> computes a materialized
+              <code>PnLView</code> per position.
+            </li>
+            <li>
+              It resolves entry and close lifecycle facts, then calls
+              <code>calculateLpEconomics(facts)</code>.
+            </li>
+            <li>
+              It enriches the result with USD prices. Active positions use live USD prices. Closed
+              positions prefer persisted close-time USD prices and fall back to historical
+              CoinGecko pricing when needed.
+            </li>
+            <li>
+              The API route <code>GET /pnl</code> reads these materialized views from
+              <code>pnl_view_cache</code>. It may lazily backfill a missing <code>openedAt</code>
+              timestamp from the stored entry block.
+            </li>
+          </ol>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Calculation Ownership</h2>
+        <div class="mt-6 grid gap-6 lg:grid-cols-2">
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <h3 class="text-lg font-semibold text-neutral-950">Computed in Core Before Caching</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-7 text-neutral-700 list-disc pl-5">
+              <li><code>entryAmount0</code>, <code>entryAmount1</code>, <code>exitAmount0</code>, <code>exitAmount1</code></li>
+              <li><code>feesCollected0</code>, <code>feesCollected1</code>, <code>pendingFeesValueInToken1</code></li>
+              <li><code>absolutePnlInToken1</code>, <code>absolutePnlPercent</code></li>
+              <li><code>divergenceLossPercent</code></li>
+              <li><code>opportunityCostInToken1</code></li>
+              <li><code>netVsHodlPercent</code></li>
+              <li><code>feesValueUsd</code> and per-token USD fee values when prices are available</li>
+            </ul>
+          </article>
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <h3 class="text-lg font-semibold text-neutral-950">Computed in the Web UI After Fetch</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-7 text-neutral-700 list-disc pl-5">
+              <li><code>currentBalanceUsd(position)</code> in <code>apps/web/src/App.tsx</code></li>
+              <li><code>calculateThirtyDayPortfolioCarryRunRate(positions)</code></li>
+              <li><code>buildBlotterPnl(...)</code>, which combines LP P&amp;L with hedge P&amp;L for display</li>
+              <li>Portfolio totals such as total mark-to-market P&amp;L and lifetime fee income</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Cache Boundaries and Data Sources</h2>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <table class="min-w-full text-left text-sm text-neutral-700">
+            <thead class="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              <tr>
+                <th class="px-4 py-3">Concern</th>
+                <th class="px-4 py-3">Normal dashboard read</th>
+                <th class="px-4 py-3">Sync-time source</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Current LP balances and range state</td>
+                <td class="px-4 py-3">SQLite cache</td>
+                <td class="px-4 py-3">HyperEVM RPC via core chain services</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Entry and close lifecycle facts</td>
+                <td class="px-4 py-3">SQLite cache</td>
+                <td class="px-4 py-3">Config-known tx hashes plus chain/log discovery</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">USD fee valuation for active positions</td>
+                <td class="px-4 py-3">SQLite cache</td>
+                <td class="px-4 py-3">Live USD prices during sync</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">USD fee valuation for closed positions</td>
+                <td class="px-4 py-3">SQLite cache</td>
+                <td class="px-4 py-3">Persisted close prices, else historical CoinGecko, else live fallback</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Last synced timestamp</td>
+                <td class="px-4 py-3">SQLite cache metadata</td>
+                <td class="px-4 py-3">Written by <code>replaceLpCaches()</code> and <code>upsertLpSyncState()</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10 grid gap-6 lg:grid-cols-2">
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Loading and Error Behavior</h2>
+          <ul class="mt-5 space-y-3 text-sm leading-7 text-neutral-700 list-disc pl-5">
+            <li><code>fetchJson()</code> throws <code>ApiError</code> on non-2xx responses.</li>
+            <li><code>App.tsx</code> renders explicit loading and error states for the dashboard query.</li>
+            <li>Sync UI separately shows in-progress, complete, and failed banners.</li>
+            <li><code>GET /positions/:tokenId</code> and <code>GET /positions/:tokenId/pnl</code> return <code>400</code> for invalid token IDs and <code>404</code> for missing positions.</li>
+            <li>P&amp;L USD enrichment is optional; token1-denominated economics can still render when USD prices are unavailable.</li>
+          </ul>
+        </article>
+
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Refresh Semantics</h2>
+          <ul class="mt-5 space-y-3 text-sm leading-7 text-neutral-700 list-disc pl-5">
+            <li><code>useDashboardPositions()</code> does not define periodic refetch polling.</li>
+            <li>Full sync polling interval: 2000ms via <code>useSyncPositions()</code>.</li>
+            <li>Per-position sync polling interval: 2000ms via <code>useSyncPosition(tokenId)</code>.</li>
+            <li>After sync completion, the client invalidates the <code>dashboardPositions</code> query and refetches cached data.</li>
+            <li>This design keeps normal dashboard reads fast and protects chain and pricing dependencies from every page load.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Configuration That Influences Fetching</h2>
+        <p class="mt-4 max-w-4xl text-sm leading-7 text-neutral-700">
+          The API loads a shared tracker config, which controls how the sync job discovers lifecycle
+          events and prices assets.
+        </p>
+        <div class="mt-6 grid gap-4 md:grid-cols-2">
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950"><code>positions[tokenId].openTx</code> and <code>closeTx</code></p>
+            <p class="mt-2">Provide known lifecycle transactions for faster and more reliable entry/close discovery.</p>
+          </article>
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950"><code>pricing.coingeckoIds</code></p>
+            <p class="mt-2">Maps token symbols or addresses to CoinGecko IDs for USD pricing and historical close valuation.</p>
+          </article>
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950"><code>rpc</code> and <code>logsRpc</code></p>
+            <p class="mt-2">Define where core services read contracts, logs, receipts, and blocks during sync.</p>
+          </article>
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950"><code>logsFromBlock</code></p>
+            <p class="mt-2">Limits how far back event discovery scans when the lifecycle is not fully specified in config.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Important Files</h2>
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">Frontend</p>
+            <p><code>apps/web/src/App.tsx</code></p>
+            <p><code>apps/web/src/api.ts</code></p>
+            <p><code>apps/web/src/hooks/useDashboardPositions.ts</code></p>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">API</p>
+            <p><code>apps/api/src/index.ts</code></p>
+            <p><code>apps/api/src/routes/positions.ts</code></p>
+            <p><code>apps/api/src/routes/pnl.ts</code></p>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">Core sync and calculations</p>
+            <p><code>packages/core/src/services/positions.ts</code></p>
+            <p><code>packages/core/src/services/pnl.ts</code></p>
+            <p><code>packages/core/src/services/lp-economics.ts</code></p>
+            <p><code>packages/core/src/services/position-lifecycle.ts</code></p>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">Persistence and configuration</p>
+            <p><code>packages/core/src/db/store.ts</code></p>
+            <p><code>packages/core/src/config.ts</code></p>
+            <p><code>config.json</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="rounded-3xl border border-neutral-200 bg-neutral-950 p-8 text-neutral-100 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight">Summary</h2>
+        <p class="mt-4 max-w-4xl text-sm leading-7 text-neutral-300">
+          The web app reads two precomputed cache-backed views, <code>PositionView</code> and
+          <code>PnLView</code>, from the Fastify API. Those views are generated during explicit sync
+          jobs in the shared core package, which pull on-chain state, resolve lifecycle events,
+          fetch USD pricing, compute LP economics, and persist the result in SQLite. The browser
+          merges the two datasets by <code>tokenId</code> and applies only a small amount of
+          presentation-level aggregation afterward.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

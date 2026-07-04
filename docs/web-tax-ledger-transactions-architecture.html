@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web App Architecture: Tax Ledger Transaction Data Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+  </head>
+  <body class="bg-neutral-100 text-neutral-900">
+    <main class="mx-auto max-w-7xl px-6 py-10 lg:px-10">
+      <header class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <p class="text-sm font-semibold uppercase tracking-[0.24em] text-neutral-500">
+          Software Architecture Documentation
+        </p>
+        <h1 class="mt-3 text-4xl font-semibold tracking-tight text-neutral-950">
+          How the Web Tax Ledger Fetches Transactions
+        </h1>
+        <p class="mt-4 max-w-4xl text-base leading-7 text-neutral-700">
+          This page documents the actual runtime path used by the tax ledger UI to load,
+          paginate, filter, sync, and edit tax transactions.
+        </p>
+      </header>
+
+      <section class="mb-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Frontend</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            The <code>/tax</code> route loads paginated transactions with React Query and renders a
+            client-side grouped table.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">API</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            Fastify serves live transaction rows from SQLite and exposes sync, manual create, and
+            update endpoints.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Core</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            Core services import transactions from HyperSync, explorer fallbacks, LP flow
+            synthesis, hedge flow synthesis, and EUR enrichment.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Storage</p>
+          <p class="mt-2 text-sm leading-6 text-neutral-700">
+            The ledger read path is live against the <code>tax_transactions</code> SQLite table.
+            There is no separate server-side view cache for list reads.
+          </p>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">System Overview</h2>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <div class="mermaid min-w-[980px]">
+flowchart LR
+    UI[Tax ledger UI\napps/web/src/TaxTransactions.tsx] --> HOOK[useTaxTransactions]
+    HOOK --> API[apps/web/src/api.ts\ngetTaxTransactions]
+    API --> ROUTE[GET /tax/transactions]
+    ROUTE --> FASTIFY[apps/api/src/routes/tax.ts]
+    FASTIFY --> STORE[listTaxTransactions + countTaxTransactions]
+    STORE --> DB[(tax_transactions\nSQLite)]
+
+    SYNCBTN[Sync button] --> POSTSYNC[POST /tax/transactions/sync]
+    POSTSYNC --> CORESYNC[syncTaxTransactions]
+    CORESYNC --> HS[HyperSync txs + transfers]
+    CORESYNC --> EXPLORER[Explorer internal tx fallback]
+    CORESYNC --> LP[LP tax flow synthesis]
+    CORESYNC --> HEDGE[Hedge tax flow synthesis]
+    CORESYNC --> EUR[CoinGecko EUR enrichment]
+    CORESYNC --> UPSERT[upsertSyncedTaxTransaction]
+    UPSERT --> DB
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-10 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Primary Runtime Flow</h2>
+          <ol class="mt-5 space-y-4 text-sm leading-7 text-neutral-700 list-decimal pl-5">
+            <li>
+              The router maps <code>/tax</code> to <code>apps/web/src/TaxTransactions.tsx</code>.
+            </li>
+            <li>
+              <code>TaxTransactions</code> calls <code>useTaxTransactions({ limit, offset, label })</code>.
+            </li>
+            <li>
+              <code>useTaxTransactions()</code> in
+              <code>apps/web/src/hooks/useTaxTransactions.ts</code> runs a React Query request whose
+              query key includes the current pagination and filter options.
+            </li>
+            <li>
+              <code>getTaxTransactions()</code> in <code>apps/web/src/api.ts</code> sends
+              <code>GET /tax/transactions?limit=&amp;offset=&amp;label=</code>.
+            </li>
+            <li>
+              The Fastify tax route validates query parameters, reads rows directly from SQLite, and
+              returns <code>{ transactions, pagination }</code>.
+            </li>
+            <li>
+              The UI groups rows by hash and applies table sorting and expansion locally after the
+              fetch completes.
+            </li>
+          </ol>
+        </article>
+
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Key Point</h2>
+          <div class="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm leading-7 text-emerald-950">
+            Unlike LP positions and P&amp;L, tax ledger reads are not served from a materialized view
+            cache. The list endpoint queries <code>tax_transactions</code> directly on every server
+            request. The only cache on the read path is React Query in the browser.
+          </div>
+          <dl class="mt-6 space-y-4 text-sm leading-6 text-neutral-700">
+            <div>
+              <dt class="font-semibold text-neutral-950">Frontend transport</dt>
+              <dd><code>fetchJson()</code> in <code>apps/web/src/api.ts</code></dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-neutral-950">Route handler</dt>
+              <dd><code>apps/api/src/routes/tax.ts</code></dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-neutral-950">Backing table</dt>
+              <dd><code>tax_transactions</code> in <code>data/lp-tracker.db</code></dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-neutral-950">Incremental sync watermark</dt>
+              <dd><code>tax_sync_state</code></dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Read Path by Layer</h2>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <table class="min-w-full text-left text-sm text-neutral-700">
+            <thead class="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              <tr>
+                <th class="px-4 py-3">Layer</th>
+                <th class="px-4 py-3">File</th>
+                <th class="px-4 py-3">Responsibility</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Screen</td>
+                <td class="px-4 py-3"><code>apps/web/src/TaxTransactions.tsx</code></td>
+                <td class="px-4 py-3">Owns pagination state, label filter state, loading/error UI, and client-side grouping.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Data hook</td>
+                <td class="px-4 py-3"><code>apps/web/src/hooks/useTaxTransactions.ts</code></td>
+                <td class="px-4 py-3">Creates React Query entries keyed by transaction list options.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Browser API client</td>
+                <td class="px-4 py-3"><code>apps/web/src/api.ts</code></td>
+                <td class="px-4 py-3">Builds query strings, validates list and pagination shapes, throws <code>ApiError</code> on bad responses.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">API route</td>
+                <td class="px-4 py-3"><code>apps/api/src/routes/tax.ts</code></td>
+                <td class="px-4 py-3">Parses <code>limit</code>, <code>offset</code>, and <code>label</code>, reads rows and totals from the core store.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Persistence</td>
+                <td class="px-4 py-3"><code>packages/core/src/db/store.ts</code></td>
+                <td class="px-4 py-3">Executes ordered SQL queries against <code>tax_transactions</code> and <code>tax_sync_state</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Pagination and Filtering</h2>
+        <div class="mt-6 grid gap-6 lg:grid-cols-2">
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <h3 class="text-lg font-semibold text-neutral-950">Server-Side</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-7 text-neutral-700 list-disc pl-5">
+              <li><code>listTaxTransactions(limit, offset, label)</code> applies SQL <code>LIMIT</code> and <code>OFFSET</code>.</li>
+              <li>Rows are ordered by <code>time_stamp DESC, block_number DESC</code>.</li>
+              <li><code>countTaxTransactions(label)</code> computes the total count for pagination.</li>
+              <li><code>label</code> supports specific labels and an unlabeled mode via <code>label IS NULL</code>.</li>
+            </ul>
+          </article>
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <h3 class="text-lg font-semibold text-neutral-950">Client-Side</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-7 text-neutral-700 list-disc pl-5">
+              <li><code>TaxTransactions.tsx</code> owns <code>page</code> and <code>rowsPerPage</code> state.</li>
+              <li>Changing page or page size produces a new React Query key and refetch.</li>
+              <li>Transaction grouping by hash happens after fetch in <code>buildTableRows()</code>.</li>
+              <li>TanStack Table sorting and row expansion are presentation concerns only.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Sync and Refresh Flow</h2>
+        <p class="mt-4 max-w-4xl text-sm leading-7 text-neutral-700">
+          Tax sync is explicit. The list endpoint does not trigger imports. The UI uses a mutation to
+          run sync, then invalidates all tax transaction queries so the list refetches.
+        </p>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <div class="mermaid min-w-[1020px]">
+sequenceDiagram
+    participant U as User
+    participant W as Web app
+    participant A as API route
+    participant C as Core syncTaxTransactions
+    participant S as External sources
+    participant D as SQLite
+
+    U->>W: Click Sync
+    W->>A: POST /tax/transactions/sync
+    A->>C: syncTaxTransactions(config)
+    C->>D: read tax_sync_state watermark
+    C->>S: fetch txs, token transfers, internal txs
+    C->>C: synthesize LP and hedge tax rows
+    C->>C: enrich rows with EUR values
+    C->>D: upsertSyncedTaxTransaction(...)
+    C->>D: upsertTaxSyncState(...)
+    A-->>W: sync summary
+    W->>W: invalidate ["taxTransactions"] queries
+    W->>A: GET /tax/transactions?limit=&offset=&label=
+    A->>D: listTaxTransactions + countTaxTransactions
+    A-->>W: fresh transactions + pagination
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-10 grid gap-6 lg:grid-cols-2">
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">External Sources That Feed the Ledger</h2>
+          <ul class="mt-5 space-y-3 text-sm leading-7 text-neutral-700 list-disc pl-5">
+            <li>HyperSync transaction history via <code>fetchTransactionsByAddress()</code></li>
+            <li>HyperSync token transfer history via <code>fetchTokenTransfersByAddress()</code></li>
+            <li>Explorer API fallback for <code>txlistinternal</code></li>
+            <li>LP lifecycle-derived synthetic tax rows from <code>syncLpTaxFlows()</code></li>
+            <li>Hedge-derived synthetic tax rows from hedge tax flow sync</li>
+            <li>CoinGecko historical pricing for EUR cost/proceeds/gain enrichment</li>
+          </ul>
+        </article>
+
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Incremental Sync State</h2>
+          <ul class="mt-5 space-y-3 text-sm leading-7 text-neutral-700 list-disc pl-5">
+            <li><code>getTaxSyncState(wallet)</code> reads the last synced block watermark.</li>
+            <li><code>syncTaxTransactions()</code> resumes from <code>last_block_number + 1</code>.</li>
+            <li><code>upsertTaxSyncState()</code> records the new watermark and sync timestamp.</li>
+            <li>This avoids full history re-import on every sync.</li>
+          </ul>
+          <div class="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-950">
+            The ledger is not rebuilt from scratch on every refresh. It is an incrementally updated,
+            durable transaction table.
+          </div>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Manual Create and Update Flow</h2>
+        <div class="mt-6 grid gap-6 lg:grid-cols-2">
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <h3 class="text-lg font-semibold text-neutral-950">Manual Create</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-7 text-neutral-700 list-disc pl-5">
+              <li>The UI submits <code>POST /tax/transactions</code>.</li>
+              <li>The API validates the editable manual fields.</li>
+              <li><code>createManualTaxTransaction()</code> inserts a row with <code>source = "manual"</code> and <code>transaction_type = "manual"</code>.</li>
+              <li>The new row appears in normal list reads immediately after query invalidation.</li>
+            </ul>
+          </article>
+          <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <h3 class="text-lg font-semibold text-neutral-950">Manual Update</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-7 text-neutral-700 list-disc pl-5">
+              <li>The UI submits <code>PATCH /tax/transactions/:id</code>.</li>
+              <li><code>updateTaxTransaction()</code> allows full ledger-field edits only for manual rows.</li>
+              <li>For synced rows, label and comment remain editable, but core ledger properties are protected.</li>
+              <li>Successful updates invalidate all tax transaction queries and refetch the list.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Mutation and Query Behavior</h2>
+        <div class="mt-6 overflow-x-auto rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <table class="min-w-full text-left text-sm text-neutral-700">
+            <thead class="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              <tr>
+                <th class="px-4 py-3">Action</th>
+                <th class="px-4 py-3">Frontend hook</th>
+                <th class="px-4 py-3">Effect on data</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">List fetch</td>
+                <td class="px-4 py-3"><code>useTaxTransactions()</code></td>
+                <td class="px-4 py-3">Fetches a specific <code>limit/offset/label</code> slice.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Sync import</td>
+                <td class="px-4 py-3"><code>useSyncTaxTransactions()</code></td>
+                <td class="px-4 py-3">Runs backend sync, then invalidates all <code>["taxTransactions"]</code> queries.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Create manual row</td>
+                <td class="px-4 py-3"><code>useCreateTaxTransaction()</code></td>
+                <td class="px-4 py-3">Inserts a manual row, then invalidates all tax transaction queries.</td>
+              </tr>
+              <tr class="border-t border-neutral-200">
+                <td class="px-4 py-3 font-medium text-neutral-950">Update row</td>
+                <td class="px-4 py-3"><code>useUpdateTaxTransaction()</code></td>
+                <td class="px-4 py-3">Writes to SQLite, then invalidates all tax transaction queries.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10 grid gap-6 lg:grid-cols-2">
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Loading and Error Behavior</h2>
+          <ul class="mt-5 space-y-3 text-sm leading-7 text-neutral-700 list-disc pl-5">
+            <li><code>TaxLoadingState</code> renders during initial query load.</li>
+            <li><code>TaxErrorState</code> renders when the query fails.</li>
+            <li><code>TaxEmptyState</code> renders when no rows are returned.</li>
+            <li>While the list is refetching, the UI shows <code>Refreshing list...</code>.</li>
+            <li>Mutation failures for sync, create, and update are shown inline in the screen.</li>
+          </ul>
+        </article>
+
+        <article class="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Write Protection Rules</h2>
+          <ul class="mt-5 space-y-3 text-sm leading-7 text-neutral-700 list-disc pl-5">
+            <li><code>upsertSyncedTaxTransaction()</code> will not overwrite rows whose <code>source</code> is <code>manual</code>.</li>
+            <li>Manual-only ledger fields cannot be edited on synced rows.</li>
+            <li>This preserves user-entered corrections and manual bookkeeping records during later syncs.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Important Files</h2>
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">Frontend</p>
+            <p><code>apps/web/src/router.tsx</code></p>
+            <p><code>apps/web/src/TaxTransactions.tsx</code></p>
+            <p><code>apps/web/src/hooks/useTaxTransactions.ts</code></p>
+            <p><code>apps/web/src/api.ts</code></p>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">API</p>
+            <p><code>apps/api/src/routes/tax.ts</code></p>
+            <p><code>apps/api/src/index.ts</code></p>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">Core services</p>
+            <p><code>packages/core/src/services/tax-transactions.ts</code></p>
+            <p><code>packages/core/src/db/tax-ledger-store.ts</code></p>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <p class="font-semibold text-neutral-950">Persistence</p>
+            <p><code>packages/core/src/db/store.ts</code></p>
+            <p><code>data/lp-tracker.db</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="rounded-3xl border border-neutral-200 bg-neutral-950 p-8 text-neutral-100 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight">Summary</h2>
+        <p class="mt-4 max-w-4xl text-sm leading-7 text-neutral-300">
+          The tax ledger UI fetches paginated transaction rows directly from SQLite through
+          <code>GET /tax/transactions</code>. React Query caches those pages in the browser, while
+          sync, manual create, and update mutations invalidate the cached lists and trigger
+          refetches. The underlying ledger table is incrementally maintained by a core sync process
+          that merges external blockchain activity, synthetic LP and hedge events, and historical
+          EUR enrichment.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

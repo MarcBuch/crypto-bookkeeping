@@ -1,6 +1,7 @@
 .DS_STORE
 node_modules/
 dist/
+.flue/dist/
 data/*.db
 data/*.db-wal
 data/*.db-shm
@@ -25,3 +26,4 @@ apps/*/vite.config.d.ts
 
 # Trade logs and session history
 trade_log/
+run-artifacts/

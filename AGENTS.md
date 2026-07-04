@@ -4,6 +4,8 @@ Gotchas and lessons learned for AI agents working in this repo.
 
 ---
 
+Always delegate codebase exploration (directory structure, package layout, understanding dependencies, finding files/routes) to the codebase-explorer subagent by using `task` with `subagent_type: "codebase-explorer"`.
+
 ## Testing
 
 ### `bun test` vs `bun run test` — critical difference

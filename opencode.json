@@ -1,6 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "litellm/claude-sonnet-4.6",
   "provider": {
     "litellm": {
       "npm": "@ai-sdk/openai-compatible",
@@ -47,5 +46,9 @@
         }
       }
     }
-  }
+  },
+  "plugin": [
+    "@mohak34/opencode-notifier@latest",
+    "@marcbuch/opencode-interface-map@0.1.2"
+  ]
 }

@@ -203,7 +203,6 @@ function findElementByType(node: ReactNode, type: string): ReactElement<any> {
     return node;
   }
 
-  const element = node as ReactElement<{ children?: ReactNode }>;
-
+  const element = node as ReactElement<any>;
   return findElementByType(element.props.children, type);
 }

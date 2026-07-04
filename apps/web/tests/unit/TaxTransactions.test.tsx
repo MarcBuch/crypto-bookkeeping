@@ -125,10 +125,10 @@ describe("tax transactions rendering", () => {
     );
 
     expect(html).toContain('aria-label="Rows per page"');
-    expect(html).toContain('Showing 1-50 of 125');
+    expect(html).toContain("Showing 1-50 of 125");
     expect(html).toContain('disabled=""');
-    expect(html).toContain('Previous');
-    expect(html).toContain('Next');
+    expect(html).toContain("Previous");
+    expect(html).toContain("Next");
   });
 
   it("shows the current page range and enables both navigation buttons in the middle", () => {
@@ -145,9 +145,9 @@ describe("tax transactions rendering", () => {
       />,
     );
 
-    expect(html).toContain('Showing 51-100 of 125');
-    expect(html).toContain('>Previous<');
-    expect(html).toContain('>Next<');
+    expect(html).toContain("Showing 51-100 of 125");
+    expect(html).toContain(">Previous<");
+    expect(html).toContain(">Next<");
     expect(html).not.toContain('disabled="" type="button">Previous');
     expect(html).not.toContain('disabled="" type="button">Next');
   });

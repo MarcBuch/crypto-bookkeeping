@@ -234,20 +234,22 @@ describe("getHedgeView() — missing/closed position scenarios", () => {
     const error = await captureError(getHedgeView(config, "123"));
 
     expect(expectError(error).message).toMatch(/no open/i);
-    expect(listHedgeEvents()).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        status: "closed",
-        realized_pnl: 10,
-        hl_fill_hash: "2002",
-        token_id: null,
-      }),
-      expect.objectContaining({
-        status: "closed",
-        realized_pnl: -5,
-        hl_fill_hash: "4004",
-        token_id: null,
-      }),
-    ]));
+    expect(listHedgeEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "closed",
+          realized_pnl: 10,
+          hl_fill_hash: "2002",
+          token_id: null,
+        }),
+        expect.objectContaining({
+          status: "closed",
+          realized_pnl: -5,
+          hl_fill_hash: "4004",
+          token_id: null,
+        }),
+      ]),
+    );
     expect(listHedgeEvents()).toHaveLength(2);
   });
 

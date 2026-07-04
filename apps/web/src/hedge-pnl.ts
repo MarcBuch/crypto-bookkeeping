@@ -142,8 +142,7 @@ export function buildNetHedgePnLFromEvents(
     }
   }
 
-  const hedgePnlUsd =
-    missingUnrealized ? null : (closedHedges.totalUsd ?? 0) + openHedgePnlUsd;
+  const hedgePnlUsd = missingUnrealized ? null : (closedHedges.totalUsd ?? 0) + openHedgePnlUsd;
 
   return {
     ...buildCombinedNetHedgePnL(pnl, hedgePnlUsd),

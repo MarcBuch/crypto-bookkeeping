@@ -185,10 +185,10 @@ export function Dashboard({
   isLoadingUnassignedHedges?: boolean;
   unassignedHedgesError?: unknown;
 }) {
-  const {
-    data: assignedHedgesData,
-    error: assignedHedgesError,
-  } = useHedgeEventsList("assigned", !isSyncing);
+  const { data: assignedHedgesData, error: assignedHedgesError } = useHedgeEventsList(
+    "assigned",
+    !isSyncing,
+  );
   const assignedHedgesByTokenId = groupAssignedHedgesByTokenId(assignedHedgesData?.hedges ?? []);
 
   const openPositions = positions.filter((position) => position.status !== "closed");
@@ -196,8 +196,11 @@ export function Dashboard({
   const totals = positions.reduce(
     (acc, position) => {
       acc.pnl +=
-        buildBlotterPnl(position.pnl, undefined, assignedHedgesByTokenId.get(position.tokenId) ?? [])
-          .displayedPnlInToken1 ?? 0;
+        buildBlotterPnl(
+          position.pnl,
+          undefined,
+          assignedHedgesByTokenId.get(position.tokenId) ?? [],
+        ).displayedPnlInToken1 ?? 0;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
       if (typeof position.pnl?.feesValueUsd === "number") {
         acc.feesUsd += position.pnl.feesValueUsd;
@@ -443,20 +446,25 @@ export function UnassignedHedgeTradeRowView({
         </div>
 
         <div className="w-full max-w-md space-y-2 lg:w-80">
-          <label className="block text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase">
+          <label
+            htmlFor="assign-to-lp-position"
+            className="block text-[0.68rem] font-semibold tracking-[0.18em] text-neutral-500 uppercase"
+          >
             Assign to LP position
           </label>
           <div className="flex gap-2">
             <select
+              id="assign-to-lp-position"
               value={selectedTokenId}
               onChange={(event) => onSelectedTokenIdChange(event.target.value)}
               disabled={isAssigning || positions.length === 0}
-              className="min-w-0 flex-1 rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-neutral-950 disabled:opacity-60"
+              className="min-w-0 flex-1 rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 transition outline-none focus:border-neutral-950 disabled:opacity-60"
             >
               <option value="">Select position…</option>
               {positions.map((position) => (
                 <option key={position.tokenId} value={position.tokenId}>
-                  {position.token0.symbol}/{position.token1.symbol} #{position.tokenId} · {position.status}
+                  {position.token0.symbol}/{position.token1.symbol} #{position.tokenId} ·{" "}
+                  {position.status}
                 </option>
               ))}
             </select>
@@ -596,7 +604,9 @@ function ActivePositionRow({
       ? "Active hedge P&L unavailable"
       : undefined;
   const hedgeDetailSuffix =
-    hedgeDisplay.source === "assigned" && assignedNetHedgePnl.fundingPartial ? " · funding partial" : "";
+    hedgeDisplay.source === "assigned" && assignedNetHedgePnl.fundingPartial
+      ? " · funding partial"
+      : "";
 
   const roiDetail = pnl
     ? (() => {
@@ -771,7 +781,7 @@ function AssignedActiveHedgesPanel({
         : "text-rose-600";
 
   return (
-    <div className="border-t border-neutral-300 bg-neutral-250/80 px-5 py-3 sm:px-7">
+    <div className="bg-neutral-250/80 border-t border-neutral-300 px-5 py-3 sm:px-7">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase">
           <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-1 text-rose-700">
@@ -784,7 +794,10 @@ function AssignedActiveHedgesPanel({
         </div>
         {hedgePnlUsd != null ? (
           <div className="font-mono text-xs font-bold text-neutral-700">
-            hedge <span className={hedgePnlUsd >= 0 ? "text-emerald-700" : "text-rose-600"}>{formatUsd(hedgePnlUsd)}</span>
+            hedge{" "}
+            <span className={hedgePnlUsd >= 0 ? "text-emerald-700" : "text-rose-600"}>
+              {formatUsd(hedgePnlUsd)}
+            </span>
             {combinedPnlUsd != null ? (
               <span className="ml-2 text-neutral-500">
                 net <span className={combinedTone}>{formatUsd(combinedPnlUsd)}</span>
@@ -796,8 +809,9 @@ function AssignedActiveHedgesPanel({
       <div className="space-y-1 font-mono text-xs text-neutral-700">
         {hedges.map((hedge) => (
           <div key={hedge.id}>
-            #{hedge.id} {formatHedgeEventSize(hedge)} {hedge.coin} @ {formatPrice(hedge.entry_px)} · mark{" "}
-            {hedge.mark_px != null ? formatPrice(hedge.mark_px) : "—"} · {formatAssignedOpenHedgePnl(hedge)}
+            #{hedge.id} {formatHedgeEventSize(hedge)} {hedge.coin} @ {formatPrice(hedge.entry_px)} ·
+            mark {hedge.mark_px != null ? formatPrice(hedge.mark_px) : "—"} ·{" "}
+            {formatAssignedOpenHedgePnl(hedge)}
           </div>
         ))}
       </div>
@@ -1011,7 +1025,11 @@ function TokenIcon({ symbol, className }: { symbol: string; className: string })
       className={`absolute top-0 grid h-8 w-8 place-items-center rounded-full border-2 border-neutral-200 ${backgroundClass} text-[0.62rem] font-black text-white shadow-lg ${className}`}
     >
       {iconSrc ? (
-        <img src={iconSrc} alt={`${symbol} token icon`} className="h-full w-full rounded-full object-cover" />
+        <img
+          src={iconSrc}
+          alt={`${symbol} token icon`}
+          className="h-full w-full rounded-full object-cover"
+        />
       ) : (
         symbol.slice(0, 1)
       )}
@@ -1089,13 +1107,26 @@ function PositionRow({
     !isSyncingPosition,
   );
   const blotterPnl = buildBlotterPnl(pnl, hedgeData, assignedHedges);
-  const activeAssignedHedges = assignedHedges.filter((hedge) => hedge.status === "open");
-  const closedAssignedHedges = dedupeClosedAssignedHedges(assignedHedges)
-    .sort((a, b) => {
-      const left = new Date(a.closed_at ?? a.opened_at).getTime();
-      const right = new Date(b.closed_at ?? b.opened_at).getTime();
-      return right - left;
-    });
+  const activeAssignedHedges: HedgeEvent[] = assignedHedges.filter(
+    (hedge: HedgeEvent) => hedge.status === "open",
+  );
+  const closedAssignedHedges: HedgeEvent[] = dedupeClosedAssignedHedges(assignedHedges).reduce(
+    (sorted: HedgeEvent[], hedge: HedgeEvent) => {
+      const hedgeTime = new Date(hedge.closed_at ?? hedge.opened_at).getTime();
+      const insertAt = sorted.findIndex(
+        (other: HedgeEvent) => new Date(other.closed_at ?? other.opened_at).getTime() < hedgeTime,
+      );
+
+      if (insertAt === -1) {
+        sorted.push(hedge);
+      } else {
+        sorted.splice(insertAt, 0, hedge);
+      }
+
+      return sorted;
+    },
+    [],
+  );
   const hasAssignedHedges = assignedHedges.length > 0;
   const hedgeStatusPnlUsd =
     hedgeData?.status === "active"
@@ -1159,7 +1190,8 @@ function PositionRow({
               <div className="space-y-1 text-xs text-neutral-500">
                 {closedAssignedHedges.map((hedge) => (
                   <div key={hedge.id} className="font-mono">
-                    closed #{hedge.id} {formatDateTime(hedge.closed_at)} · {formatAssignedClosedHedgePnl(hedge)}
+                    closed #{hedge.id} {formatDateTime(hedge.closed_at)} ·{" "}
+                    {formatAssignedClosedHedgePnl(hedge)}
                   </div>
                 ))}
               </div>
@@ -1386,7 +1418,8 @@ export function buildBlotterPnl(
     closedHedgePnlUsd,
     closedHedgePnlInToken1,
     closedHedgeFundingUnknown: assignedClosedHedge.count > 0 && assignedClosedHedge.fundingUnknown,
-    closedHedgeCount: assignedClosedHedge.count > 0 ? assignedClosedHedge.count : closedHedgePnlUsd != null ? 1 : 0,
+    closedHedgeCount:
+      assignedClosedHedge.count > 0 ? assignedClosedHedge.count : closedHedgePnlUsd != null ? 1 : 0,
     includesClosedHedge: lpPnlInToken1 != null && closedHedgePnlInToken1 != null,
   };
 }

@@ -33,8 +33,8 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { QueryClient } from "@tanstack/react-query";
 
 import * as api from "../../src/api";
-import { hedgeQueryKeys } from "../../src/hooks/useHedge";
 import { queryKeys } from "../../src/hooks/useDashboardPositions";
+import { hedgeQueryKeys } from "../../src/hooks/useHedge";
 
 const realSetInterval = globalThis.setInterval;
 const realClearInterval = globalThis.clearInterval;

@@ -444,7 +444,10 @@ export function groupTaxTransactions(transactions: TaxTransaction[]): TaxTransac
   return sortTaxTransactionGroupsNewestFirst([...groups.values()]);
 }
 
-function chooseTaxTransactionGroupPrimary(left: TaxTransaction, right: TaxTransaction): TaxTransaction {
+function chooseTaxTransactionGroupPrimary(
+  left: TaxTransaction,
+  right: TaxTransaction,
+): TaxTransaction {
   if (compareTaxTransactionGroupPrimary(left, right) <= 0) return left;
   return right;
 }
@@ -661,8 +664,10 @@ export function TaxTransactionLedger({
   const currentPage = page ?? 0;
   const currentRowsPerPage = rowsPerPage ?? 50;
   const lastPage = Math.max(Math.ceil(paginationTotal / currentRowsPerPage) - 1, 0);
-  const currentStart = paginationTotal === 0 ? 0 : Math.min(currentPage * currentRowsPerPage + 1, paginationTotal);
-  const currentEnd = paginationTotal === 0 ? 0 : Math.min((currentPage + 1) * currentRowsPerPage, paginationTotal);
+  const currentStart =
+    paginationTotal === 0 ? 0 : Math.min(currentPage * currentRowsPerPage + 1, paginationTotal);
+  const currentEnd =
+    paginationTotal === 0 ? 0 : Math.min((currentPage + 1) * currentRowsPerPage, paginationTotal);
   const canGoPrevious = currentPage > 0;
   const canGoNext = currentPage < lastPage;
 

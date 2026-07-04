@@ -386,9 +386,7 @@ export async function getTaxTransactions(
   const data = await fetchJson<{
     transactions?: unknown;
     pagination?: unknown;
-  }>(
-    `/tax/transactions${query ? `?${query}` : ""}`,
-  );
+  }>(`/tax/transactions${query ? `?${query}` : ""}`);
 
   if (!Array.isArray(data.transactions)) {
     throw new ApiError("API response did not include tax transactions.");
@@ -407,13 +405,11 @@ export async function getTaxTransactions(
     typeof limit !== "number" ||
     typeof offset !== "number" ||
     typeof total !== "number" ||
-    (
-      label !== null &&
+    (label !== null &&
       label !== "Trade" &&
       label !== "Transfer" &&
       label !== "Approval" &&
-      label !== "Repay Loan"
-    )
+      label !== "Repay Loan")
   ) {
     throw new ApiError("API response included malformed tax transactions pagination.");
   }
@@ -506,7 +502,10 @@ export async function getHedges(
   return { hedges: data.hedges };
 }
 
-export async function assignHedgeEvent(id: number, tokenId: string | null): Promise<{ hedge: HedgeEvent }> {
+export async function assignHedgeEvent(
+  id: number,
+  tokenId: string | null,
+): Promise<{ hedge: HedgeEvent }> {
   const data = await fetchJson<{ hedge?: HedgeEvent }>(`/hedges/${id}/assignment`, {
     method: "PATCH",
     body: { tokenId },

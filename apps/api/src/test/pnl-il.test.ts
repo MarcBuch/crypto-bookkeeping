@@ -124,7 +124,8 @@ let mockGetPosition: (...args: unknown[]) => unknown = () => null;
 let mockCreateClient: (...args: unknown[]) => unknown = () => ({
   getBlock: async () => ({ timestamp: 1700000000n }),
 });
-let mockUpdateCachedPnLView: (...args: unknown[]) => unknown = () => undefined;
+let mockUpdateCachedPnLView: (tokenId: string, update: { openedAt: string }) => void = () =>
+  undefined;
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
 await mock.module("@lp-tracker/core", () => ({
@@ -136,7 +137,8 @@ await mock.module("@lp-tracker/core", () => ({
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
   getPosition: (...args: unknown[]) => mockGetPosition(...args),
   createClient: (...args: unknown[]) => mockCreateClient(...args),
-  updateCachedPnLView: (...args: unknown[]) => mockUpdateCachedPnLView(...args),
+  updateCachedPnLView: (tokenId: string, update: { openedAt: string }) =>
+    mockUpdateCachedPnLView(tokenId, update),
   syncLpData: async () => ({ synced: 0 }),
   syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
   getPnLView: async () => [],

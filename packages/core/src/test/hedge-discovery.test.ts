@@ -2,8 +2,8 @@ import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 
 import { assignHedgeEvent, getHedgeEvent, insertHedgeEvent, listHedgeEvents } from "../db/store.js";
 import { groupHyperliquidHedgeFills, syncHyperliquidHedgeTrades } from "../services/hedge.js";
-import { jsonResponse, setFetchMock, getRequestType } from "./helpers/http.js";
 import { useTestDb } from "./helpers/db.js";
+import { jsonResponse, setFetchMock, getRequestType } from "./helpers/http.js";
 
 type FetchInput = Parameters<typeof globalThis.fetch>[0];
 type FetchInit = Parameters<typeof globalThis.fetch>[1];
@@ -556,12 +556,12 @@ describe("syncHyperliquidHedgeTrades", () => {
 
     const created = listHedgeEvents()[0];
     expect(created).toBeDefined();
-    assignHedgeEvent(created!.id, "token-123");
+    assignHedgeEvent(created.id, "token-123");
 
     await syncHyperliquidHedgeTrades(baseConfig);
 
-    expect(getHedgeEvent(created!.id)).toMatchObject({
-      id: created!.id,
+    expect(getHedgeEvent(created.id)).toMatchObject({
+      id: created.id,
       token_id: "token-123",
       trade_key: "trade:hl:HYPE:3003",
       status: "open",

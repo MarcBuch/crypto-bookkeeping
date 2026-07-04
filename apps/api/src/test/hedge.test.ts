@@ -1035,7 +1035,12 @@ describe("GET /positions/:tokenId/hedge/events", () => {
       expect(res.json()).toMatchObject({
         tokenId: "123",
         events: [
-          expect.objectContaining({ id: 2, token_id: "123", trade_key: "trade-2", tax_key: "tax-2" }),
+          expect.objectContaining({
+            id: 2,
+            token_id: "123",
+            trade_key: "trade-2",
+            tax_key: "tax-2",
+          }),
         ],
       });
       expect(res.json().events).toHaveLength(1);

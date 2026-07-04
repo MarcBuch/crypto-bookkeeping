@@ -612,7 +612,7 @@ export function listTaxTransactions(
        ORDER BY time_stamp DESC, block_number DESC
         LIMIT ? OFFSET ?`,
     )
-      .all(limit, offset);
+    .all(limit, offset);
 }
 
 export function countTaxTransactions(label?: TaxTransactionLabelFilter): number {
@@ -620,7 +620,9 @@ export function countTaxTransactions(label?: TaxTransactionLabelFilter): number 
 
   if (label === "unlabeled") {
     return db
-      .query<{ total: number }, []>("SELECT COUNT(*) AS total FROM tax_transactions WHERE label IS NULL")
+      .query<{ total: number }, []>(
+        "SELECT COUNT(*) AS total FROM tax_transactions WHERE label IS NULL",
+      )
       .get()!.total;
   }
 
@@ -888,16 +890,18 @@ export function upsertPnLViewCache(tokenId: string | null, data: unknown, synced
 
 export function updateCachedPnLView(tokenId: string, update: Record<string, unknown>): void {
   const db = getDb();
-  const existing = db.query<CacheRow, [string]>("SELECT data FROM pnl_view_cache WHERE token_id = ?").get(tokenId);
+  const existing = db
+    .query<CacheRow, [string]>("SELECT data FROM pnl_view_cache WHERE token_id = ?")
+    .get(tokenId);
   if (!existing) {
     return;
   }
 
   const merged = { ...parseCachedView(existing.data), ...update };
-  db.run(
-    "UPDATE pnl_view_cache SET data = ? WHERE token_id = ?",
-    [JSON.stringify(merged), tokenId],
-  );
+  db.run("UPDATE pnl_view_cache SET data = ? WHERE token_id = ?", [
+    JSON.stringify(merged),
+    tokenId,
+  ]);
 }
 
 export interface StoredTokenMetadata {
@@ -991,20 +995,24 @@ export function insertHedgeEvent(event: Omit<StoredHedgeEvent, "id">): StoredHed
   return inserted;
 }
 
-function defaultHedgeTradeKey(event: Pick<
-  HedgeEventInsert,
-  "token_id" | "coin" | "hl_fill_hash" | "opened_at" | "entry_px" | "size"
->): string {
+function defaultHedgeTradeKey(
+  event: Pick<
+    HedgeEventInsert,
+    "token_id" | "coin" | "hl_fill_hash" | "opened_at" | "entry_px" | "size"
+  >,
+): string {
   if (event.hl_fill_hash) {
     return `trade:fill:${event.coin}:${event.hl_fill_hash}`;
   }
   return `trade:legacy:${event.token_id ?? "unassigned"}:${event.coin}:${event.opened_at}:${String(event.entry_px)}:${String(event.size)}`;
 }
 
-function defaultHedgeTaxKey(event: Pick<
-  HedgeEventInsert,
-  "token_id" | "coin" | "hl_fill_hash" | "opened_at" | "entry_px" | "size"
->): string {
+function defaultHedgeTaxKey(
+  event: Pick<
+    HedgeEventInsert,
+    "token_id" | "coin" | "hl_fill_hash" | "opened_at" | "entry_px" | "size"
+  >,
+): string {
   if (event.hl_fill_hash) {
     return `tax:legacy:${event.token_id ?? "unassigned"}:${event.coin}:${event.hl_fill_hash}`;
   }
@@ -1079,7 +1087,10 @@ function prepareHedgeEventForWrite(event: HedgeEventInsert): PreparedHedgeEvent 
   };
 }
 
-function overwriteHedgeEvent(existing: StoredHedgeEvent, preparedEvent: PreparedHedgeEvent): StoredHedgeEvent {
+function overwriteHedgeEvent(
+  existing: StoredHedgeEvent,
+  preparedEvent: PreparedHedgeEvent,
+): StoredHedgeEvent {
   const existingTaxKey = existing.tax_key ?? null;
   const shouldReplaceTaxKey =
     existingTaxKey == null ||
@@ -1146,7 +1157,9 @@ function reconcileClosedHedgeEventByFillHash(params: {
 
     const reloaded = getHedgeEvent(authoritativeClosedEvent.id);
     if (!reloaded) {
-      throw new Error(`Reconciled hedge event could not be reloaded: ${authoritativeClosedEvent.id}`);
+      throw new Error(
+        `Reconciled hedge event could not be reloaded: ${authoritativeClosedEvent.id}`,
+      );
     }
     authoritativeClosedEvent = reloaded;
     effectiveTokenId = authoritativeClosedEvent.token_id ?? params.incomingTokenId;
@@ -1299,9 +1312,7 @@ export function getHedgeEventByTradeKey(tradeKey: string): StoredHedgeEvent | nu
 export function listHedgeEvents(): StoredHedgeEvent[] {
   const db = getDb();
   return db
-    .query<StoredHedgeEvent, []>(
-      "SELECT * FROM hedge_events ORDER BY opened_at DESC, id DESC",
-    )
+    .query<StoredHedgeEvent, []>("SELECT * FROM hedge_events ORDER BY opened_at DESC, id DESC")
     .all();
 }
 
@@ -1352,7 +1363,9 @@ export function upsertHedgeEventByTradeKey(event: HedgeEventUpsert): StoredHedge
       .get(preparedEvent.coin, preparedEvent.closed_at ?? preparedEvent.updated_at);
 
     if (existingOpenCandidate) {
-      return normalizeClosedHedgeIdentity(overwriteHedgeEvent(existingOpenCandidate, preparedEvent));
+      return normalizeClosedHedgeIdentity(
+        overwriteHedgeEvent(existingOpenCandidate, preparedEvent),
+      );
     }
   }
 

@@ -513,7 +513,9 @@ describe("POST /tax/transactions", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, Repay Loan, or null" });
+    expectJson(res).toEqual({
+      error: "label must be Trade, Transfer, Approval, Repay Loan, or null",
+    });
     expect(allCreateArgs).toEqual([]);
   });
 
@@ -898,7 +900,9 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, Repay Loan, or null" });
+    expectJson(res).toEqual({
+      error: "label must be Trade, Transfer, Approval, Repay Loan, or null",
+    });
     expect(allUpdateArgs).toEqual([]);
   });
 
@@ -915,7 +919,9 @@ describe("PATCH /tax/transactions/:id", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expectJson(res).toEqual({ error: "label must be Trade, Transfer, Approval, Repay Loan, or null" });
+    expectJson(res).toEqual({
+      error: "label must be Trade, Transfer, Approval, Repay Loan, or null",
+    });
     expect(allUpdateArgs).toEqual([]);
   });
 

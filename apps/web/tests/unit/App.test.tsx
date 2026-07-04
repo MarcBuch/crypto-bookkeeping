@@ -15,7 +15,9 @@ function escapeRegex(value: string): string {
 
 function expectMetricValue(html: string, label: string, value: string): void {
   expect(html).toMatch(
-    new RegExp(`${escapeRegex(label)}</p><span[^>]*></span></div><p[^>]*>${escapeRegex(value)}</p>`),
+    new RegExp(
+      `${escapeRegex(label)}</p><span[^>]*></span></div><p[^>]*>${escapeRegex(value)}</p>`,
+    ),
   );
 }
 
@@ -113,7 +115,10 @@ function withoutUsdFee(
   };
 }
 
-function renderDashboard(positions: DashboardPosition[], assignedHedges: HedgeEvent[] = []): string {
+function renderDashboard(
+  positions: DashboardPosition[],
+  assignedHedges: HedgeEvent[] = [],
+): string {
   const queryClient = new QueryClient();
   queryClient.setQueryData(hedgeQueryKeys.list("assigned"), { hedges: assignedHedges });
   return renderToStaticMarkup(
@@ -452,7 +457,10 @@ describe("dashboard rendering", () => {
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
-        <Dashboard positions={[activePosition]} unassignedHedgesError={new Error("hedge api down")} />
+        <Dashboard
+          positions={[activePosition]}
+          unassignedHedgesError={new Error("hedge api down")}
+        />
       </QueryClientProvider>,
     );
 

@@ -13,10 +13,7 @@ await mock.module("../db/schema.js", () => ({
   resetDb: () => {},
 }));
 
-import {
-  insertHedgeSnapshot,
-  listHedgeSnapshots,
-} from "../db/store.js";
+import { insertHedgeSnapshot, listHedgeSnapshots } from "../db/store.js";
 import type { StoredHedgeEvent, StoredHedgeSnapshot } from "../db/store.js";
 
 // Helper to create a minimal hedge snapshot
@@ -91,7 +88,9 @@ describe("hedge-db — listHedgeSnapshots and insertHedgeSnapshot", () => {
       initSchema(legacyDb);
 
       const migrated = legacyDb
-        .query<StoredHedgeEvent, []>("SELECT * FROM hedge_events WHERE hl_fill_hash = 'fill-legacy-1'")
+        .query<StoredHedgeEvent, []>(
+          "SELECT * FROM hedge_events WHERE hl_fill_hash = 'fill-legacy-1'",
+        )
         .get();
       expect(migrated?.trade_key).toBe("trade:fill:HYPE:fill-legacy-1");
       expect(migrated?.tax_key).toBe("tax:manual:preserve-me");
@@ -305,7 +304,7 @@ describe("hedge-db — listHedgeSnapshots and insertHedgeSnapshot", () => {
         );
       `);
 
-       for (let index = 0; index < 2; index += 1) {
+      for (let index = 0; index < 2; index += 1) {
         legacyDb.run(
           `INSERT INTO hedge_events
            (token_id, coin, status, entry_px, size, opened_at, closed_at, close_px, realized_pnl, funding_earned, close_reason, hl_fill_hash, trade_key, tax_key)
@@ -344,9 +343,7 @@ describe("hedge-db — listHedgeSnapshots and insertHedgeSnapshot", () => {
       expect(migratedRows[1]?.trade_key).toBe(
         "trade:legacy:unassigned:HYPE:2024-01-01T00:00:00Z:100:1.5:row:2",
       );
-      expect(migratedRows[0]?.tax_key).toBe(
-        "tax:manual:preserve-me",
-      );
+      expect(migratedRows[0]?.tax_key).toBe("tax:manual:preserve-me");
       expect(migratedRows[1]?.tax_key).toBe(
         "tax:legacy:unassigned:HYPE:2024-01-01T00:00:00Z:100:1.5:row:2",
       );
@@ -422,9 +419,7 @@ describe("hedge-db — listHedgeSnapshots and insertHedgeSnapshot", () => {
           "SELECT trade_key, tax_key FROM hedge_events WHERE id = 1",
         )
         .get();
-      expect(migrated?.trade_key).toBe(
-        "trade:legacy:unassigned:HYPE:2024-01-01T00:00:00Z:100:1.5",
-      );
+      expect(migrated?.trade_key).toBe("trade:legacy:unassigned:HYPE:2024-01-01T00:00:00Z:100:1.5");
       expect(migrated?.tax_key).toBe(
         "tax:legacy:unassigned:HYPE:2024-01-01T00:00:00Z:100:1.5:row:1",
       );

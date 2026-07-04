@@ -454,9 +454,7 @@ describe("tax transaction persistence", () => {
 
     expect(tableSql?.sql).toContain("Approval");
     expect(tableSql?.sql).toContain("Repay Loan");
-    expect(updateTaxTransaction("legacy-row", { label: "Repay Loan" })?.label).toBe(
-      "Repay Loan",
-    );
+    expect(updateTaxTransaction("legacy-row", { label: "Repay Loan" })?.label).toBe("Repay Loan");
     expect(getTaxTransaction("legacy-row")?.label).toBe("Repay Loan");
   });
 

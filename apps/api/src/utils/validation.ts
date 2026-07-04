@@ -34,12 +34,7 @@ export function parseTaxTransactionLabel(
   raw: string | undefined,
 ): "Trade" | "Transfer" | "Approval" | "Repay Loan" | undefined {
   if (raw === undefined) return undefined;
-  if (
-    raw === "Trade" ||
-    raw === "Transfer" ||
-    raw === "Approval" ||
-    raw === "Repay Loan"
-  ) {
+  if (raw === "Trade" || raw === "Transfer" || raw === "Approval" || raw === "Repay Loan") {
     return raw;
   }
   throw new ValidationError(`label must be Trade, Transfer, Approval, or Repay Loan, got: ${raw}`);

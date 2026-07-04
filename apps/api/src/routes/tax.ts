@@ -139,7 +139,7 @@ const maxTaxTransactionCommentLength = 1000;
 type TaxTransactionPagination = {
   limit: number;
   offset: number;
-  label: "Trade" | "Transfer" | "Approval" | "Repay Loan" | undefined;
+  label: "Trade" | "Transfer" | "Approval" | "Repay Loan" | null | undefined;
   total: number | null;
 };
 

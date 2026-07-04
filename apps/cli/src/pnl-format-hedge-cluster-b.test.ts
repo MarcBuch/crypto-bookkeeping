@@ -10,6 +10,7 @@ const basePnL: PnLView = {
   token0Symbol: "HYPE",
   token1Symbol: "USDC",
   status: "active",
+  openedAt: "2024-01-01T00:00:00Z",
   entryPrice: 20,
   exitPrice: 21,
   priceChangePercent: 0.05,

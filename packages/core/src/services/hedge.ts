@@ -339,7 +339,7 @@ function parseFillSignedSize(fill: HyperliquidFill): number {
 }
 
 function sortFillsChronologically(fills: HyperliquidFill[]): HyperliquidFill[] {
-  return [...fills].sort((a, b) => a.time - b.time || a.tid - b.tid);
+  return [...fills].toSorted((a, b) => a.time - b.time || a.tid - b.tid);
 }
 
 function vwapFills(fills: HyperliquidFill[]): number {
@@ -349,7 +349,7 @@ function vwapFills(fills: HyperliquidFill[]): number {
 
   const totalSize = fills.reduce((sum, fill) => sum + parseFloat(fill.sz), 0);
   if (nearlyZero(totalSize)) {
-    return parseFloat(fills[0]!.px);
+    return parseFloat(fills[0].px);
   }
 
   const weighted = fills.reduce((sum, fill) => sum + parseFloat(fill.px) * parseFloat(fill.sz), 0);
@@ -375,7 +375,10 @@ function isoTime(fill: HyperliquidFill | null, fallback: string): string {
   return fill ? new Date(fill.time).toISOString() : fallback;
 }
 
-function splitFillAtZeroCrossing(fill: HyperliquidFill, closingSize: number): [HyperliquidFill, HyperliquidFill] {
+function splitFillAtZeroCrossing(
+  fill: HyperliquidFill,
+  closingSize: number,
+): [HyperliquidFill, HyperliquidFill] {
   const totalSize = parseFloat(fill.sz);
   const openingSize = Math.max(totalSize - closingSize, 0);
 
@@ -459,12 +462,17 @@ function buildLifecycleTaxKey(params: {
 }
 
 function getExistingOpenHedgeEvent(coin: string): StoredHedgeEvent | null {
-  return sqliteHedgeStore
-    .listAllEvents()
-    .find((event) => event.coin === coin && event.status === "open") ?? null;
+  return (
+    sqliteHedgeStore
+      .listAllEvents()
+      .find((event) => event.coin === coin && event.status === "open") ?? null
+  );
 }
 
-function getReusableOpenIdentity(existingOpen: StoredHedgeEvent | null, anchorTid?: number): OpenIdentityCandidate {
+function getReusableOpenIdentity(
+  existingOpen: StoredHedgeEvent | null,
+  anchorTid?: number,
+): OpenIdentityCandidate {
   if (!existingOpen) {
     return { tradeKey: null, taxKey: null };
   }
@@ -549,7 +557,8 @@ function buildClosedDiscoveredEvent(
   const representativeCloseFill = largestFill(closingFills) ?? lastFill(lifecycle.fills);
   const openedAt = isoTime(firstOpenFill, new Date().toISOString());
   const entryPx = vwapFills(openingFills);
-  const size = lifecycle.maxAbsInventory || openingFills.reduce((sum, fill) => sum + parseFloat(fill.sz), 0);
+  const size =
+    lifecycle.maxAbsInventory || openingFills.reduce((sum, fill) => sum + parseFloat(fill.sz), 0);
   const closeTid = representativeCloseFill?.tid;
 
   return {
@@ -565,8 +574,12 @@ function buildClosedDiscoveredEvent(
     funding_earned: null,
     close_reason: inferCloseReason(closingFills),
     hl_fill_hash: closeTid != null ? String(closeTid) : null,
-    trade_key: closeTid != null ? `trade:fill:${coin}:${closeTid}` : `trade:hl:closed:${coin}:${openedAt}`,
-    tax_key: closeTid != null ? `tax:fill:${coin}:${closeTid}` : `tax:hl:closed:${config.wallet}:${coin}:${openedAt}`,
+    trade_key:
+      closeTid != null ? `trade:fill:${coin}:${closeTid}` : `trade:hl:closed:${coin}:${openedAt}`,
+    tax_key:
+      closeTid != null
+        ? `tax:fill:${coin}:${closeTid}`
+        : `tax:hl:closed:${config.wallet}:${coin}:${openedAt}`,
     current_szi: null,
     mark_px: null,
     unrealized_pnl: null,
@@ -584,7 +597,8 @@ function buildOpenDiscoveredEvent(
   activeLifecycle: GroupedHyperliquidLifecycle | null,
 ): Omit<StoredHedgeEvent, "id"> & { trade_key: string; tax_key: string } {
   const existingOpen = getExistingOpenHedgeEvent(coin);
-  const firstOpenFill = firstFill(activeLifecycle?.openingFills ?? []) ?? firstFill(activeLifecycle?.fills ?? []);
+  const firstOpenFill =
+    firstFill(activeLifecycle?.openingFills ?? []) ?? firstFill(activeLifecycle?.fills ?? []);
   // Best-effort opened_at: prefer earliest active-lifecycle open fill, then existing store row,
   // then now when Hyperliquid no longer exposes the originating fill.
   const openedAt =
@@ -681,9 +695,13 @@ export async function syncHyperliquidHedgeTrades(
     );
   }
 
-  const activePosition = assetPositions.find((assetPosition) => assetPosition.position.coin === coin);
+  const activePosition = assetPositions.find(
+    (assetPosition) => assetPosition.position.coin === coin,
+  );
 
-  for (const event of closedLifecycles.map((lifecycle) => buildClosedDiscoveredEvent(config, coin, lifecycle))) {
+  for (const event of closedLifecycles.map((lifecycle) =>
+    buildClosedDiscoveredEvent(config, coin, lifecycle),
+  )) {
     sqliteHedgeStore.upsertEventByTradeKey(event);
   }
 
@@ -867,7 +885,7 @@ export async function resolveHedgeClose(
   // Step 7: VWAP close price across all closing fills; largest fill used for
   // the representative tid (hl_fill_hash) and closed_at timestamp.
   const closePx = vwapClose(closingFills);
-  const largestFill = closingFills.reduce((max, fill) =>
+  const closingLargestFill = closingFills.reduce((max, fill) =>
     parseFloat(fill.sz) > parseFloat(max.sz) ? fill : max,
   );
 
@@ -875,12 +893,12 @@ export async function resolveHedgeClose(
   const closedEvent = sqliteHedgeStore.closeOpenEvent({
     token_id: tokenId,
     coin,
-    closed_at: new Date(largestFill.time).toISOString(),
+    closed_at: new Date(closingLargestFill.time).toISOString(),
     close_px: closePx,
     realized_pnl: totalClosedPnl,
     funding_earned: fundingEarned,
     close_reason: inferCloseReason(closingFills),
-    hl_fill_hash: String(largestFill.tid),
+    hl_fill_hash: String(closingLargestFill.tid),
   });
 
   // Step 9: Return the closed event (or re-fetch if race condition)

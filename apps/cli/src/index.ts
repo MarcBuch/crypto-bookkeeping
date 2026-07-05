@@ -81,20 +81,27 @@ function parseListTaxLabel(raw: string | undefined): TaxTransactionLabelFilter |
     raw === "Transfer" ||
     raw === "Approval" ||
     raw === "Repay Loan" ||
+    raw === "Derivative" ||
     raw === "unlabeled"
   ) {
     return raw;
   }
-  throw new Error("label must be Trade, Transfer, Approval, Repay Loan, or unlabeled");
+  throw new Error("label must be Trade, Transfer, Approval, Repay Loan, Derivative, or unlabeled");
 }
 
 function parseUpdateTaxLabel(raw: string): TaxTransactionLabel {
-  if (raw === "Trade" || raw === "Transfer" || raw === "Approval" || raw === "Repay Loan") {
+  if (
+    raw === "Trade" ||
+    raw === "Transfer" ||
+    raw === "Approval" ||
+    raw === "Repay Loan" ||
+    raw === "Derivative"
+  ) {
     return raw;
   }
   if (raw === "null" || raw === "clear" || raw === "none" || raw === "unlabeled") return null;
   throw new Error(
-    "label must be Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
+    "label must be Trade, Transfer, Approval, Repay Loan, Derivative, null, clear, none, or unlabeled",
   );
 }
 
@@ -370,7 +377,7 @@ tax
   .option("--time <iso>", "Transaction timestamp as an ISO string")
   .option(
     "--label <label>",
-    "Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
+    "Trade, Transfer, Approval, Repay Loan, Derivative, null, clear, none, or unlabeled",
   )
   .option("--comment <comment>", "Comment to store with the transaction")
   .option("--incoming-quantity <quantity>", "Incoming asset quantity")
@@ -471,7 +478,10 @@ tax
   .description("List stored tax transactions")
   .option("--limit <number>", "Number of transactions to show", "50")
   .option("--offset <number>", "Number of transactions to skip", "0")
-  .option("--label <label>", "Filter by Trade, Transfer, Approval, Repay Loan, or unlabeled")
+  .option(
+    "--label <label>",
+    "Filter by Trade, Transfer, Approval, Repay Loan, Derivative, or unlabeled",
+  )
   .action((options: { limit: string; offset: string; label?: string }) => {
     let limit: number;
     let offset: number;
@@ -521,7 +531,7 @@ tax
   .argument("<id>", "Tax transaction ID")
   .option(
     "--label <label>",
-    "Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
+    "Trade, Transfer, Approval, Repay Loan, Derivative, null, clear, none, or unlabeled",
   )
   .option("--comment <comment>", "Comment to store with the transaction")
   .action((id: string, options: { label?: string; comment?: string }) => {

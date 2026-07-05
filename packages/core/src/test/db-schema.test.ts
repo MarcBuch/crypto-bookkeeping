@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
@@ -85,6 +86,63 @@ describe("getDb — auto-creates data directory", () => {
     const db2 = getDb();
     // After reset, a new instance is returned
     expect(db2).not.toBe(db1);
+  });
+
+  it("rebuilds a tax table whose label check lacks Derivative even if the legacy SQL text differs", () => {
+    const dataDir = join(TMP, "tax-label-migration-shape");
+    mkdirSync(dataDir, { recursive: true });
+    process.env.LP_TRACKER_DATA_DIR = dataDir;
+
+    const dbPath = join(dataDir, "lp-tracker.db");
+    const legacyDb = new Database(dbPath, { create: true });
+    legacyDb.exec(`
+      CREATE TABLE tax_transactions (
+        id TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        block_number INTEGER,
+        time_stamp TEXT,
+        from_address TEXT,
+        to_address TEXT,
+        value TEXT,
+        gas_used TEXT,
+        gas_price TEXT,
+        fee TEXT,
+        method_id TEXT,
+        function_name TEXT,
+        input TEXT,
+        contract_address TEXT,
+        token_symbol TEXT,
+        token_decimal INTEGER,
+        token_name TEXT,
+        transaction_type TEXT,
+        source TEXT NOT NULL,
+        is_error INTEGER,
+        label TEXT CHECK ( label IS NULL OR label IN ('Trade','Transfer','Approval','Repay Loan') ),
+        incoming_quantity TEXT,
+        incoming_asset TEXT,
+        outgoing_quantity TEXT,
+        outgoing_asset TEXT,
+        cost_eur TEXT,
+        proceeds_eur TEXT,
+        gain_eur TEXT,
+        holding_duration_days INTEGER,
+        comment TEXT,
+        synced_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+    legacyDb.close();
+    resetDb();
+
+    const db = getDb();
+    const tableSql = db
+      .query<{ sql: string }, []>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tax_transactions'",
+      )
+      .get();
+
+    expect(tableSql?.sql).toContain("'Derivative'");
   });
 });
 

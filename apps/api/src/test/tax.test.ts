@@ -205,7 +205,7 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({
-      error: "label must be Trade, Transfer, Approval, or Repay Loan, got: Income",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, or Derivative, got: Income",
     });
   });
 
@@ -216,7 +216,7 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({
-      error: "label must be Trade, Transfer, Approval, or Repay Loan, got: trade",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, or Derivative, got: trade",
     });
     expect(lastListArgs).toEqual([]);
   });
@@ -232,6 +232,20 @@ describe("GET /tax/transactions", () => {
 
     expect(res.statusCode).toBe(200);
     expect(lastListArgs).toEqual([10, 5, "Approval"]);
+  });
+
+  it("accepts Derivative label filters", async () => {
+    mockListTaxTransactions = () => [];
+    lastListArgs = [];
+
+    const res = await server.inject({
+      method: "GET",
+      url: "/tax/transactions?limit=10&offset=5&label=Derivative",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(lastListArgs).toEqual([10, 5, "Derivative"]);
+    expect(lastCountArgs).toEqual(["Derivative"]);
   });
 
   it.each(["abc", "10abc", "0", "-1"])("rejects invalid limit %s", async (limit) => {
@@ -514,7 +528,7 @@ describe("POST /tax/transactions", () => {
 
     expect(res.statusCode).toBe(400);
     expectJson(res).toEqual({
-      error: "label must be Trade, Transfer, Approval, Repay Loan, or null",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, Derivative, or null",
     });
     expect(allCreateArgs).toEqual([]);
   });
@@ -532,6 +546,21 @@ describe("POST /tax/transactions", () => {
     expect(res.statusCode).toBe(201);
     expectJson(res).toEqual({ transaction: createdTransaction });
     expect(allCreateArgs).toEqual([[{ label: "Approval" }]]);
+  });
+
+  it("accepts Derivative labels", async () => {
+    const createdTransaction = { ...fakeTransaction, label: "Derivative" };
+    mockCreateManualTaxTransaction = () => createdTransaction;
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/tax/transactions",
+      payload: { label: "Derivative" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expectJson(res).toEqual({ transaction: createdTransaction });
+    expect(allCreateArgs).toEqual([[{ label: "Derivative" }]]);
   });
 
   it("accepts Repay Loan labels", async () => {
@@ -901,7 +930,7 @@ describe("PATCH /tax/transactions/:id", () => {
 
     expect(res.statusCode).toBe(400);
     expectJson(res).toEqual({
-      error: "label must be Trade, Transfer, Approval, Repay Loan, or null",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, Derivative, or null",
     });
     expect(allUpdateArgs).toEqual([]);
   });
@@ -920,7 +949,7 @@ describe("PATCH /tax/transactions/:id", () => {
 
     expect(res.statusCode).toBe(400);
     expectJson(res).toEqual({
-      error: "label must be Trade, Transfer, Approval, Repay Loan, or null",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, Derivative, or null",
     });
     expect(allUpdateArgs).toEqual([]);
   });
@@ -938,6 +967,21 @@ describe("PATCH /tax/transactions/:id", () => {
     expect(res.statusCode).toBe(200);
     expectJson(res).toEqual({ transaction: updatedTransaction });
     expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Approval" }]]);
+  });
+
+  it("accepts Derivative labels", async () => {
+    const updatedTransaction = { ...fakeTransaction, label: "Derivative" };
+    mockUpdateTaxTransaction = () => updatedTransaction;
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/tax/transactions/tx-1%3Aexternal",
+      payload: { label: "Derivative" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expectJson(res).toEqual({ transaction: updatedTransaction });
+    expect(allUpdateArgs).toEqual([["tx-1:external", { label: "Derivative" }]]);
   });
 
   it("accepts Repay Loan labels", async () => {

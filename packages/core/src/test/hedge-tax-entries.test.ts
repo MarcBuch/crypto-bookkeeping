@@ -195,4 +195,11 @@ describe("buildHedgeTaxEntries — Cluster C (output contract)", () => {
     expect(fundingEntry).toBeDefined();
     expect(fundingEntry?.transaction_type).toBe("hedge-funding");
   });
+
+  it("defaults hedge-generated rows to Derivative", () => {
+    const event = makeHedgeEvent({ realized_pnl: 100, funding_earned: 25 });
+    const entries = buildHedgeTaxEntries(event, "2024-01-02T12:00:00Z");
+
+    expect(entries.every((entry) => entry.label === "Derivative")).toBe(true);
+  });
 });

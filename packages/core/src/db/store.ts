@@ -116,7 +116,13 @@ type PreparedHedgeEvent = {
   updated_at: string;
 };
 
-export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | "Repay Loan" | null;
+export type TaxTransactionLabel =
+  | "Trade"
+  | "Transfer"
+  | "Approval"
+  | "Repay Loan"
+  | "Derivative"
+  | null;
 export type TaxTransactionLabelFilter = Exclude<TaxTransactionLabel, null> | "unlabeled";
 
 export interface StoredTaxTransaction {
@@ -158,7 +164,7 @@ export interface StoredTaxTransaction {
 export type SyncedTaxTransaction = Omit<
   StoredTaxTransaction,
   "label" | "comment" | "created_at" | "updated_at"
->;
+> & { label?: TaxTransactionLabel };
 
 export interface TaxTransactionUpdate {
   hash?: string;
@@ -258,10 +264,11 @@ function assertValidTaxTransactionLabel(label: TaxTransactionLabel | undefined):
     label !== "Trade" &&
     label !== "Transfer" &&
     label !== "Approval" &&
-    label !== "Repay Loan"
+    label !== "Repay Loan" &&
+    label !== "Derivative"
   ) {
     throw new Error(
-      "Tax transaction label must be 'Trade', 'Transfer', 'Approval', 'Repay Loan', or null",
+      "Tax transaction label must be 'Trade', 'Transfer', 'Approval', 'Repay Loan', 'Derivative', or null",
     );
   }
 }
@@ -404,17 +411,18 @@ export function getAllLatestSnapshots(): StoredSnapshot[] {
 
 export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): void {
   const db = getDb();
+  assertValidTaxTransactionLabel(transaction.label);
   db.run(
     `INSERT INTO tax_transactions
      (id, hash, block_number, time_stamp, from_address, to_address, value, gas_used, gas_price,
-        fee, method_id, function_name, input, contract_address, token_symbol, token_decimal,
-        token_name, transaction_type, source, is_error, incoming_quantity, incoming_asset,
-        outgoing_quantity, outgoing_asset, cost_eur, proceeds_eur, gain_eur,
-        holding_duration_days, synced_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         fee, method_id, function_name, input, contract_address, token_symbol, token_decimal,
+         token_name, transaction_type, source, is_error, label, incoming_quantity, incoming_asset,
+         outgoing_quantity, outgoing_asset, cost_eur, proceeds_eur, gain_eur,
+         holding_duration_days, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
-        hash = excluded.hash,
-        block_number = excluded.block_number,
+         hash = excluded.hash,
+         block_number = excluded.block_number,
        time_stamp = excluded.time_stamp,
        from_address = excluded.from_address,
        to_address = excluded.to_address,
@@ -428,13 +436,14 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
        contract_address = excluded.contract_address,
        token_symbol = excluded.token_symbol,
        token_decimal = excluded.token_decimal,
-       token_name = excluded.token_name,
-        transaction_type = excluded.transaction_type,
-        source = excluded.source,
-        is_error = excluded.is_error,
-        incoming_quantity = excluded.incoming_quantity,
-        incoming_asset = excluded.incoming_asset,
-        outgoing_quantity = excluded.outgoing_quantity,
+         token_name = excluded.token_name,
+         transaction_type = excluded.transaction_type,
+         source = excluded.source,
+         is_error = excluded.is_error,
+         label = COALESCE(tax_transactions.label, excluded.label),
+         incoming_quantity = excluded.incoming_quantity,
+         incoming_asset = excluded.incoming_asset,
+         outgoing_quantity = excluded.outgoing_quantity,
         outgoing_asset = excluded.outgoing_asset,
         synced_at = excluded.synced_at,
         updated_at = datetime('now')
@@ -460,6 +469,7 @@ export function upsertSyncedTaxTransaction(transaction: SyncedTaxTransaction): v
       transaction.transaction_type,
       transaction.source,
       transaction.is_error,
+      transaction.label ?? null,
       transaction.incoming_quantity,
       transaction.incoming_asset,
       transaction.outgoing_quantity,

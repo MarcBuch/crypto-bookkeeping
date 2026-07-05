@@ -104,7 +104,13 @@ export interface HedgeEvent {
 
 export type HedgesAssignedFilter = "assigned" | "unassigned" | "all";
 
-export type TaxTransactionLabel = "Trade" | "Transfer" | "Approval" | "Repay Loan" | null;
+export type TaxTransactionLabel =
+  | "Trade"
+  | "Transfer"
+  | "Approval"
+  | "Repay Loan"
+  | "Derivative"
+  | null;
 
 export interface TaxTransaction {
   id: string;
@@ -409,7 +415,8 @@ export async function getTaxTransactions(
       label !== "Trade" &&
       label !== "Transfer" &&
       label !== "Approval" &&
-      label !== "Repay Loan")
+      label !== "Repay Loan" &&
+      label !== "Derivative")
   ) {
     throw new ApiError("API response included malformed tax transactions pagination.");
   }

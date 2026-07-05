@@ -34,6 +34,7 @@ export const taxTransactionLabelOptions: Array<{
   { label: "Transfer", value: "Transfer" },
   { label: "Approval", value: "Approval" },
   { label: "Repay Loan", value: "Repay Loan" },
+  { label: "Derivative", value: "Derivative" },
 ];
 
 export function taxCommentDraftState(transactionComment: string | null, draft: string) {
@@ -404,7 +405,8 @@ function isEditableTaxTransactionLabel(value: string): value is EditableTaxTrans
     value === "Trade" ||
     value === "Transfer" ||
     value === "Approval" ||
-    value === "Repay Loan"
+    value === "Repay Loan" ||
+    value === "Derivative"
   );
 }
 

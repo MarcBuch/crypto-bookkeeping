@@ -54,7 +54,7 @@ export function resetDb(): void {
 
 export function initSchema(database: Database): void {
   const taxLabelCheckConstraint =
-    "label IS NULL OR label IN ('Trade', 'Transfer', 'Approval', 'Repay Loan')";
+    "label IS NULL OR label IN ('Trade', 'Transfer', 'Approval', 'Repay Loan', 'Derivative')";
   const hedgeTradeKeyBackfillSql = `CASE
     WHEN hl_fill_hash IS NOT NULL THEN 'trade:fill:' || coin || ':' || hl_fill_hash
     ELSE 'trade:legacy:' || COALESCE(token_id, 'unassigned') || ':' || coin || ':' || opened_at || ':' || printf('%.17g', entry_px) || ':' || printf('%.17g', size) || ':row:' || id
@@ -366,9 +366,9 @@ export function initSchema(database: Database): void {
     )
     .get();
   const taxTableSql = createTableSqlRow?.sql ?? "";
-  const needsTaxLabelMigration =
-    taxTableSql.includes("label IN ('Trade', 'Transfer')") ||
-    taxTableSql.includes("label IN ('Trade', 'Transfer', 'Approval')");
+  const hasTaxLabelConstraint = taxTableSql.includes("label TEXT CHECK");
+  const hasDerivativeLabelConstraint = taxTableSql.includes("'Derivative'");
+  const needsTaxLabelMigration = hasTaxLabelConstraint && !hasDerivativeLabelConstraint;
 
   if (needsTaxLabelMigration) {
     database.exec(`
@@ -428,6 +428,13 @@ export function initSchema(database: Database): void {
       ALTER TABLE tax_transactions_new RENAME TO tax_transactions;
     `);
   }
+
+  database.exec(`
+    UPDATE tax_transactions
+    SET label = 'Derivative'
+    WHERE label IS NULL
+      AND transaction_type IN ('hedge-close', 'hedge-funding');
+  `);
 
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_tax_transactions_hash ON tax_transactions(hash);

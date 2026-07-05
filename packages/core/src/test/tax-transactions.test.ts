@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, it, expect } from "bun:test";
 
 import { getDb, resolveDbPath } from "../db/schema.js";
+import { resetDb } from "../db/schema.js";
 import {
   createManualTaxTransaction,
   countTaxTransactions,
@@ -388,7 +389,7 @@ describe("tax transaction persistence", () => {
     expect(getTaxTransaction("tx-1:external")?.label).toBeNull();
   });
 
-  it("accepts Trade, Transfer, Approval, Repay Loan, and null labels", () => {
+  it("accepts Trade, Transfer, Approval, Repay Loan, Derivative, and null labels", () => {
     upsertSyncedTaxTransaction(makeSyncedTaxTransaction());
 
     expect(updateTaxTransaction("tx-1:external", { label: "Trade" })?.label).toBe("Trade");
@@ -397,7 +398,16 @@ describe("tax transaction persistence", () => {
     expect(updateTaxTransaction("tx-1:external", { label: "Repay Loan" })?.label).toBe(
       "Repay Loan",
     );
+    expect(updateTaxTransaction("tx-1:external", { label: "Derivative" })?.label).toBe(
+      "Derivative",
+    );
     expect(updateTaxTransaction("tx-1:external", { label: null })?.label).toBeNull();
+  });
+
+  it("persists labels provided on synced tax upserts", () => {
+    upsertSyncedTaxTransaction(makeSyncedTaxTransaction({ label: "Derivative" }));
+
+    expect(getTaxTransaction("tx-1:external")?.label).toBe("Derivative");
   });
 
   it("migrates legacy label constraint and allows newer labels", () => {
@@ -454,8 +464,139 @@ describe("tax transaction persistence", () => {
 
     expect(tableSql?.sql).toContain("Approval");
     expect(tableSql?.sql).toContain("Repay Loan");
+    expect(tableSql?.sql).toContain("Derivative");
     expect(updateTaxTransaction("legacy-row", { label: "Repay Loan" })?.label).toBe("Repay Loan");
     expect(getTaxTransaction("legacy-row")?.label).toBe("Repay Loan");
+  });
+
+  it("backfills unlabeled hedge rows to Derivative without touching labeled or non-hedge rows", () => {
+    const dbPath = resolveDbPath();
+    const legacyDb = new Database(dbPath, { create: true });
+    legacyDb.exec(`
+      CREATE TABLE tax_transactions (
+        id TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        block_number INTEGER,
+        time_stamp TEXT,
+        from_address TEXT,
+        to_address TEXT,
+        value TEXT,
+        gas_used TEXT,
+        gas_price TEXT,
+        fee TEXT,
+        method_id TEXT,
+        function_name TEXT,
+        input TEXT,
+        contract_address TEXT,
+        token_symbol TEXT,
+        token_decimal INTEGER,
+        token_name TEXT,
+        transaction_type TEXT,
+        source TEXT NOT NULL,
+        is_error INTEGER,
+        label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer')),
+        incoming_quantity TEXT,
+        incoming_asset TEXT,
+        outgoing_quantity TEXT,
+        outgoing_asset TEXT,
+        cost_eur TEXT,
+        proceeds_eur TEXT,
+        gain_eur TEXT,
+        holding_duration_days INTEGER,
+        comment TEXT,
+        synced_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO tax_transactions (id, hash, source, transaction_type, synced_at, label)
+      VALUES
+        ('hedge-unlabeled', '0x1', 'manual', 'hedge-close', datetime('now'), NULL),
+        ('hedge-labeled', '0x2', 'manual', 'hedge-funding', datetime('now'), 'Trade'),
+        ('other-unlabeled', '0x3', 'manual', 'trade', datetime('now'), NULL);
+    `);
+    legacyDb.close();
+    resetDb();
+
+    const db = getDb();
+    expect(
+      db
+        .query<{ label: string | null }, [string]>(
+          "SELECT label FROM tax_transactions WHERE id = ?",
+        )
+        .get("hedge-unlabeled")?.label,
+    ).toBe("Derivative");
+    expect(
+      db
+        .query<{ label: string | null }, [string]>(
+          "SELECT label FROM tax_transactions WHERE id = ?",
+        )
+        .get("hedge-labeled")?.label,
+    ).toBe("Trade");
+    expect(
+      db
+        .query<{ label: string | null }, [string]>(
+          "SELECT label FROM tax_transactions WHERE id = ?",
+        )
+        .get("other-unlabeled")?.label,
+    ).toBeNull();
+  });
+
+  it("migrates the pre-Derivative four-label tax constraint and backfills unlabeled hedge rows", () => {
+    const dbPath = resolveDbPath();
+    const legacyDb = new Database(dbPath, { create: true });
+    legacyDb.exec(`
+      CREATE TABLE tax_transactions (
+        id TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        block_number INTEGER,
+        time_stamp TEXT,
+        from_address TEXT,
+        to_address TEXT,
+        value TEXT,
+        gas_used TEXT,
+        gas_price TEXT,
+        fee TEXT,
+        method_id TEXT,
+        function_name TEXT,
+        input TEXT,
+        contract_address TEXT,
+        token_symbol TEXT,
+        token_decimal INTEGER,
+        token_name TEXT,
+        transaction_type TEXT,
+        source TEXT NOT NULL,
+        is_error INTEGER,
+        label TEXT CHECK (label IS NULL OR label IN ('Trade', 'Transfer', 'Approval', 'Repay Loan')),
+        incoming_quantity TEXT,
+        incoming_asset TEXT,
+        outgoing_quantity TEXT,
+        outgoing_asset TEXT,
+        cost_eur TEXT,
+        proceeds_eur TEXT,
+        gain_eur TEXT,
+        holding_duration_days INTEGER,
+        comment TEXT,
+        synced_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO tax_transactions (id, hash, source, transaction_type, synced_at, label)
+      VALUES ('hedge-pre-derivative', '0xlegacy-hedge', 'hedge-events', 'hedge-close', datetime('now'), NULL);
+    `);
+    legacyDb.close();
+    resetDb();
+
+    const migratedDb = getDb();
+    const tableSql = migratedDb
+      .query<TableSqlRow, []>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tax_transactions'",
+      )
+      .get();
+
+    expect(tableSql?.sql).toContain("Derivative");
+    expect(getTaxTransaction("hedge-pre-derivative")?.label).toBe("Derivative");
   });
 
   it("stores empty comments as empty strings and clears null comments to null", () => {
@@ -676,7 +817,7 @@ describe("tax transaction persistence", () => {
     expect(updateTaxTransaction("missing", { label: "Trade", comment: "ignored" })).toBeNull();
   });
 
-  it("lists German-taxable rows by excluding Approval labels", () => {
+  it("lists German-taxable rows including Derivative and excluding Approval labels", () => {
     upsertSyncedTaxTransaction(
       makeSyncedTaxTransaction({
         id: "approval",
@@ -705,17 +846,26 @@ describe("tax transaction persistence", () => {
         time_stamp: "2026-05-30T12:00:00.000Z",
       }),
     );
+    upsertSyncedTaxTransaction(
+      makeSyncedTaxTransaction({
+        id: "derivative",
+        block_number: 104,
+        time_stamp: "2026-05-30T12:04:00.000Z",
+      }),
+    );
 
     updateTaxTransaction("approval", { label: "Approval" });
     updateTaxTransaction("trade", { label: "Trade" });
     updateTaxTransaction("transfer", { label: "Transfer" });
+    updateTaxTransaction("derivative", { label: "Derivative" });
 
     expect(listGermanTaxableTransactions(50, 0).map((row) => row.id)).toEqual([
+      "derivative",
       "trade",
       "transfer",
       "unlabeled",
     ]);
-    expect(listGermanTaxableTransactions(1, 1).map((row) => row.id)).toEqual(["transfer"]);
+    expect(listGermanTaxableTransactions(1, 1).map((row) => row.id)).toEqual(["trade"]);
   });
 
   it("lists rows needing German tax review as unlabeled only", () => {

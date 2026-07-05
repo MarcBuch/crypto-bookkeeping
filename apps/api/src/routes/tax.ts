@@ -34,7 +34,7 @@ type TaxTransactionUpdate = {
   token_decimal?: number | null;
   token_name?: string | null;
   is_error?: number | null;
-  label?: "Trade" | "Transfer" | "Approval" | "Repay Loan" | null;
+  label?: "Trade" | "Transfer" | "Approval" | "Repay Loan" | "Derivative" | null;
   incoming_quantity?: string | null;
   incoming_asset?: string | null;
   outgoing_quantity?: string | null;
@@ -139,7 +139,7 @@ const maxTaxTransactionCommentLength = 1000;
 type TaxTransactionPagination = {
   limit: number;
   offset: number;
-  label: "Trade" | "Transfer" | "Approval" | "Repay Loan" | null | undefined;
+  label: "Trade" | "Transfer" | "Approval" | "Repay Loan" | "Derivative" | null | undefined;
   total: number | null;
 };
 
@@ -174,15 +174,18 @@ function assignNullableIntegerField(
 
 function assertValidTaxTransactionLabel(
   label: unknown,
-): asserts label is "Trade" | "Transfer" | "Approval" | "Repay Loan" | null {
+): asserts label is "Trade" | "Transfer" | "Approval" | "Repay Loan" | "Derivative" | null {
   if (
     label !== "Trade" &&
     label !== "Transfer" &&
     label !== "Approval" &&
     label !== "Repay Loan" &&
+    label !== "Derivative" &&
     label !== null
   ) {
-    throw new ValidationError("label must be Trade, Transfer, Approval, Repay Loan, or null");
+    throw new ValidationError(
+      "label must be Trade, Transfer, Approval, Repay Loan, Derivative, or null",
+    );
   }
 }
 
@@ -417,7 +420,7 @@ export async function taxRoutes(fastify: FastifyInstance): Promise<void> {
 
       let limit: number;
       let offset: number;
-      let label: "Trade" | "Transfer" | "Approval" | "Repay Loan" | undefined;
+      let label: "Trade" | "Transfer" | "Approval" | "Repay Loan" | "Derivative" | undefined;
       try {
         limit = parseLimit(limitRaw, 50, 200);
         offset = parseOffset(offsetRaw, 0);

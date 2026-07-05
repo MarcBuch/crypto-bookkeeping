@@ -496,6 +496,24 @@ describe("API client", () => {
     });
   });
 
+  it("fetches tax transactions filtered by Derivative label", async () => {
+    const derivativeTaxTransaction = { ...taxTransaction, label: "Derivative" as const };
+    mockFetch((url, init) => {
+      expect(init?.method).toBeUndefined();
+      expect(url).toBe("http://localhost:3000/tax/transactions?label=Derivative");
+      return jsonResponse({
+        transactions: [derivativeTaxTransaction],
+        pagination: { limit: 200, offset: 0, label: "Derivative", total: 1 },
+      });
+    });
+
+    const result = await getTaxTransactions({ label: "Derivative" });
+    expect(result).toEqual({
+      transactions: [derivativeTaxTransaction],
+      pagination: { limit: 200, offset: 0, label: "Derivative", total: 1 },
+    });
+  });
+
   it("accepts null pagination labels for unfiltered tax transactions", async () => {
     mockFetch((url, init) => {
       expect(init?.method).toBeUndefined();

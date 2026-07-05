@@ -117,7 +117,7 @@ bun run cli history <tokenId>
 bun run cli tax sync
 bun run cli tax list --label unlabeled --limit 20
 bun run cli tax get <transaction-id>
-bun run cli tax label <transaction-id> --label Trade --comment "..."
+bun run cli tax label <transaction-id> --label <Trade|Derivative|Transfer|Approval|Repay Loan> --comment "..."
 
 # Or directly from apps/cli:
 cd apps/cli
@@ -129,7 +129,7 @@ bun run history
 bun run start tax sync
 bun run start tax list --label unlabeled --limit 20
 bun run start tax get <transaction-id>
-bun run start tax label <transaction-id> --label Trade --comment "..."
+bun run start tax label <transaction-id> --label <Trade|Derivative|Transfer|Approval|Repay Loan> --comment "..."
 ```
 
 ### Commands
@@ -180,7 +180,7 @@ bun run cli tax sync
 bun run --filter @lp-tracker/cli start -- --json tax sync
 ```
 
-List synced transactions, optionally filtering labels with `Trade`, `Transfer`, `Approval`, `Repay Loan`, or `unlabeled`:
+List synced transactions, optionally filtering labels with `Trade`, `Derivative`, `Transfer`, `Approval`, `Repay Loan`, or `unlabeled`:
 
 ```bash
 bun run cli tax list --limit 20
@@ -195,11 +195,11 @@ bun run cli tax get <transaction-id>
 bun run --filter @lp-tracker/cli start -- --json tax get "<transaction-id>"
 ```
 
-Label a transaction as `Trade`, `Transfer`, `Approval`, or `Repay Loan`; clear the label with `null`, `clear`, `none`, or `unlabeled`:
+Label a transaction as `Trade`, `Derivative`, `Transfer`, `Approval`, or `Repay Loan`; clear the label with `null`, `clear`, `none`, or `unlabeled`:
 
 ```bash
-bun run cli tax label <transaction-id> --label Trade --comment "..."
-bun run --filter @lp-tracker/cli start -- --json tax label "<transaction-id>" --label Trade --comment "..."
+bun run cli tax label <transaction-id> --label <Trade|Derivative|Transfer|Approval|Repay Loan> --comment "..."
+bun run --filter @lp-tracker/cli start -- --json tax label "<transaction-id>" --label <Trade|Derivative|Transfer|Approval|Repay Loan> --comment "..."
 ```
 
 Agent workflow:
@@ -208,7 +208,19 @@ Agent workflow:
 2. Run `tax list --label unlabeled --limit 20` to find rows needing review.
 3. Run `tax get "<transaction-id>"` to inspect hashes, transfers, amounts, and existing notes.
 4. Look up the transaction hash externally or manually classify the activity.
-5. Run `tax label "<transaction-id>" --label Trade --comment "..."`, `--label Transfer`, `--label Approval`, or `--label Repay Loan`; use a clear value if the row should return to unlabeled.
+5. Run `tax label "<transaction-id>" --label <Trade|Derivative|Transfer|Approval|Repay Loan> --comment "..."`; choose the label that matches the activity, or use a clear value if the row should return to unlabeled.
+
+### Label taxonomy
+
+Supported tax labels:
+
+- `Trade` — spot crypto disposals/acquisitions such as token swaps or sales
+- `Derivative` — perp/futures/options events such as hedge close PnL and funding
+- `Transfer` — self-transfers and other non-disposal movements
+- `Approval` — allowance/approval transactions and other non-taxable operational actions
+- `Repay Loan` — repayment of loan principal
+
+German tax framing: `Derivative` maps to derivative / `Termingeschaeft`-style activity and should be treated separately from spot token disposals.
 
 Tax JSON commands return stable envelopes: `{ "sync": ... }`, `{ "transactions": [...] }`, `{ "transaction": ... }`, or controlled errors such as `{ "error": "...", "id": "..." }` for not found and validation failures.
 
@@ -261,7 +273,7 @@ PORT=8080 bun run start
 
 Success responses follow the shape of the corresponding CLI `--json` output, including best-effort USD fee fields such as `feesValueUsd`, per-token USD fee values, token USD prices, and `usdPriceSource` when pricing is available.
 
-Tax transaction responses are stored locally in SQLite and are not synced on read. Call `POST /tax/transactions/sync` when you want to fetch fresh blockchain data. Labels currently support `Trade`, `Transfer`, `Approval`, and `Repay Loan`; use `null` to clear a label. For German tax workflows, `Approval` is treated as non-taxable and excluded from German tax counting. Comments are stored locally and limited to 1000 JavaScript string code units.
+Tax transaction responses are stored locally in SQLite and are not synced on read. Call `POST /tax/transactions/sync` when you want to fetch fresh blockchain data. Labels currently support `Trade`, `Derivative`, `Transfer`, `Approval`, and `Repay Loan`; use `null` to clear a label. For German tax workflows, `Approval` is treated as non-taxable and excluded from German tax counting. `Derivative` is the derivative / `Termingeschaeft` bucket, distinct from spot token disposals. Comments are stored locally and limited to 1000 JavaScript string code units.
 
 Error responses:
 

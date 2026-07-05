@@ -191,7 +191,7 @@ flowchart LR
               <li><code>listTaxTransactions(limit, offset, label)</code> applies SQL <code>LIMIT</code> and <code>OFFSET</code>.</li>
               <li>Rows are ordered by <code>time_stamp DESC, block_number DESC</code>.</li>
               <li><code>countTaxTransactions(label)</code> computes the total count for pagination.</li>
-              <li><code>label</code> supports specific labels and an unlabeled mode via <code>label IS NULL</code>.</li>
+              <li><code>label</code> supports <code>Trade</code>, <code>Derivative</code>, <code>Transfer</code>, <code>Approval</code>, <code>Repay Loan</code>, and an unlabeled mode via <code>label IS NULL</code>.</li>
             </ul>
           </article>
           <article class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
@@ -203,6 +203,24 @@ flowchart LR
               <li>TanStack Table sorting and row expansion are presentation concerns only.</li>
             </ul>
           </article>
+        </div>
+      </section>
+
+      <section class="mb-10 rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <h2 class="text-2xl font-semibold tracking-tight text-neutral-950">Label Taxonomy</h2>
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">
+          <div class="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-7 text-neutral-700">
+            <ul class="space-y-2 list-disc pl-5">
+              <li><code>Trade</code>: spot crypto disposals/acquisitions such as swaps or sales.</li>
+              <li><code>Derivative</code>: perp/futures/options activity, including hedge close P&amp;L and funding.</li>
+              <li><code>Transfer</code>: self-transfers and other non-disposal movements.</li>
+              <li><code>Approval</code>: allowance/approval transactions and other non-taxable operational actions.</li>
+              <li><code>Repay Loan</code>: repayment of loan principal.</li>
+            </ul>
+          </div>
+          <div class="rounded-2xl border border-neutral-200 bg-emerald-50 p-5 text-sm leading-7 text-emerald-950">
+            In German tax framing, <code>Derivative</code> maps to derivative / <code>Termingeschaeft</code>-style activity and is distinct from spot token disposals.
+          </div>
         </div>
       </section>
 

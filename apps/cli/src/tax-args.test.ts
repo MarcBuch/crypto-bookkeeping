@@ -159,7 +159,7 @@ describe("tax CLI argument handling", () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(parseJsonStdout(result)).toEqual({
-      error: "label must be Trade, Transfer, Approval, Repay Loan, or unlabeled",
+      error: "label must be Trade, Transfer, Approval, Repay Loan, Derivative, or unlabeled",
     });
   });
 
@@ -184,12 +184,20 @@ describe("tax CLI argument handling", () => {
     expect(parseJsonStdout(result)).toEqual({ transactions: [] });
   });
 
+  it("accepts Derivative list labels", async () => {
+    const result = await runCli(["--json", "tax", "list", "--label", "Derivative"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(parseJsonStdout(result)).toEqual({ transactions: [] });
+  });
+
   it("rejects invalid update labels with controlled JSON", async () => {
     const result = await runCli(["--json", "tax", "label", "tx-1:external", "--label", "Income"]);
 
     expect(result.exitCode).not.toBe(0);
     expect(parseJsonStdout(result)).toEqual({
-      error: "label must be Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
+      error:
+        "label must be Trade, Transfer, Approval, Repay Loan, Derivative, null, clear, none, or unlabeled",
     });
   });
 
@@ -223,6 +231,21 @@ describe("tax CLI argument handling", () => {
     });
   });
 
+  it("accepts Derivative update labels", async () => {
+    const dataDir = makeDataDir();
+    await seedTaxTransaction(dataDir);
+
+    const result = await runCli(
+      ["--json", "tax", "label", "tx-1:external", "--label", "Derivative"],
+      dataDir,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(parseJsonStdout(result)).toMatchObject({
+      transaction: { id: "tx-1:external", label: "Derivative" },
+    });
+  });
+
   it("rejects label updates without a label or comment with controlled JSON", async () => {
     const result = await runCli(["--json", "tax", "label", "tx-1:external"]);
 
@@ -246,7 +269,8 @@ describe("tax CLI argument handling", () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(parseJsonStdout(result)).toEqual({
-      error: "label must be Trade, Transfer, Approval, Repay Loan, null, clear, none, or unlabeled",
+      error:
+        "label must be Trade, Transfer, Approval, Repay Loan, Derivative, null, clear, none, or unlabeled",
     });
   });
 

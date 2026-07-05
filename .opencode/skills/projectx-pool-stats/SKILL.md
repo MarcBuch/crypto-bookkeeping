@@ -1,16 +1,28 @@
 ---
 name: projectx-pool-stats
-description: Use when the user wants to check the current APR, TVL, 24h volume, fees, or active boost campaigns on ProjectX (prjx.com). Also use when comparing fee tiers for a pool, checking if a Merkl boost is still active, or assessing whether the current pool APR justifies staying in or reranging. Fetches live data from the public ProjectX API.
+description: Use when the user wants current or historical ProjectX APR, TVL, volume, fees, fee slowdown, or active boost campaigns. Also use when comparing fee tiers, checking Merkl boosts, diagnosing why advertised yield changed, or assessing whether pool APR justifies staying in or reranging.
 ---
 
 # Skill: ProjectX Pool Stats
 
-Fetches live pool data from the ProjectX DEX API (`https://api.prjx.com`):
+Fetches ProjectX pool data from two sources:
+
+- ProjectX DEX API (`https://api.prjx.com`) for live headline APR and Merkl boosts
+- Goldsky Uniswap V3 HyperEVM subgraph for historical fee APR, TVL, volume, and slowdown diagnostics
+
+Live ProjectX data includes:
 
 - Current APR — base fee APR + active Merkl boost APR
 - TVL, 24h volume, 24h fee revenue
 - Boost campaign details (reward token, daily USD, end date)
 - Break-even rerange days for HYPE/USDC pools (contextualised to LP position size)
+
+Goldsky history includes:
+
+- Daily fee APR from historical `feesUSD` / `tvlUSD`
+- Rolling hourly fee APR for recent slowdown checks
+- Volume-vs-TVL decomposition, e.g. volume down vs liquidity up
+- Fee-only data; Merkl boost APR is not included
 
 ## When to use
 
@@ -20,6 +32,8 @@ Fetches live pool data from the ProjectX DEX API (`https://api.prjx.com`):
 - User wants to compare fee tiers (0.05% vs 0.30% for HYPE/USDC)
 - User asks whether reranging is worth it at current pool APR
 - User wants TVL or volume context before deciding to enter or exit
+- User asks why advertised ProjectX APR/yield dropped or whether fees slowed down
+- User wants recent daily/hourly fee APR history for a pool
 
 ## How to Run
 
@@ -41,9 +55,14 @@ bun "$SKILL_DIR/pool-stats.ts" --all 2>/dev/null
 # JSON output (for agent/programmatic use)
 bun "$SKILL_DIR/pool-stats.ts" --json 2>/dev/null
 bun "$SKILL_DIR/pool-stats.ts" HYPE/USDC --fee 500 --json 2>/dev/null
+
+# Historical fee APR / slowdown analysis from Goldsky
+bun "$SKILL_DIR/pool-history.ts" HYPE/USDC --fee 500 2>/dev/null
+bun "$SKILL_DIR/pool-history.ts" HYPE/USDC --fee 500 --days 14 --hours 48 --json 2>/dev/null
+bun "$SKILL_DIR/pool-history.ts" --pool 0x6c9a33e3b592c0d65b3ba59355d5be0d38259285 --json 2>/dev/null
 ```
 
-## JSON Output Schema
+## Live JSON Output Schema (`pool-stats.ts`)
 
 ```json
 {
@@ -72,12 +91,56 @@ bun "$SKILL_DIR/pool-stats.ts" HYPE/USDC --fee 500 --json 2>/dev/null
 }
 ```
 
+## History JSON Output Schema (`pool-history.ts`)
+
+```json
+{
+  "fetchedAt": "2026-07-05T15:20:00.000Z",
+  "source": "goldsky-uniswap-v3-hyperevm-position",
+  "pool": {
+    "id": "0x6c9a33e3b592c0d65b3ba59355d5be0d38259285",
+    "feeTier": "500",
+    "feeRatePct": 0.05,
+    "tvlUSD": 15230451,
+    "token0": { "symbol": "WHYPE" },
+    "token1": { "symbol": "USDC" },
+    "token1Price": 69.72
+  },
+  "summary": {
+    "averageDaily": {
+      "avgDailyVolumeUSD": 68852557,
+      "avgDailyFeesUSD": 34426,
+      "feeAprPct": 84.6
+    },
+    "rollingHours": {
+      "totalVolumeUSD": 35003230,
+      "totalFeesUSD": 17502,
+      "dailyizedVolumeUSD": 35003230,
+      "dailyizedFeesUSD": 17502,
+      "annualizedFeeAprPct": 41.8
+    },
+    "slowdown": {
+      "verdict": "volume-down",
+      "volumeVsAveragePct": -49.2,
+      "feesVsAveragePct": -49.2,
+      "tvlVsAveragePct": 5.1,
+      "aprVsAveragePct": -50.6
+    }
+  },
+  "days": [{ "date": "2026-07-04", "volumeUSD": 47781849, "feesUSD": 23891, "feeAprPct": 56.1 }],
+  "hours": [{ "hour": "2026-07-05T14:00:00.000Z", "feesUSD": 608.53, "annualizedFeeAprPct": 35.1 }]
+}
+```
+
 ## Key Notes
 
-- The API returns a single snapshot — there is no historical APR endpoint. To track APR over time, call this skill periodically and compare.
+- `pool-stats.ts` returns a single live snapshot from ProjectX, including Merkl boosts.
+- `pool-history.ts` returns historical fee-only APR from Goldsky; it excludes Merkl boosts.
+- Use `pool-history.ts` when diagnosing fee slowdowns or advertised APR compression over time.
 - `apr` = `baseApr` + Merkl boost. Use `baseApr` for fee income projections; the boost is campaign-dependent and has an end date.
 - The break-even rerange line in human output is computed against a fixed $2,449 position size — scale the numbers proportionally for different sizes.
 - All numeric fields from the API come back as strings; the script parses them with `parseFloat`.
 - The `--fee` flag takes basis points (`500` for 0.05%, `3000` for 0.30%).
+- For HYPE/USDC, Goldsky `token0Price` is inverted HYPE per USDC; prefer `token1Price` for USDC per HYPE.
 
-Base directory for this skill: file:///Users/marc.buchardt/fun/private/lp-tracker/.opencode/skills/projectx-pool-stats
+Base directory for this skill: /Users/marc.buchardt/fun/private/bookkeeping/.opencode/skills/projectx-pool-stats

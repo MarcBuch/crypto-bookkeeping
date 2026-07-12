@@ -232,6 +232,8 @@ describe("dashboard rendering", () => {
     const html = renderDashboard([activePosition, positionWithoutUsdFees]);
 
     expect(html).toMatch(/Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
+    expect(html).toContain("12.35 USDC");
+    expect(html).toContain("partial");
     expect(html).toContain("USD unavailable");
     expect(html).not.toContain("$0.00");
     expect(html).toContain("24.69 USDC");

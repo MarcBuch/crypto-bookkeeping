@@ -212,6 +212,9 @@ export function Dashboard({
   );
 
   const token1Symbol = positions.find((p) => p.pnl)?.pnl?.token1Symbol ?? "token1";
+  const hasPartialUsdFees = positions.some(
+    (position) => position.pnl != null && position.pnl.feesValueUsd == null,
+  );
 
   return (
     <>
@@ -237,7 +240,7 @@ export function Dashboard({
           <MetricCard
             label="Lifetime Income USD"
             value={totals.feesUsdCount > 0 ? formatUsd(totals.feesUsd) : "USD unavailable"}
-            detail={`${formatNumber(totals.fees)} ${token1Symbol}`}
+            detail={`${formatNumber(totals.fees)} ${token1Symbol}${hasPartialUsdFees ? " · partial" : ""}`}
             tone={totals.feesUsdCount > 0 ? totals.feesUsd : undefined}
           />
         </section>

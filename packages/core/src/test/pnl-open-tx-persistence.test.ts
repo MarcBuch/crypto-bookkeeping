@@ -59,6 +59,10 @@ let mockComputeUnclaimedFees: (..._args: unknown[]) => unknown = async () => ({
   fees0: 0,
   fees1: 0,
 });
+let mockComputeUnclaimedFeesRaw: (..._args: unknown[]) => unknown = async () => ({
+  fees0: 0n,
+  fees1: 0n,
+});
 
 await mock.module("../chain/pools.js", () => ({
   getTokenInfo: async (_client: unknown, token: string) =>
@@ -71,6 +75,7 @@ await mock.module("../chain/pools.js", () => ({
     feeGrowthGlobal1X128: 0n,
   }),
   computeUnclaimedFees: (...args: unknown[]) => mockComputeUnclaimedFees(...args),
+  computeUnclaimedFeesRaw: (...args: unknown[]) => mockComputeUnclaimedFeesRaw(...args),
   getTickData: async () => ({
     feeGrowthOutside0X128: 0n,
     feeGrowthOutside1X128: 0n,
@@ -98,6 +103,7 @@ await mock.module("../math/divergence-loss.js", () => ({
     feeGrowthInside1X128: 0n,
   }),
   calculateUnclaimedFees: () => ({ fees0: 0, fees1: 0 }),
+  calculateUnclaimedFeesRaw: () => ({ fees0: 0n, fees1: 0n }),
 }));
 
 await mock.module("../services/lp-economics.js", () => ({
@@ -199,6 +205,7 @@ beforeEach(() => {
   mockToken0Info = { symbol: "TOK", decimals: 18 };
   mockToken1Info = { symbol: "TOK", decimals: 18 };
   mockComputeUnclaimedFees = async () => ({ fees0: 0, fees1: 0 });
+  mockComputeUnclaimedFeesRaw = async () => ({ fees0: 0n, fees1: 0n });
   mockGetAllPositions = async () => [fakePos];
   lastCalculateLpEconomicsFacts = null;
 });
@@ -669,10 +676,12 @@ describe("active position fees and withdrawals", () => {
     mockToken1Info = { symbol: "TOK1", decimals: 0 };
     mockSumDecreaseLiquidityLogs = async () => ({ amount0: 11n, amount1: 22n });
     mockSumCollectLogsPublic = async () => ({ amount0: 41n, amount1: 52n });
-    mockComputeUnclaimedFees = async () => ({ fees0: 1, fees1: 2 });
+    mockComputeUnclaimedFeesRaw = async () => ({ fees0: 1n, fees1: 2n });
 
     const [result] = await getPnLView(baseConfig);
 
+    expect(lastCalculateLpEconomicsFacts?.pendingFees0).toBe(1n);
+    expect(lastCalculateLpEconomicsFacts?.pendingFees1).toBe(2n);
     expect(lastCalculateLpEconomicsFacts?.totalFees0).toBe(31n);
     expect(lastCalculateLpEconomicsFacts?.totalFees1).toBe(32n);
     expect(result.pendingFeesValueInToken1).toBe(3);

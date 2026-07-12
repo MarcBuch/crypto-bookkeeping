@@ -12,7 +12,7 @@ import {
   type HypersyncClient,
 } from "../chain/hypersync.js";
 import {
-  computeUnclaimedFees,
+  computeUnclaimedFeesRaw,
   getPoolAddress,
   getPoolState,
   getSlot0,
@@ -358,16 +358,14 @@ export async function resolvePositionLifecycle(
           : 0n;
     }
 
-    const feeResult = await computeUnclaimedFees(
+    const feeResult = await computeUnclaimedFeesRaw(
       context.client,
       poolAddress,
       pos,
       poolState,
-      token0Info.decimals,
-      token1Info.decimals,
     );
-    pendingFees0 = BigInt(Math.floor(feeResult.fees0 * 10 ** token0Info.decimals));
-    pendingFees1 = BigInt(Math.floor(feeResult.fees1 * 10 ** token1Info.decimals));
+    pendingFees0 = feeResult.fees0;
+    pendingFees1 = feeResult.fees1;
     totalFees0 = previouslyCollectedFees0 + pendingFees0;
     totalFees1 = previouslyCollectedFees1 + pendingFees1;
   } else {

@@ -12,6 +12,7 @@ import {
   sqrtPriceX96ToPrice,
   getTokenAmounts,
   calculateUnclaimedFees,
+  calculateUnclaimedFeesRaw,
   tickToSqrtPrice,
   tickToPrice,
 } from "../math/divergence-loss.js";
@@ -506,6 +507,21 @@ describe("calculateUnclaimedFees — 0 liquidity", () => {
 
     expect(result.fees0).toBeGreaterThanOrEqual(0);
     expect(result.fees1).toBeGreaterThanOrEqual(0);
+  });
+
+  it("preserves raw fee units above Number.MAX_SAFE_INTEGER exactly", () => {
+    const raw = calculateUnclaimedFeesRaw(
+      0n,
+      0n,
+      0n,
+      0n,
+      0n,
+      BigInt(Number.MAX_SAFE_INTEGER) + 123n,
+      0n,
+    );
+
+    expect(raw.fees0).toBe(BigInt(Number.MAX_SAFE_INTEGER) + 123n);
+    expect(raw.fees1).toBe(0n);
   });
 });
 

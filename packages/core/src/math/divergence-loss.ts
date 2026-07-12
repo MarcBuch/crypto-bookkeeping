@@ -141,6 +141,34 @@ export function calculateUnclaimedFees(
   decimals0: number,
   decimals1: number,
 ): { fees0: number; fees1: number } {
+  const rawFees = calculateUnclaimedFeesRaw(
+    liquidity,
+    feeGrowthInside0LastX128,
+    feeGrowthInside1LastX128,
+    feeGrowthInside0CurrentX128,
+    feeGrowthInside1CurrentX128,
+    tokensOwed0,
+    tokensOwed1,
+  );
+
+  return {
+    fees0: Number(rawFees.fees0) / 10 ** decimals0,
+    fees1: Number(rawFees.fees1) / 10 ** decimals1,
+  };
+}
+
+/**
+ * Calculate uncollected fees for a position in raw token units.
+ */
+export function calculateUnclaimedFeesRaw(
+  liquidity: bigint,
+  feeGrowthInside0LastX128: bigint,
+  feeGrowthInside1LastX128: bigint,
+  feeGrowthInside0CurrentX128: bigint,
+  feeGrowthInside1CurrentX128: bigint,
+  tokensOwed0: bigint,
+  tokensOwed1: bigint,
+): { fees0: bigint; fees1: bigint } {
   // Calculate fee growth delta
   let feeGrowth0Delta: bigint;
   let feeGrowth1Delta: bigint;
@@ -162,10 +190,7 @@ export function calculateUnclaimedFees(
   const unclaimed0 = (feeGrowth0Delta * liquidity) / Q128 + tokensOwed0;
   const unclaimed1 = (feeGrowth1Delta * liquidity) / Q128 + tokensOwed1;
 
-  return {
-    fees0: Number(unclaimed0) / 10 ** decimals0,
-    fees1: Number(unclaimed1) / 10 ** decimals1,
-  };
+  return { fees0: unclaimed0, fees1: unclaimed1 };
 }
 
 /**

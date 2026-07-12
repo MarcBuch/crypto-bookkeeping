@@ -1,6 +1,9 @@
 import type { Address } from "viem";
 
-import { calculateFeeGrowthInside, calculateUnclaimedFees } from "../math/divergence-loss.js";
+import {
+  calculateFeeGrowthInside,
+  calculateUnclaimedFeesRaw,
+} from "../math/divergence-loss.js";
 import { factoryAbi, poolAbi, erc20Abi } from "./abis";
 import type { Client } from "./client";
 import { withRetry } from "./rpc";
@@ -174,6 +177,33 @@ export async function computeUnclaimedFees(
   token0Decimals: number,
   token1Decimals: number,
 ): Promise<{ fees0: number; fees1: number }> {
+  const feeResult = await computeUnclaimedFeesRaw(
+    client,
+    poolAddress,
+    pos,
+    poolState,
+  );
+
+  return {
+    fees0: Number(feeResult.fees0) / 10 ** token0Decimals,
+    fees1: Number(feeResult.fees1) / 10 ** token1Decimals,
+  };
+}
+
+export async function computeUnclaimedFeesRaw(
+  client: ReadContractClient,
+  poolAddress: Address,
+  pos: {
+    tickLower: number;
+    tickUpper: number;
+    liquidity: bigint;
+    feeGrowthInside0LastX128: bigint;
+    feeGrowthInside1LastX128: bigint;
+    tokensOwed0: bigint;
+    tokensOwed1: bigint;
+  },
+  poolState: PoolState,
+): Promise<{ fees0: bigint; fees1: bigint }> {
   try {
     const [tickLowerData, tickUpperData] = await Promise.all([
       getTickData(client, poolAddress, pos.tickLower),
@@ -192,7 +222,7 @@ export async function computeUnclaimedFees(
       tickUpperData.feeGrowthOutside1X128,
     );
 
-    const feeResult = calculateUnclaimedFees(
+    return calculateUnclaimedFeesRaw(
       pos.liquidity,
       pos.feeGrowthInside0LastX128,
       pos.feeGrowthInside1LastX128,
@@ -200,14 +230,10 @@ export async function computeUnclaimedFees(
       feeGrowthInside.feeGrowthInside1X128,
       pos.tokensOwed0,
       pos.tokensOwed1,
-      token0Decimals,
-      token1Decimals,
     );
-
-    return feeResult;
   } catch {
     // Fees calculation may fail — leave as 0
-    return { fees0: 0, fees1: 0 };
+    return { fees0: 0n, fees1: 0n };
   }
 }
 

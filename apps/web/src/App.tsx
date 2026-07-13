@@ -202,8 +202,9 @@ export function Dashboard({
           assignedHedgesByTokenId.get(position.tokenId) ?? [],
         ).displayedPnlInToken1 ?? 0;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
-      if (typeof position.pnl?.feesValueUsd === "number") {
-        acc.feesUsd += position.pnl.feesValueUsd;
+      const feesUsd = position.pnl ? feeValueUsd(position.pnl) : null;
+      if (feesUsd !== null) {
+        acc.feesUsd += feesUsd;
         acc.feesUsdCount += 1;
       }
       return acc;
@@ -213,7 +214,7 @@ export function Dashboard({
 
   const token1Symbol = positions.find((p) => p.pnl)?.pnl?.token1Symbol ?? "token1";
   const hasPartialUsdFees = positions.some(
-    (position) => position.pnl != null && position.pnl.feesValueUsd == null,
+    (position) => position.pnl != null && feeValueUsd(position.pnl) === null,
   );
 
   return (
@@ -1134,7 +1135,7 @@ function PositionRow({
   const hedgeStatusPnlUsd =
     hedgeData?.status === "active"
       ? hedgeData.unrealizedPnl + hedgeData.fundingEarned
-      : blotterPnl.closedHedgePnlUsd;
+      : blotterPnl.hedgePnlUsd;
 
   return (
     <tr className="text-neutral-700 transition hover:bg-neutral-50">
@@ -1217,22 +1218,25 @@ function PositionRow({
             {formatUsd(blotterPnl.displayedPnlUsd)}
           </div>
         )}
-        {pnl && blotterPnl.closedHedgePnlUsd != null ? (
+        {pnl && blotterPnl.hedgePnlUsd != null ? (
           <div className="mt-1 text-xs font-normal text-neutral-500">
             LP {formatNumber(pnl.absolutePnlInToken1)} {pnl.token1Symbol}, hedge{" "}
-            {blotterPnl.closedHedgePnlInToken1 != null
-              ? `${formatNumber(blotterPnl.closedHedgePnlInToken1)} ${pnl.token1Symbol}`
-              : formatUsd(blotterPnl.closedHedgePnlUsd)}
-            {blotterPnl.closedHedgeCount > 0 ? ` (${blotterPnl.closedHedgeCount}x)` : ""}
-            {blotterPnl.closedHedgeFundingUnknown ? " · funding partial" : ""}
+            {blotterPnl.hedgePnlInToken1 != null
+              ? `${formatNumber(blotterPnl.hedgePnlInToken1)} ${pnl.token1Symbol}`
+              : formatUsd(blotterPnl.hedgePnlUsd)}
+            {blotterPnl.hedgeCount > 0 ? ` (${blotterPnl.hedgeCount}x)` : ""}
+            {blotterPnl.hedgeFundingUnknown ? " · funding partial" : ""}
           </div>
+        ) : null}
+        {pnl && blotterPnl.hedgePnlUnavailable ? (
+          <div className="mt-1 text-xs font-normal text-neutral-500">hedge P&L unavailable</div>
         ) : null}
       </td>
       <td className="px-5 py-4 font-mono whitespace-nowrap text-neutral-600">
         {pnl ? (
           <div>
-            <p className={`font-bold ${toneClass(usdFeeValue(pnl.feesValueUsd))}`}>
-              {formatUsdFeeValue(pnl.feesValueUsd)}
+            <p className={`font-bold ${toneClass(usdFeeValue(feeValueUsd(pnl)))}`}>
+              {formatUsdFeeValue(feeValueUsd(pnl))}
             </p>
             <p className="mt-1 text-xs text-neutral-500">
               {formatNumber(pnl.feesValueInToken1)} {pnl.token1Symbol}
@@ -1338,6 +1342,27 @@ export function formatUsd(value: number): string {
   }).format(value);
 }
 
+function tokenUsdPrice(symbol: string, price: number | null | undefined): number | null {
+  if (isFiniteNumber(price)) {
+    return price;
+  }
+
+  return isUsdStablecoin(symbol) ? 1 : null;
+}
+
+function isUsdStablecoin(symbol: string): boolean {
+  return /^(?:USDC|USDT|USDE|DAI)$/i.test(symbol);
+}
+
+function feeValueUsd(pnl: PnLView): number | null {
+  if (isFiniteNumber(pnl.feesValueUsd)) {
+    return pnl.feesValueUsd;
+  }
+
+  const token1Usd = tokenUsdPrice(pnl.token1Symbol, pnl.token1UsdPrice);
+  return token1Usd === null ? null : pnl.feesValueInToken1 * token1Usd;
+}
+
 export function buildActivePositionHedgeDisplay(params: {
   pnl: PnLView | undefined;
   assignedHedges?: HedgeEvent[];
@@ -1375,11 +1400,12 @@ export interface BlotterPnlView {
   lpPnlInToken1: number | null;
   displayedPnlInToken1: number | null;
   displayedPnlUsd: number | null;
-  closedHedgePnlUsd: number | null;
-  closedHedgePnlInToken1: number | null;
-  closedHedgeFundingUnknown: boolean;
-  closedHedgeCount: number;
-  includesClosedHedge: boolean;
+  hedgePnlUsd: number | null;
+  hedgePnlInToken1: number | null;
+  hedgeFundingUnknown: boolean;
+  hedgePnlUnavailable: boolean;
+  hedgeCount: number;
+  includesHedge: boolean;
 }
 
 export interface ClosedAssignedHedgePnlSummary {
@@ -1394,36 +1420,61 @@ export function buildBlotterPnl(
   assignedHedges: HedgeEvent[] = [],
 ): BlotterPnlView {
   const assignedClosedHedge = sumClosedAssignedHedgePnl(assignedHedges);
-  const closedHedgePnlUsd =
-    assignedClosedHedge.count > 0
-      ? assignedClosedHedge.totalUsd
-      : hedge?.status === "closed" && hedge.realizedPnl != null
-        ? hedge.realizedPnl + hedge.fundingEarned
-        : null;
+  const activeAssignedHedges = assignedHedges.filter(
+    (assignedHedge) => assignedHedge.status === "open",
+  );
+  let hedgePnlUsd: number | null = null;
+  let hedgeFundingUnknown = assignedClosedHedge.count > 0 && assignedClosedHedge.fundingUnknown;
+  let hedgePnlUnavailable = false;
+  let hedgeCount = 0;
 
-  const closedHedgePnlInToken1 =
-    closedHedgePnlUsd != null && pnl?.token1UsdPrice != null && pnl.token1UsdPrice > 0
-      ? closedHedgePnlUsd / pnl.token1UsdPrice
-      : null;
+  if (assignedHedges.length > 0) {
+    hedgeCount = assignedClosedHedge.count + activeAssignedHedges.length;
+    let activeHedgePnlUsd = 0;
+
+    for (const activeHedge of activeAssignedHedges) {
+      if (activeHedge.unrealized_pnl == null) {
+        hedgePnlUnavailable = true;
+        continue;
+      }
+
+      activeHedgePnlUsd += activeHedge.unrealized_pnl;
+      if (activeHedge.funding_earned != null) {
+        activeHedgePnlUsd += activeHedge.funding_earned;
+      } else {
+        hedgeFundingUnknown = true;
+      }
+    }
+
+    hedgePnlUsd = (assignedClosedHedge.totalUsd ?? 0) + activeHedgePnlUsd;
+  } else if (hedge?.status === "closed" && hedge.realizedPnl != null) {
+    hedgePnlUsd = hedge.realizedPnl + hedge.fundingEarned;
+    hedgeCount = 1;
+  } else if (hedge?.status === "active") {
+    hedgePnlUsd = hedge.unrealizedPnl + hedge.fundingEarned;
+    hedgeCount = 1;
+  }
+
+  const token1Usd = pnl ? tokenUsdPrice(pnl.token1Symbol, pnl.token1UsdPrice) : null;
+  const hedgePnlInToken1 =
+    hedgePnlUsd != null && token1Usd != null && token1Usd > 0 ? hedgePnlUsd / token1Usd : null;
 
   const lpPnlInToken1 = pnl?.absolutePnlInToken1 ?? null;
   const displayedPnlInToken1 =
-    lpPnlInToken1 != null ? lpPnlInToken1 + (closedHedgePnlInToken1 ?? 0) : null;
+    lpPnlInToken1 != null ? lpPnlInToken1 + (hedgePnlInToken1 ?? 0) : null;
   const displayedPnlUsd =
-    displayedPnlInToken1 != null && pnl?.token1UsdPrice != null
-      ? displayedPnlInToken1 * pnl.token1UsdPrice
-      : null;
+    displayedPnlInToken1 != null && token1Usd != null ? displayedPnlInToken1 * token1Usd : null;
 
   return {
     lpPnlInToken1,
     displayedPnlInToken1,
     displayedPnlUsd,
-    closedHedgePnlUsd,
-    closedHedgePnlInToken1,
-    closedHedgeFundingUnknown: assignedClosedHedge.count > 0 && assignedClosedHedge.fundingUnknown,
-    closedHedgeCount:
-      assignedClosedHedge.count > 0 ? assignedClosedHedge.count : closedHedgePnlUsd != null ? 1 : 0,
-    includesClosedHedge: lpPnlInToken1 != null && closedHedgePnlInToken1 != null,
+    hedgePnlUsd,
+    hedgePnlInToken1,
+    hedgeFundingUnknown,
+    hedgePnlUnavailable,
+    hedgeCount,
+    includesHedge: lpPnlInToken1 != null && hedgePnlInToken1 != null,
   };
 }
 
@@ -1494,8 +1545,18 @@ function isFiniteNumber(value: number | null | undefined): value is number {
 }
 
 function currentBalanceUsd(position: DashboardPosition): number | null {
-  const token0Usd = position.pnl?.token0UsdPrice;
-  const token1Usd = position.pnl?.token1UsdPrice;
+  const rawToken0Usd = position.pnl?.token0UsdPrice;
+  const rawToken1Usd = position.pnl?.token1UsdPrice;
+  const token0Usd = isFiniteNumber(rawToken0Usd)
+    ? rawToken0Usd
+    : position.pnl && !isFiniteNumber(rawToken1Usd)
+      ? tokenUsdPrice(position.pnl.token0Symbol, rawToken0Usd)
+      : null;
+  const token1Usd = isFiniteNumber(rawToken1Usd)
+    ? rawToken1Usd
+    : position.pnl && !isFiniteNumber(rawToken0Usd)
+      ? tokenUsdPrice(position.pnl.token1Symbol, rawToken1Usd)
+      : null;
   const currentPrice = position.currentPrice;
 
   if (isFiniteNumber(token0Usd) && isFiniteNumber(token1Usd)) {
@@ -1527,7 +1588,12 @@ function calculateThirtyDayPortfolioCarryRunRate(positions: DashboardPosition[])
 
   for (const position of positions) {
     const pnl = position.pnl;
-    if (!pnl || typeof pnl.feesValueUsd !== "number" || pnl.openedAt == null) {
+    if (!pnl || pnl.openedAt == null) {
+      continue;
+    }
+
+    const feesUsd = feeValueUsd(pnl);
+    if (feesUsd === null) {
       continue;
     }
 
@@ -1536,7 +1602,7 @@ function calculateThirtyDayPortfolioCarryRunRate(positions: DashboardPosition[])
       continue;
     }
 
-    totalFeesUsd += pnl.feesValueUsd;
+    totalFeesUsd += feesUsd;
     earliestOpenedAt = earliestOpenedAt === null ? openedAt : Math.min(earliestOpenedAt, openedAt);
   }
 

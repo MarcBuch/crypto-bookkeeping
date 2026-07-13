@@ -20,7 +20,7 @@ describe("calculateUsdFeeIncome", () => {
     });
   });
 
-  it("keeps the available leg populated but aggregate null when a nonzero-fee leg is unpriced", () => {
+  it("uses available priced legs for aggregate USD fees when a nonzero-fee leg is unpriced", () => {
     expect(
       calculateUsdFeeIncome({
         feesCollected0: 3,
@@ -31,7 +31,7 @@ describe("calculateUsdFeeIncome", () => {
     ).toEqual({
       feesCollected0Usd: 6,
       feesCollected1Usd: null,
-      feesValueUsd: null,
+      feesValueUsd: 6,
       usdPriceSource: "coingecko",
     });
   });

@@ -69,10 +69,11 @@ export function calculateUsdFeeIncome(params: {
       : params.token1UsdPrice === null
         ? null
         : params.feesCollected1 * params.token1UsdPrice;
+  const pricedFeeLegs = [feesCollected0Usd, feesCollected1Usd].filter(
+    (value): value is number => value !== null,
+  );
   const feesValueUsd =
-    feesCollected0Usd === null || feesCollected1Usd === null
-      ? null
-      : feesCollected0Usd + feesCollected1Usd;
+    pricedFeeLegs.length === 0 ? null : pricedFeeLegs.reduce((total, value) => total + value, 0);
   const usdPriceSource =
     params.token0UsdPrice !== null || params.token1UsdPrice !== null ? "coingecko" : null;
 

@@ -170,12 +170,14 @@ describe("buildActivePositionHedgeDisplay", () => {
     expect(result.net.closedCount).toBe(1);
   });
 
-  it("marks assigned hedge P&L unavailable when unrealized P&L is missing", () => {
+  it("keeps known assigned hedge P&L but flags partial data when unrealized P&L is missing", () => {
     const result = buildActivePositionHedgeDisplay({
       pnl,
       assignedHedges: [
+        assignedOpenHedge,
         {
           ...assignedOpenHedge,
+          id: 24,
           unrealized_pnl: null,
         },
       ],
@@ -186,8 +188,8 @@ describe("buildActivePositionHedgeDisplay", () => {
     if (result.source !== "assigned") {
       throw new Error("expected assigned hedge source");
     }
-    expect(result.net.hedgePnlUsd).toBeNull();
-    expect(result.net.combinedPnlUsd).toBeNull();
+    expect(result.net.hedgePnlUsd).toBe(27.59);
+    expect(result.net.combinedPnlUsd).toBe(53.09);
     expect(result.net.missingUnrealized).toBe(true);
   });
 

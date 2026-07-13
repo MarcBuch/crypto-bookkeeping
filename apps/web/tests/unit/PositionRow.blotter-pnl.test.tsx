@@ -46,8 +46,8 @@ describe("buildBlotterPnl", () => {
 
     expect(result.displayedPnlInToken1).toBe(25.5);
     expect(result.displayedPnlUsd).toBe(25.5);
-    expect(result.closedHedgePnlUsd).toBeNull();
-    expect(result.includesClosedHedge).toBe(false);
+    expect(result.hedgePnlUsd).toBeNull();
+    expect(result.includesHedge).toBe(false);
   });
 
   it("adds closed hedge P&L into the LP row when token1 USD price is known", () => {
@@ -69,14 +69,14 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl(pnl, hedge);
 
-    expect(result.closedHedgePnlUsd).toBe(45.5);
-    expect(result.closedHedgePnlInToken1).toBe(45.5);
+    expect(result.hedgePnlUsd).toBe(45.5);
+    expect(result.hedgePnlInToken1).toBe(45.5);
     expect(result.displayedPnlInToken1).toBe(71);
     expect(result.displayedPnlUsd).toBe(71);
-    expect(result.includesClosedHedge).toBe(true);
+    expect(result.includesHedge).toBe(true);
   });
 
-  it("does not fold closed hedge P&L into token1 totals when token1 USD price is missing", () => {
+  it("uses stable token1 symbol to fold closed hedge P&L into token1 totals when token1 USD price is missing", () => {
     const hedge: HedgeView = {
       tokenId: "123",
       coin: "HYPE",
@@ -95,14 +95,14 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl({ ...pnl, token1UsdPrice: null }, hedge);
 
-    expect(result.closedHedgePnlUsd).toBe(45.5);
-    expect(result.closedHedgePnlInToken1).toBeNull();
-    expect(result.displayedPnlInToken1).toBe(25.5);
-    expect(result.displayedPnlUsd).toBeNull();
-    expect(result.includesClosedHedge).toBe(false);
+    expect(result.hedgePnlUsd).toBe(45.5);
+    expect(result.hedgePnlInToken1).toBe(45.5);
+    expect(result.displayedPnlInToken1).toBe(71);
+    expect(result.displayedPnlUsd).toBe(71);
+    expect(result.includesHedge).toBe(true);
   });
 
-  it("does not add active hedge P&L to blotter LP totals", () => {
+  it("adds active hedge P&L to blotter LP totals", () => {
     const hedge: HedgeView = {
       tokenId: "123",
       coin: "HYPE",
@@ -118,13 +118,14 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl(pnl, hedge);
 
-    expect(result.closedHedgePnlUsd).toBeNull();
-    expect(result.displayedPnlInToken1).toBe(25.5);
-    expect(result.displayedPnlUsd).toBe(25.5);
-    expect(result.includesClosedHedge).toBe(false);
+    expect(result.hedgePnlUsd).toBe(45.5);
+    expect(result.hedgePnlInToken1).toBe(45.5);
+    expect(result.displayedPnlInToken1).toBe(71);
+    expect(result.displayedPnlUsd).toBe(71);
+    expect(result.includesHedge).toBe(true);
   });
 
-  it("sums multiple closed assigned hedge events and ignores open events in row totals", () => {
+  it("sums multiple closed and open assigned hedge events in row totals", () => {
     const assignedHedges: HedgeEvent[] = [
       {
         id: 1,
@@ -202,11 +203,96 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl(pnl, undefined, assignedHedges);
 
-    expect(result.closedHedgePnlUsd).toBe(35.5);
-    expect(result.closedHedgePnlInToken1).toBe(35.5);
-    expect(result.displayedPnlInToken1).toBe(61);
-    expect(result.closedHedgeCount).toBe(2);
-    expect(result.closedHedgeFundingUnknown).toBe(true);
+    expect(result.hedgePnlUsd).toBe(164.5);
+    expect(result.hedgePnlInToken1).toBe(164.5);
+    expect(result.displayedPnlInToken1).toBe(190);
+    expect(result.hedgeCount).toBe(3);
+    expect(result.hedgeFundingUnknown).toBe(true);
+  });
+
+  it("keeps known assigned hedge P&L in row totals when another open hedge is missing unrealized P&L", () => {
+    const assignedHedges: HedgeEvent[] = [
+      {
+        id: 1,
+        token_id: "123",
+        trade_key: null,
+        tax_key: null,
+        coin: "HYPE",
+        status: "closed",
+        entry_px: 10,
+        size: -5,
+        opened_at: "2026-06-20T00:00:00.000Z",
+        closed_at: "2026-06-20T04:00:00.000Z",
+        close_px: 9,
+        realized_pnl: 40,
+        funding_earned: 5.5,
+        close_reason: "manual_close",
+        hl_fill_hash: null,
+        current_szi: null,
+        mark_px: null,
+        unrealized_pnl: null,
+        liquidation_px: null,
+        leverage_type: null,
+        leverage_value: null,
+        updated_at: null,
+      },
+      {
+        id: 2,
+        token_id: "123",
+        trade_key: null,
+        tax_key: null,
+        coin: "HYPE",
+        status: "open",
+        entry_px: 13,
+        size: -2,
+        opened_at: "2026-06-22T00:00:00.000Z",
+        closed_at: null,
+        close_px: null,
+        realized_pnl: null,
+        funding_earned: 9,
+        close_reason: null,
+        hl_fill_hash: null,
+        current_szi: "-2",
+        mark_px: 12,
+        unrealized_pnl: 30,
+        liquidation_px: 20,
+        leverage_type: "cross",
+        leverage_value: 2,
+        updated_at: "2026-06-22T01:00:00.000Z",
+      },
+      {
+        id: 3,
+        token_id: "123",
+        trade_key: null,
+        tax_key: null,
+        coin: "HYPE",
+        status: "open",
+        entry_px: 14,
+        size: -1,
+        opened_at: "2026-06-23T00:00:00.000Z",
+        closed_at: null,
+        close_px: null,
+        realized_pnl: null,
+        funding_earned: 4,
+        close_reason: null,
+        hl_fill_hash: null,
+        current_szi: "-1",
+        mark_px: 12,
+        unrealized_pnl: null,
+        liquidation_px: 20,
+        leverage_type: "cross",
+        leverage_value: 2,
+        updated_at: "2026-06-23T01:00:00.000Z",
+      },
+    ];
+
+    const result = buildBlotterPnl(pnl, undefined, assignedHedges);
+
+    expect(result.hedgePnlUsd).toBe(84.5);
+    expect(result.hedgePnlInToken1).toBe(84.5);
+    expect(result.displayedPnlInToken1).toBe(110);
+    expect(result.hedgePnlUnavailable).toBe(true);
+    expect(result.includesHedge).toBe(true);
   });
 
   it("reduces assigned closed hedge contribution when known funding is negative", () => {
@@ -239,13 +325,13 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl(pnl, undefined, assignedHedges);
 
-    expect(result.closedHedgePnlUsd).toBe(36.75);
-    expect(result.closedHedgePnlInToken1).toBe(36.75);
+    expect(result.hedgePnlUsd).toBe(36.75);
+    expect(result.hedgePnlInToken1).toBe(36.75);
     expect(result.displayedPnlInToken1).toBe(62.25);
-    expect(result.closedHedgeFundingUnknown).toBe(false);
+    expect(result.hedgeFundingUnknown).toBe(false);
   });
 
-  it("keeps assigned closed hedge USD known but token1 conversion null when token1UsdPrice is missing", () => {
+  it("uses stable token1 symbol to convert assigned closed hedge USD when token1UsdPrice is missing", () => {
     const assignedHedges: HedgeEvent[] = [
       {
         id: 1,
@@ -275,11 +361,11 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl({ ...pnl, token1UsdPrice: null }, undefined, assignedHedges);
 
-    expect(result.closedHedgePnlUsd).toBe(45.5);
-    expect(result.closedHedgePnlInToken1).toBeNull();
-    expect(result.displayedPnlInToken1).toBe(25.5);
-    expect(result.displayedPnlUsd).toBeNull();
-    expect(result.includesClosedHedge).toBe(false);
+    expect(result.hedgePnlUsd).toBe(45.5);
+    expect(result.hedgePnlInToken1).toBe(45.5);
+    expect(result.displayedPnlInToken1).toBe(71);
+    expect(result.displayedPnlUsd).toBe(71);
+    expect(result.includesHedge).toBe(true);
   });
 
   it("prefers assigned closed hedge history over legacy closed hedge view to avoid double counting", () => {
@@ -327,7 +413,7 @@ describe("buildBlotterPnl", () => {
 
     const result = buildBlotterPnl(pnl, hedge, assignedHedges);
 
-    expect(result.closedHedgePnlUsd).toBe(12);
+    expect(result.hedgePnlUsd).toBe(12);
     expect(result.displayedPnlInToken1).toBe(37.5);
   });
 });

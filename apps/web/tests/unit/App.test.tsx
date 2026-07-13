@@ -226,15 +226,14 @@ describe("dashboard rendering", () => {
     expectMetricValue(html, "Lifetime Income USD", "$3.23");
   });
 
-  it("sums only numeric USD fees across mixed positions", () => {
+  it("derives USD fees from token1-denominated fees across mixed positions", () => {
     const positionWithoutUsdFees = withoutUsdFee(activePosition, "789", null);
 
     const html = renderDashboard([activePosition, positionWithoutUsdFees]);
 
-    expect(html).toMatch(/Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$3\.23<\/p>/);
+    expect(html).toMatch(/Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$15\.58<\/p>/);
     expect(html).toContain("12.35 USDC");
-    expect(html).toContain("partial");
-    expect(html).toContain("USD unavailable");
+    expect(html).not.toContain("partial");
     expect(html).not.toContain("$0.00");
     expect(html).toContain("24.69 USDC");
     expect(html).toContain("active");
@@ -242,15 +241,13 @@ describe("dashboard rendering", () => {
     expect(html).toContain("1 - 2");
   });
 
-  it("shows unavailable portfolio USD fees when every position lacks USD fees", () => {
+  it("derives portfolio USD fees when every position lacks explicit USD fees", () => {
     const positionWithNullUsdFees = withoutUsdFee(activePosition, "789", null);
     const positionWithMissingUsdFees = withoutUsdFee(closedPosition, "999");
 
     const html = renderDashboard([positionWithNullUsdFees, positionWithMissingUsdFees]);
 
-    expect(html).toMatch(
-      /Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>USD unavailable<\/p>/,
-    );
+    expect(html).toMatch(/Lifetime Income USD<\/p><span[^>]*><\/span><\/div><p[^>]*>\$24\.69<\/p>/);
     expect(html).not.toContain("$0.00");
     expect(html).toContain("24.69 USDC");
     expect(html).toContain("closed");
@@ -295,6 +292,25 @@ describe("dashboard rendering", () => {
     expect(html).not.toContain("USD unavailable");
   });
 
+  it("derives balance USD from stable token1 symbol when cached USD prices are missing", () => {
+    const staleCachedPosition: DashboardPosition = {
+      ...activePosition,
+      currentPrice: 2.4,
+      currentAmount0: 1.75,
+      currentAmount1: 3.2,
+      pnl: {
+        ...activePosition.pnl!,
+        token0UsdPrice: null,
+        token1UsdPrice: null,
+      },
+    };
+
+    const html = renderDashboard([staleCachedPosition]);
+
+    expect(html).toContain("$7.40");
+    expect(html).not.toContain("USD unavailable");
+  });
+
   it("renders ledger USD fee as primary and token1 fees as secondary context", () => {
     const html = renderDashboard([activePosition]);
 
@@ -305,7 +321,7 @@ describe("dashboard rendering", () => {
     expect(html).toContain("12.35 USDC");
   });
 
-  it("shows USD unavailable instead of zero for missing USD fees", () => {
+  it("derives row USD fees from stable token1-denominated fees", () => {
     const positionWithoutUsdFees: DashboardPosition = {
       ...activePosition,
       pnl: {
@@ -316,7 +332,7 @@ describe("dashboard rendering", () => {
 
     const html = renderDashboard([positionWithoutUsdFees]);
 
-    expect(html).toContain("USD unavailable");
+    expect(html).toContain("$12.35");
     expect(html).not.toContain("$0.00");
   });
 
@@ -369,7 +385,7 @@ describe("dashboard rendering", () => {
     expect(html).toContain("37 USDC");
   });
 
-  it("uses only closed assigned hedge totals in dashboard MTM while still showing active assigned context", () => {
+  it("uses closed and active assigned hedge totals in dashboard MTM", () => {
     const html = renderDashboard(
       [activePosition, closedPositionWithClosedHedge],
       [
@@ -449,7 +465,7 @@ describe("dashboard rendering", () => {
     );
 
     expect(html).toContain("Total MTM P&amp;L");
-    expect(html).toContain("32.5 USDC");
+    expect(html).toContain("1,046.5 USDC");
     expect(html).toContain("1 active assigned");
     expect(html).toContain("2 closed assigned");
     expect(html).toContain("funding partial");

@@ -130,6 +130,8 @@ export interface PositionCloseEvent {
   amount0: bigint;
   amount1: bigint;
   liquidity: bigint;
+  cumulativeAmount0: bigint;
+  cumulativeAmount1: bigint;
   collectedFees0: bigint;
   collectedFees1: bigint;
 }
@@ -287,7 +289,11 @@ export async function findCloseEvent(
             hyperSyncClient,
           ),
         ]);
-        event = applyCollectTotals(event, collectTotals, decreaseTotals);
+        event = applyCollectTotals(
+          withCumulativeWithdrawalTotals(event, decreaseTotals),
+          collectTotals,
+          decreaseTotals,
+        );
       }
       if (event) return { status: "found", event };
       console.warn(`    DecreaseLiquidity not found in known tx, falling back to log scan...`);
@@ -364,7 +370,11 @@ export async function findCloseEvent(
       const collectTotals = { amount0: collectAmount0, amount1: collectAmount1 };
       return {
         status: "found",
-        event: applyCollectTotals(event, collectTotals, decreaseTotals),
+        event: applyCollectTotals(
+          withCumulativeWithdrawalTotals(event, decreaseTotals),
+          collectTotals,
+          decreaseTotals,
+        ),
       };
     } else {
       let selectedLog: PositionLogRecord | null = null;
@@ -408,7 +418,11 @@ export async function findCloseEvent(
           ]);
           return {
             status: "found",
-            event: applyCollectTotals(event, collectTotals, decreaseTotals),
+            event: applyCollectTotals(
+              withCumulativeWithdrawalTotals(event, decreaseTotals),
+              collectTotals,
+              decreaseTotals,
+            ),
           };
         }
       }
@@ -750,6 +764,8 @@ function toCloseEvent(log: PositionLogRecord, tokenId: bigint): PositionCloseEve
     amount0: args.amount0,
     amount1: args.amount1,
     liquidity: args.liquidity,
+    cumulativeAmount0: args.amount0,
+    cumulativeAmount1: args.amount1,
     collectedFees0: 0n,
     collectedFees1: 0n,
   };
@@ -914,8 +930,24 @@ function extractDecreaseLiquidity(
     amount0: decreaseEvent.amount0,
     amount1: decreaseEvent.amount1,
     liquidity: decreaseEvent.liquidity,
+    cumulativeAmount0: decreaseEvent.amount0,
+    cumulativeAmount1: decreaseEvent.amount1,
     collectedFees0,
     collectedFees1,
+  };
+}
+
+function withCumulativeWithdrawalTotals(
+  event: PositionCloseEvent,
+  cumulativeTotals: { amount0: bigint; amount1: bigint } = {
+    amount0: event.amount0,
+    amount1: event.amount1,
+  },
+): PositionCloseEvent {
+  return {
+    ...event,
+    cumulativeAmount0: cumulativeTotals.amount0,
+    cumulativeAmount1: cumulativeTotals.amount1,
   };
 }
 

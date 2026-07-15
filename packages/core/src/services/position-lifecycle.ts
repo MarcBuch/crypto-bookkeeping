@@ -358,46 +358,31 @@ export async function resolvePositionLifecycle(
           : 0n;
     }
 
-    const feeResult = await computeUnclaimedFeesRaw(
-      context.client,
-      poolAddress,
-      pos,
-      poolState,
-    );
+    const feeResult = await computeUnclaimedFeesRaw(context.client, poolAddress, pos, poolState);
     pendingFees0 = feeResult.fees0;
     pendingFees1 = feeResult.fees1;
     totalFees0 = previouslyCollectedFees0 + pendingFees0;
     totalFees1 = previouslyCollectedFees1 + pendingFees1;
   } else {
     const hasCachedExit =
-      storedPos?.close_tx && storedPos.exit_amount0 != null && !posConfig?.closeTx;
+      storedPos?.close_tx &&
+      storedPos.exit_amount0 != null &&
+      storedPos.exit_amount1 != null &&
+      storedPos.exit_sqrt_price_x96 != null &&
+      !posConfig?.closeTx;
 
     if (hasCachedExit && storedPos) {
-      currentAmount0 = BigInt(storedPos.exit_amount0 ?? "0");
-      currentAmount1 = BigInt(storedPos.exit_amount1 ?? "0");
-      exitAmount0 = currentAmount0;
-      exitAmount1 = currentAmount1;
+      currentAmount0 = 0n;
+      currentAmount1 = 0n;
+      withdrawnAmount0 = BigInt(storedPos.exit_amount0!);
+      withdrawnAmount1 = BigInt(storedPos.exit_amount1!);
+      exitAmount0 = withdrawnAmount0;
+      exitAmount1 = withdrawnAmount1;
       previouslyCollectedFees0 = BigInt(storedPos.fees_collected0 ?? "0");
       previouslyCollectedFees1 = BigInt(storedPos.fees_collected1 ?? "0");
       totalFees0 = previouslyCollectedFees0;
       totalFees1 = previouslyCollectedFees1;
-      if (storedPos.exit_sqrt_price_x96) {
-        exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96);
-      } else if (storedPos.close_block) {
-        exitSqrtPriceX96 = deriveEntryPriceFromAmounts(
-          exitAmount0,
-          exitAmount1,
-          entryLiquidity,
-          pos.tickLower,
-          pos.tickUpper,
-        );
-        sqlitePositionStore.persistDerivedExitSqrtPrice({
-          pos,
-          tokens: { token0Info, token1Info },
-          storedPos,
-          exitSqrtPriceX96,
-        });
-      }
+      exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96!);
     } else {
       const latestBlock = await getLatestBlock(context);
       const closeResult = await findCloseEvent(
@@ -418,10 +403,12 @@ export async function resolvePositionLifecycle(
 
       if (closeResult.status === "found") {
         const closeEvent = closeResult.event;
-        currentAmount0 = closeEvent.amount0;
-        currentAmount1 = closeEvent.amount1;
-        exitAmount0 = closeEvent.amount0;
-        exitAmount1 = closeEvent.amount1;
+        currentAmount0 = 0n;
+        currentAmount1 = 0n;
+        withdrawnAmount0 = closeEvent.cumulativeAmount0;
+        withdrawnAmount1 = closeEvent.cumulativeAmount1;
+        exitAmount0 = closeEvent.cumulativeAmount0;
+        exitAmount1 = closeEvent.cumulativeAmount1;
         previouslyCollectedFees0 = closeEvent.collectedFees0;
         previouslyCollectedFees1 = closeEvent.collectedFees1;
         totalFees0 = closeEvent.collectedFees0;

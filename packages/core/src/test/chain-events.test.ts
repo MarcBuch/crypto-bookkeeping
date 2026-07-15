@@ -107,6 +107,8 @@ describe("findCloseEventFromTx", () => {
       amount0: 1000n,
       amount1: 2000n,
       liquidity: 50n,
+      cumulativeAmount0: 1000n,
+      cumulativeAmount1: 2000n,
       collectedFees0: 10n,
       collectedFees1: 50n,
     });
@@ -454,6 +456,10 @@ describe("findCloseEvent scan window computation", () => {
     if (result.status === "found") {
       expect(result.event.collectedFees0).toBe(10n);
       expect(result.event.collectedFees1).toBe(25n);
+      expect(result.event.amount0).toBe(100n);
+      expect(result.event.amount1).toBe(200n);
+      expect(result.event.cumulativeAmount0).toBe(140n);
+      expect(result.event.cumulativeAmount1).toBe(280n);
     }
   });
 });
@@ -548,6 +554,8 @@ describe("viem pagination semantics", () => {
         amount0: 20n,
         amount1: 30n,
         liquidity: 20n,
+        cumulativeAmount0: 25n,
+        cumulativeAmount1: 37n,
         collectedFees0: 8n,
         collectedFees1: 13n,
       },
@@ -555,27 +563,23 @@ describe("viem pagination semantics", () => {
   });
 
   it("findCloseEvent prefers the larger same-block logIndex when both viem close logs are indexed", async () => {
-    let callCount = 0;
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    const getLogs = (async () => {
-      callCount += 1;
-      if (callCount === 1) {
-        return [
-          makeEventLog(
-            { tokenId: 1n, liquidity: 10n, amount0: 10n, amount1: 20n },
-            500n,
-            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
-            1n,
-          ),
-          makeEventLog(
-            { tokenId: 1n, liquidity: 11n, amount0: 11n, amount1: 21n },
-            500n,
-            TX_HASH,
-            2n,
-          ),
-        ];
-      }
-      return [];
+    const getLogs = (async (args?: { event?: { name?: string } }) => {
+      if (args?.event?.name !== "DecreaseLiquidity") return [];
+      return [
+        makeEventLog(
+          { tokenId: 1n, liquidity: 10n, amount0: 10n, amount1: 20n },
+          500n,
+          "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+          1n,
+        ),
+        makeEventLog(
+          { tokenId: 1n, liquidity: 11n, amount0: 11n, amount1: 21n },
+          500n,
+          TX_HASH,
+          2n,
+        ),
+      ];
     }) as unknown as OpenClient["getLogs"];
     const client = makeOpenClient(getLogs, 500n);
 
@@ -590,6 +594,8 @@ describe("viem pagination semantics", () => {
         amount0: 11n,
         amount1: 21n,
         liquidity: 11n,
+        cumulativeAmount0: 21n,
+        cumulativeAmount1: 41n,
         collectedFees0: 0n,
         collectedFees1: 0n,
       },
@@ -597,28 +603,24 @@ describe("viem pagination semantics", () => {
   });
 
   it("findCloseEvent deterministically prefers indexed same-block viem logs over unindexed ones", async () => {
-    let callCount = 0;
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    const getLogs = (async () => {
-      callCount += 1;
-      if (callCount === 1) {
-        return [
-          // Safe tie-break: when one same-block log has no logIndex, keep the indexed log
-          // because its ordering is explicit while the unindexed log's position is ambiguous.
-          makeEventLog(
-            { tokenId: 1n, liquidity: 10n, amount0: 10n, amount1: 20n },
-            500n,
-            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
-          ),
-          makeEventLog(
-            { tokenId: 1n, liquidity: 12n, amount0: 12n, amount1: 22n },
-            500n,
-            TX_HASH,
-            1n,
-          ),
-        ];
-      }
-      return [];
+    const getLogs = (async (args?: { event?: { name?: string } }) => {
+      if (args?.event?.name !== "DecreaseLiquidity") return [];
+      // Safe tie-break: when one same-block log has no logIndex, keep the indexed log
+      // because its ordering is explicit while the unindexed log's position is ambiguous.
+      return [
+        makeEventLog(
+          { tokenId: 1n, liquidity: 10n, amount0: 10n, amount1: 20n },
+          500n,
+          "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Hex,
+        ),
+        makeEventLog(
+          { tokenId: 1n, liquidity: 12n, amount0: 12n, amount1: 22n },
+          500n,
+          TX_HASH,
+          1n,
+        ),
+      ];
     }) as unknown as OpenClient["getLogs"];
     const client = makeOpenClient(getLogs, 500n);
 
@@ -633,6 +635,8 @@ describe("viem pagination semantics", () => {
         amount0: 12n,
         amount1: 22n,
         liquidity: 12n,
+        cumulativeAmount0: 22n,
+        cumulativeAmount1: 42n,
         collectedFees0: 0n,
         collectedFees1: 0n,
       },

@@ -577,6 +577,8 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
         transactionHash: "0xCLOSE",
         amount0: 100n,
         amount1: 200n,
+        cumulativeAmount0: 100n,
+        cumulativeAmount1: 200n,
         liquidity: 1000000n,
         collectedFees0: 10n,
         collectedFees1: 20n,

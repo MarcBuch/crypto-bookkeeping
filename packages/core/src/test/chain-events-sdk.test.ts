@@ -499,6 +499,8 @@ describe("findCloseEvent SDK path", () => {
       expect(result.event.liquidity).toBe(liquidity);
       expect(result.event.collectedFees0).toBe(0n);
       expect(result.event.collectedFees1).toBe(0n);
+      expect(result.event.cumulativeAmount0).toBe(amount0);
+      expect(result.event.cumulativeAmount1).toBe(amount1);
       expect(result.event.blockNumber).toBe(BigInt(blockNumber));
       expect(result.event.transactionHash).toBe(TX_HASH);
     }
@@ -616,6 +618,8 @@ describe("findCloseEvent SDK path", () => {
       expect(result.event.amount0).toBe(decreaseAmount0);
       expect(result.event.amount1).toBe(decreaseAmount1);
       expect(result.event.liquidity).toBe(liquidity);
+      expect(result.event.cumulativeAmount0).toBe(decreaseAmount0);
+      expect(result.event.cumulativeAmount1).toBe(decreaseAmount1);
       // Fees = Collect - Decrease (0 if negative)
       expect(result.event.collectedFees0).toBe(100n);
       expect(result.event.collectedFees1).toBe(250n);
@@ -1065,6 +1069,8 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
       expect(result.event.tokenId).toBe(tokenId);
       expect(result.event.amount0).toBe(decreaseAmount0);
       expect(result.event.amount1).toBe(decreaseAmount1);
+      expect(result.event.cumulativeAmount0).toBe(decreaseAmount0);
+      expect(result.event.cumulativeAmount1).toBe(decreaseAmount1);
       // totalCollect0 = 1_000 + 35_500 = 36_500; fees0 = 36_500 - 35_000 = 1_500
       expect(result.event.collectedFees0).toBe(1_500n);
       // totalCollect1 = 9_000 + 358_100 = 367_100; fees1 = 367_100 - 358_000 = 9_100
@@ -1165,6 +1171,8 @@ describe("findCloseEvent fast path with SDK Collect scan", () => {
     expect(result.status).toBe("found");
     if (result.status === "found") {
       // Only close-tx fees: 10_200 - 10_000 = 200; 5_050 - 5_000 = 50
+      expect(result.event.cumulativeAmount0).toBe(10_000n);
+      expect(result.event.cumulativeAmount1).toBe(5_000n);
       expect(result.event.collectedFees0).toBe(200n);
       expect(result.event.collectedFees1).toBe(50n);
     }

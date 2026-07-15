@@ -75,6 +75,8 @@ function closeEvent(
     amount0: bigint;
     amount1: bigint;
     liquidity: bigint;
+    cumulativeAmount0: bigint;
+    cumulativeAmount1: bigint;
     collectedFees0: bigint;
     collectedFees1: bigint;
   }> = {},
@@ -86,6 +88,8 @@ function closeEvent(
     amount0: 100n,
     amount1: 200n,
     liquidity: 1000000n,
+    cumulativeAmount0: 100n,
+    cumulativeAmount1: 200n,
     collectedFees0: 10n,
     collectedFees1: 20n,
     ...overrides,
@@ -137,7 +141,12 @@ describe("sqlitePositionStore", () => {
         sqrtPriceX96: 111n,
         openTx: "0xOPEN",
       },
-      closeEvent: closeEvent(),
+      closeEvent: closeEvent({
+        amount0: 100n,
+        amount1: 200n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
+      }),
       exitSqrtPriceX96: 222n,
     });
 
@@ -145,7 +154,73 @@ describe("sqlitePositionStore", () => {
     expect(stored?.entry_amount0).toBe("1000");
     expect(stored?.open_tx).toBe("0xOPEN");
     expect(stored?.close_tx).toBe("0xCLOSE");
+    expect(stored?.exit_amount0).toBe("130");
+    expect(stored?.exit_amount1).toBe("260");
     expect(stored?.exit_sqrt_price_x96).toBe("222");
+  });
+
+  it("persists cumulative close amounts when the same close is replayed", () => {
+    upsertPosition(storedPosition());
+
+    sqlitePositionStore.persistClose({
+      pos: basePos,
+      tokens,
+      entry: {
+        blockNumber: 100n,
+        amount0: 1000n,
+        amount1: 2000n,
+        liquidity: 1000000n,
+        sqrtPriceX96: 111n,
+        openTx: "0xOPEN",
+      },
+      closeEvent: closeEvent({
+        amount0: 100n,
+        amount1: 200n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
+      }),
+      exitSqrtPriceX96: 222n,
+    });
+
+    sqlitePositionStore.persistClose({
+      pos: basePos,
+      tokens,
+      entry: {
+        blockNumber: 100n,
+        amount0: 1000n,
+        amount1: 2000n,
+        liquidity: 1000000n,
+        sqrtPriceX96: 111n,
+        openTx: "0xOPEN",
+      },
+      closeEvent: closeEvent({
+        amount0: 100n,
+        amount1: 200n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
+      }),
+      exitSqrtPriceX96: 222n,
+    });
+
+    const stored = getPosition(basePos.tokenId.toString());
+    expect(stored?.exit_amount0).toBe("130");
+    expect(stored?.exit_amount1).toBe("260");
+  });
+
+  it("does not accept cached close rows missing exit amount1 or exit price as complete", () => {
+    upsertPosition(
+      storedPosition({
+        close_tx: "0xCLOSE",
+        exit_amount0: "130",
+        exit_amount1: null,
+        exit_sqrt_price_x96: null,
+      }),
+    );
+
+    const stored = getPosition(basePos.tokenId.toString());
+    expect(stored?.exit_amount0).toBe("130");
+    expect(stored?.exit_amount1).toBeNull();
+    expect(stored?.exit_sqrt_price_x96).toBeNull();
   });
 
   it("close writes preserve stored entry facts when later inputs conflict or omit them", () => {

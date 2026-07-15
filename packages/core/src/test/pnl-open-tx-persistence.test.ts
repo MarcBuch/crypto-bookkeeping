@@ -27,6 +27,8 @@ let mockSumCollectLogsPublic: (..._args: unknown[]) => unknown = async () => ({
   amount1: 0n,
 });
 let lastCalculateLpEconomicsFacts: Record<string, unknown> | null = null;
+let lastDeriveEntryPriceFromAmountsArgs: readonly [bigint, bigint, bigint, number, number] | null =
+  null;
 
 await mock.module("../chain/events.js", () => ({
   findOpenEvent: (...args: unknown[]) => {
@@ -96,7 +98,16 @@ await mock.module("../services/pricing.js", () => ({
 }));
 
 await mock.module("../math/divergence-loss.js", () => ({
-  deriveEntryPriceFromAmounts: () => 79228162514264337593543950336n,
+  deriveEntryPriceFromAmounts: (
+    amount0: bigint,
+    amount1: bigint,
+    liquidity: bigint,
+    tickLower: number,
+    tickUpper: number,
+  ) => {
+    lastDeriveEntryPriceFromAmountsArgs = [amount0, amount1, liquidity, tickLower, tickUpper];
+    return 79228162514264337593543950336n;
+  },
   getTokenAmounts: () => ({ amount0: 500n, amount1: 500n }),
   calculateFeeGrowthInside: () => ({
     feeGrowthInside0X128: 0n,
@@ -109,14 +120,17 @@ await mock.module("../math/divergence-loss.js", () => ({
 await mock.module("../services/lp-economics.js", () => ({
   calculateLpEconomics: (facts: Record<string, unknown>) => {
     lastCalculateLpEconomicsFacts = facts;
+    const exitAmount0 = Number(facts.exitAmount0 ?? 0n);
+    const exitAmount1 = Number(facts.exitAmount1 ?? 0n);
+    const exitValueInToken1 = exitAmount0 + exitAmount1;
     return {
       entryPrice: 1.0,
       exitPrice: facts.exitSqrtPriceX96 === 79228162514264337593543950336n ? 1.0 : 2.0,
       priceChangePercent: 0,
-      entryAmount0: 1.0,
-      entryAmount1: 1.0,
-      exitAmount0: 1.0,
-      exitAmount1: 1.0,
+      entryAmount0: Number(facts.entryAmount0 ?? 0n),
+      entryAmount1: Number(facts.entryAmount1 ?? 0n),
+      exitAmount0,
+      exitAmount1,
       pendingFees0: Number(facts.pendingFees0 ?? 0n),
       pendingFees1: Number(facts.pendingFees1 ?? 0n),
       totalFees0: 0,
@@ -124,9 +138,9 @@ await mock.module("../services/lp-economics.js", () => ({
       pendingFeesValueInToken1: Number(facts.pendingFees0 ?? 0n) + Number(facts.pendingFees1 ?? 0n),
       totalFeesValueInToken1: 0,
       entryValueInToken1: 2.0,
-      exitValueInToken1: 2.0,
+      exitValueInToken1,
       holdValueInToken1: 2.0,
-      absolutePnlInToken1: 0,
+      absolutePnlInToken1: exitValueInToken1 - 2000,
       absolutePnlPercent: 0,
       divergenceLossPercent: 0,
       opportunityCostInToken1: 0,
@@ -208,6 +222,7 @@ beforeEach(() => {
   mockComputeUnclaimedFeesRaw = async () => ({ fees0: 0n, fees1: 0n });
   mockGetAllPositions = async () => [fakePos];
   lastCalculateLpEconomicsFacts = null;
+  lastDeriveEntryPriceFromAmountsArgs = null;
 });
 
 afterAll(() => {
@@ -432,6 +447,8 @@ describe("close_tx persistence and exit cache bypass", () => {
         amount0: 100n,
         amount1: 200n,
         liquidity: 0n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
         collectedFees0: 10n,
         collectedFees1: 20n,
       },
@@ -442,8 +459,8 @@ describe("close_tx persistence and exit cache bypass", () => {
     const stored = getPosition(TOKEN_ID);
     expect(stored).not.toBeNull();
     expect(stored!.close_tx).toBe("0xCLOSE");
-    expect(stored!.exit_amount0).toBe("100");
-    expect(stored!.exit_amount1).toBe("200");
+    expect(stored!.exit_amount0).toBe("130");
+    expect(stored!.exit_amount1).toBe("260");
     expect(stored!.fees_collected0).toBe("10");
     expect(stored!.fees_collected1).toBe("20");
     expect(stored!.close_block).toBe(5000);
@@ -465,6 +482,8 @@ describe("close_tx persistence and exit cache bypass", () => {
         amount0: 100n,
         amount1: 200n,
         liquidity: 1000000n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
         collectedFees0: 10n,
         collectedFees1: 20n,
       },
@@ -481,23 +500,27 @@ describe("close_tx persistence and exit cache bypass", () => {
     expect(stored!.entry_block).toBe(100);
     expect(stored!.entry_sqrt_price_x96).toBe("79228162514264337593543950336");
     expect(stored!.close_tx).toBe("0xCLOSE");
+    expect(stored!.exit_amount0).toBe("130");
+    expect(stored!.exit_amount1).toBe("260");
+    expect(stored!.exit_sqrt_price_x96).toBe("79228162514264337593543950336");
+    expect(lastDeriveEntryPriceFromAmountsArgs).toEqual([100n, 200n, 1000000n, -100, 100]);
   });
 
-  it("derives close price from close event amounts when config closeTx is present", async () => {
+  it("cached close missing amount1 or exit price falls through to discovery and gets repaired", async () => {
     mockGetAllPositions = async () => [fakePosZeroLiquidity];
-    upsertPosition({
-      ...fakePosWithEntry,
-      close_tx: "0xCACHED",
-      exit_amount0: "100",
-      exit_amount1: "200",
-      fees_collected0: "1",
-      fees_collected1: "2",
-      close_block: 5000,
-      exit_sqrt_price_x96: "79228162514264337593543950337",
-    });
     mockFindOpenEvent = async () => ({
       status: "found",
-      event: { ...fakeOpenEvent, transactionHash: "0xCONFIG_OPEN" },
+      event: { ...fakeOpenEvent, transactionHash: "0xOPEN" },
+    });
+    upsertPosition({
+      ...fakePosWithEntry,
+      close_tx: "0xSTALE",
+      exit_amount0: "999",
+      exit_amount1: null,
+      fees_collected0: "7",
+      fees_collected1: "8",
+      close_block: 321,
+      exit_sqrt_price_x96: null,
     });
     mockFindCloseEvent = async () => ({
       status: "found",
@@ -508,6 +531,53 @@ describe("close_tx persistence and exit cache bypass", () => {
         amount0: 100n,
         amount1: 200n,
         liquidity: 1000000n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
+        collectedFees0: 10n,
+        collectedFees1: 20n,
+      },
+    });
+
+    const [result] = await getPnLView({
+      ...baseConfig,
+      positions: {
+        [TOKEN_ID]: { openTx: "0xOPEN", closeTx: "0xCONFIG_CLOSE" },
+      },
+    });
+
+    const stored = getPosition(TOKEN_ID);
+    expect(stored!.close_tx).toBe("0xCONFIG_CLOSE");
+    expect(stored!.exit_amount0).toBe("130");
+    expect(stored!.exit_amount1).toBe("260");
+    expect(stored!.exit_sqrt_price_x96).toBe("79228162514264337593543950336");
+    expect(lastDeriveEntryPriceFromAmountsArgs).toEqual([100n, 200n, 1000000n, -100, 100]);
+    expect(lastCalculateLpEconomicsFacts?.exitAmount0).toBe(130n);
+    expect(lastCalculateLpEconomicsFacts?.exitAmount1).toBe(260n);
+    expect(lastCalculateLpEconomicsFacts?.withdrawnAmount0).toBe(130n);
+    expect(lastCalculateLpEconomicsFacts?.withdrawnAmount1).toBe(260n);
+    expect(lastCalculateLpEconomicsFacts?.exitSqrtPriceX96).toBe(79228162514264337593543950336n);
+    expect(result.exitValueInToken1).toBe(390);
+    expect(result.exitPrice).toBe(1);
+  });
+
+  it("uses final close-event amounts for exit price and cumulative amounts for PnL", async () => {
+    mockGetAllPositions = async () => [fakePosZeroLiquidity];
+    mockToken0Info = { symbol: "TOK0", decimals: 0 };
+    mockToken1Info = { symbol: "TOK1", decimals: 0 };
+    upsertPosition({
+      ...fakePosWithEntry,
+    });
+    mockFindCloseEvent = async () => ({
+      status: "found",
+      event: {
+        tokenId: 42n,
+        blockNumber: 5000n,
+        transactionHash: "0xCLOSE",
+        amount0: 100n,
+        amount1: 200n,
+        liquidity: 1000000n,
+        cumulativeAmount0: 130n,
+        cumulativeAmount1: 260n,
         collectedFees0: 10n,
         collectedFees1: 20n,
       },
@@ -515,13 +585,20 @@ describe("close_tx persistence and exit cache bypass", () => {
 
     const result = await getPnLView({
       ...baseConfig,
-      positions: {
-        [TOKEN_ID]: { openTx: "", closeTx: "0xCONFIG_CLOSE" },
-      },
     });
 
+    expect(lastDeriveEntryPriceFromAmountsArgs).toEqual([100n, 200n, 1000000n, -100, 100]);
+    expect(lastCalculateLpEconomicsFacts?.currentAmount0).toBe(0n);
+    expect(lastCalculateLpEconomicsFacts?.currentAmount1).toBe(0n);
+    expect(lastCalculateLpEconomicsFacts?.withdrawnAmount0).toBe(130n);
+    expect(lastCalculateLpEconomicsFacts?.withdrawnAmount1).toBe(260n);
+    expect(lastCalculateLpEconomicsFacts?.exitAmount0).toBe(130n);
+    expect(lastCalculateLpEconomicsFacts?.exitAmount1).toBe(260n);
     expect(findCloseEventCallCount).toBeGreaterThan(0);
     expect(lastCalculateLpEconomicsFacts?.exitSqrtPriceX96).toBe(79228162514264337593543950336n);
+    expect(result[0].exitAmount0).toBe(130);
+    expect(result[0].exitAmount1).toBe(260);
+    expect(result[0].exitValueInToken1).toBe(390);
     expect(result[0].exitPrice).toBe(1.0);
   });
 
@@ -535,6 +612,7 @@ describe("close_tx persistence and exit cache bypass", () => {
       fees_collected0: "7",
       fees_collected1: "8",
       close_block: 5000,
+      exit_sqrt_price_x96: "79228162514264337593543950336",
     });
 
     findCloseEventCallCount = 0;
@@ -553,6 +631,7 @@ describe("close_tx persistence and exit cache bypass", () => {
       fees_collected0: "7",
       fees_collected1: "8",
       close_block: 5000,
+      exit_sqrt_price_x96: "79228162514264337593543950336",
     });
 
     await getPnLView({
@@ -570,11 +649,12 @@ describe("close_tx persistence and exit cache bypass", () => {
     upsertPosition({
       ...fakePosWithEntry,
       close_tx: "0xCACHED",
-      exit_amount0: "42",
-      exit_amount1: "0",
+      exit_amount0: "420",
+      exit_amount1: "420",
       fees_collected0: "0",
       fees_collected1: "0",
       close_block: 5000,
+      exit_sqrt_price_x96: "79228162514264337593543950336",
     });
 
     // First sync
@@ -584,7 +664,8 @@ describe("close_tx persistence and exit cache bypass", () => {
 
     const stored = getPosition(TOKEN_ID);
     expect(stored!.close_tx).toBe("0xCACHED");
-    expect(stored!.exit_amount0).toBe("42");
+    expect(stored!.exit_amount0).toBe("420");
+    expect(stored!.exit_amount1).toBe("420");
   });
 
   it("partial close cache (close_tx set but exit_amount0 is null) falls through to slow-path", async () => {
@@ -593,6 +674,9 @@ describe("close_tx persistence and exit cache bypass", () => {
       ...fakePosWithEntry,
       close_tx: "0xPARTIAL",
       // exit_amount0 intentionally not set (null)
+      exit_amount0: "999",
+      exit_amount1: null,
+      exit_sqrt_price_x96: null,
     });
 
     findCloseEventCallCount = 0;

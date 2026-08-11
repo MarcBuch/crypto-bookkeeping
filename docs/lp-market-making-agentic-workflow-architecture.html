@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LP Market Making Agentic Workflow</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+  </script>
+  <style>
+    body { background: #f5f5f4; color: #1c1917; }
+    .prose-copy { max-width: 72ch; }
+    .mermaid { overflow-x: auto; background: #fafaf9; border: 1px solid #e7e5e4; border-radius: 0.75rem; padding: 1rem; }
+    code { font-size: 0.9em; }
+  </style>
+</head>
+<body class="antialiased">
+  <main class="mx-auto max-w-7xl px-5 py-10 sm:px-8 lg:py-16">
+    <header class="max-w-4xl">
+      <p class="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">Architecture Brief · July 2026</p>
+      <h1 class="text-4xl font-bold tracking-tight text-stone-900 sm:text-6xl">Agentic LP Market Making</h1>
+      <p class="prose-copy mt-5 text-lg leading-8 text-stone-600">A practical architecture for combining deterministic trading tools with planner, reviewer, execution, verification, and performance-feedback agents.</p>
+      <div class="mt-6 flex flex-wrap gap-2 text-sm">
+        <span class="rounded-full bg-stone-900 px-3 py-1.5 text-white">Preservation first</span>
+        <span class="rounded-full bg-amber-100 px-3 py-1.5 text-amber-900">Fees second</span>
+        <span class="rounded-full bg-emerald-100 px-3 py-1.5 text-emerald-900">Human approval initially</span>
+      </div>
+    </header>
+
+    <section class="mt-12 grid gap-4 md:grid-cols-4">
+      <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200"><p class="text-sm text-stone-500">Current foundation</p><h2 class="mt-2 text-xl font-semibold">Read and measure</h2><p class="mt-2 text-sm leading-6 text-stone-600">Position lifecycle, P&amp;L, fees, IL, history, snapshots, and hedge reconstruction already exist.</p></article>
+      <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200"><p class="text-sm text-stone-500">Main gap</p><h2 class="mt-2 text-xl font-semibold">Closed-loop decisions</h2><p class="mt-2 text-sm leading-6 text-stone-600">Proposals, approvals, executions, reconciliations, and outcomes are not yet one persistent workflow.</p></article>
+      <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200"><p class="text-sm text-stone-500">Tool boundary</p><h2 class="mt-2 text-xl font-semibold">Deterministic math</h2><p class="mt-2 text-sm leading-6 text-stone-600">If identical inputs should produce identical outputs, implement it as a tested tool.</p></article>
+      <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200"><p class="text-sm text-stone-500">Agent boundary</p><h2 class="mt-2 text-xl font-semibold">Ambiguous synthesis</h2><p class="mt-2 text-sm leading-6 text-stone-600">Keep conflicting-signal interpretation, narrative, and approval requests agentic.</p></article>
+    </section>
+
+    <section class="mt-14 rounded-3xl bg-stone-900 p-6 text-stone-100 sm:p-10">
+      <div class="max-w-3xl"><p class="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Operating principle</p><h2 class="mt-3 text-3xl font-bold">Tools calculate. Agents decide. Risk controls can veto.</h2><p class="mt-4 leading-7 text-stone-300">The agent must not recalculate financial facts from prose or invent thresholds. It consumes a canonical, timestamped market snapshot and produces a structured intent that deterministic policy code can challenge.</p></div>
+      <div class="mermaid mt-8">
+        flowchart LR
+          A[Market adapters] --> B[Canonical market snapshot]
+          B --> C[Calculators and simulations]
+          C --> D[Policy and risk checks]
+          D --> E[Planner agent]
+          E --> F[Human approval]
+          F --> G[Execution adapter]
+          G --> H[Verification and reconciliation]
+          H --> I[Performance attribution]
+          I --> B
+      </div>
+    </section>
+
+    <section class="mt-14">
+      <h2 class="text-3xl font-bold tracking-tight">The agentic workflow</h2>
+      <p class="prose-copy mt-3 leading-7 text-stone-600">This is the trading equivalent of plan, build, test, deploy, observe. Each stage has a narrow responsibility and produces an auditable artifact.</p>
+      <div class="mermaid mt-8">
+        sequenceDiagram
+          participant M as Market data
+          participant T as Deterministic tools
+          participant P as Planner agent
+          participant R as Risk reviewer
+          participant H as Human
+          participant X as Execution adapter
+          participant V as Verification
+          participant L as Ledger
+          M->>T: Fetch and normalize snapshot
+          T->>P: Position, regime, P&L, hedge, scenarios
+          P->>R: Structured trade intent
+          R-->>P: Pass, warnings, or veto
+          P->>H: Explain proposal and residual risks
+          H->>X: Approve exact intent
+          X->>V: Simulate and submit bounded action
+          V->>L: Receipts, fills, balances, new position
+          L->>T: Persist outcome and refresh snapshot
+          T->>P: Expected versus realized performance
+      </div>
+      <div class="mt-8 grid gap-4 lg:grid-cols-2">
+        <article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="text-xl font-semibold">1. Observe</h3><p class="mt-2 leading-7 text-stone-600">Create one immutable snapshot containing position range and inventory, fees, capital appreciation, divergence loss, hedge state, signed drift/vol, funding, pool economics, borrow health, and data freshness.</p></article>
+        <article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="text-xl font-semibold">2. Plan</h3><p class="mt-2 leading-7 text-stone-600">The planner chooses <code>HOLD</code>, <code>RERANGE</code>, <code>HEDGE</code>, <code>REDUCE</code>, or <code>CLOSE</code> and emits an exact intent, rationale, confidence, expected horizon, and abort conditions.</p></article>
+        <article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="text-xl font-semibold">3. Review</h3><p class="mt-2 leading-7 text-stone-600">An independent risk module checks hard limits. It can veto the planner. A second agent may explain the challenge, but numeric vetoes belong to code.</p></article>
+        <article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="text-xl font-semibold">4. Execute and verify</h3><p class="mt-2 leading-7 text-stone-600">Execution revalidates state, simulates, enforces slippage and deadlines, submits only the approved action, then reconciles receipts, fills, balances, range, and hedge.</p></article>
+      </div>
+    </section>
+
+    <section class="mt-14">
+      <h2 class="text-3xl font-bold tracking-tight">What becomes a tool</h2>
+      <p class="prose-copy mt-3 leading-7 text-stone-600">A tool should expose small, deep interfaces: a caller supplies validated facts and receives a typed result with timestamps, assumptions, warnings, and failure states.</p>
+      <div class="mt-8 overflow-x-auto rounded-2xl bg-white ring-1 ring-stone-200">
+        <table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-stone-200 bg-stone-50 text-stone-500"><tr><th class="px-5 py-4 font-semibold">Tool</th><th class="px-5 py-4 font-semibold">Inputs</th><th class="px-5 py-4 font-semibold">Outputs</th><th class="px-5 py-4 font-semibold">Role</th></tr></thead><tbody class="divide-y divide-stone-100">
+          <tr><td class="px-5 py-4 font-semibold">market-snapshot</td><td class="px-5 py-4">Token ID, adapters</td><td class="px-5 py-4">Position, P&amp;L, hedge, prices, freshness</td><td class="px-5 py-4">Canonical facts</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">regime</td><td class="px-5 py-4">Coin, candle windows</td><td class="px-5 py-4">Signed drift, vol, ratio, regime, OI</td><td class="px-5 py-4">Market classification</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">rerange-simulate</td><td class="px-5 py-4">Capital, candidate ranges</td><td class="px-5 py-4">Amounts, delta, concentration, in-range probability</td><td class="px-5 py-4">Scenario analysis</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">hedge-size</td><td class="px-5 py-4">LP delta, coverage target</td><td class="px-5 py-4">Recommended short, coverage, resize triggers</td><td class="px-5 py-4">Sizing discipline</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">risk-check</td><td class="px-5 py-4">Snapshot, intent, policy</td><td class="px-5 py-4">Pass, vetoes, warnings, limits</td><td class="px-5 py-4">Independent safety gate</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">fee-economics</td><td class="px-5 py-4">Fees, costs, horizon</td><td class="px-5 py-4">Run rate, break-even, net benefit</td><td class="px-5 py-4">Churn economics</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">capital-flow</td><td class="px-5 py-4">Position chain, transfers</td><td class="px-5 py-4">Deployed capital, appreciation, fees, hedge P&amp;L</td><td class="px-5 py-4">Lifecycle attribution</td></tr>
+          <tr><td class="px-5 py-4 font-semibold">execution-verify</td><td class="px-5 py-4">Intent, receipts, fills</td><td class="px-5 py-4">Expected versus actual reconciliation</td><td class="px-5 py-4">Post-trade truth</td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    <section class="mt-14 grid gap-8 lg:grid-cols-2">
+      <div><h2 class="text-3xl font-bold tracking-tight">Strategy encoded as policy</h2><p class="mt-3 leading-7 text-stone-600">The policy is not a generic yield optimizer. It follows <code>PLAYBOOK.md</code>: protect USDC repayment capital first, then earn fees. HYPE upside is explicitly out of scope for this book.</p><div class="mermaid mt-6">
+        flowchart TD
+          A{Position state} -->|Upper third| B[Fee continuity only]
+          A -->|Middle third| C[Hold]
+          A -->|Lower third| D[Defend]
+          E{Signed drift/vol} -->|Above +0.5| F[Keep earning]
+          E -->|-0.5 to +0.5| G[Wide range, normal discipline]
+          E -->|-1.0 to -0.5| H[Reduce, widen, skew, hedge]
+          E -->|Below -1.0| I[Reduce hard, close, repay, or bridge hedge]
+          D --> J[Widen, reduce, hedge, close, or repay]
+      </div></div>
+      <div><h2 class="text-3xl font-bold tracking-tight">Hard invariants</h2><ul class="mt-5 space-y-3 text-stone-600"><li class="rounded-xl bg-white p-4 ring-1 ring-stone-200">Never hedge more than 100% of live LP WHYPE delta; Mode A targets 50–75%.</li><li class="rounded-xl bg-white p-4 ring-1 ring-stone-200">Do not hedge a mostly-USDC position near the upper bound; that creates naked short exposure.</li><li class="rounded-xl bg-white p-4 ring-1 ring-stone-200">Do not tight-recenter into lower-third weakness. Reduce, widen, repay, or close first.</li><li class="rounded-xl bg-white p-4 ring-1 ring-stone-200">Maintain Aave health factor and a USDC repayment reserve above configured floors.</li><li class="rounded-xl bg-white p-4 ring-1 ring-stone-200">Reject stale data, excessive slippage, unbounded size, and fee economics that cannot recover churn.</li></ul></div>
+    </section>
+
+    <section class="mt-14 rounded-3xl bg-amber-50 p-6 ring-1 ring-amber-200 sm:p-10">
+      <h2 class="text-3xl font-bold tracking-tight text-amber-950">Structured intent, not prose</h2>
+      <p class="mt-3 leading-7 text-amber-900/80">The planner should emit a machine-checkable object. Narrative is generated alongside it, never used as the execution contract.</p>
+      <pre class="mt-6 overflow-x-auto rounded-2xl bg-stone-950 p-5 text-sm leading-7 text-stone-200"><code>{
+  "action": "RERANGE",
+  "range": { "lower": 52, "upper": 78 },
+  "capitalPct": 75,
+  "hedgeDeltaPct": 50,
+  "expectedHoldingDays": 10,
+  "abortConditions": [
+    "slippage &gt; 0.30%",
+    "healthFactor &lt; 1.8",
+    "snapshotAge &gt; 5 minutes"
+  ],
+  "confidence": 0.72
+}</code></pre>
+    </section>
+
+    <section class="mt-14">
+      <h2 class="text-3xl font-bold tracking-tight">What remains agentic</h2>
+      <div class="mt-6 grid gap-4 md:grid-cols-3"><article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="font-semibold">Synthesis</h3><p class="mt-2 text-sm leading-6 text-stone-600">Choose between valid actions when regime, fee, hedge, and news signals conflict.</p></article><article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="font-semibold">Context</h3><p class="mt-2 text-sm leading-6 text-stone-600">Assess whether a catalyst is durable and compare conditions with previous reviews.</p></article><article class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="font-semibold">Communication</h3><p class="mt-2 text-sm leading-6 text-stone-600">Explain the trade-off, ask for approval, and write the decision journal.</p></article></div>
+    </section>
+
+    <section class="mt-14">
+      <h2 class="text-3xl font-bold tracking-tight">Repository mapping</h2>
+      <div class="mt-6 grid gap-4 lg:grid-cols-2"><div class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="font-semibold">Existing deterministic foundation</h3><ul class="mt-3 space-y-2 text-sm leading-6 text-stone-600"><li><code>packages/core/src/services/pnl.ts</code> — LP P&amp;L and fee views</li><li><code>packages/core/src/services/lp-economics.ts</code> — value and fee calculations</li><li><code>packages/core/src/services/hedge.ts</code> — hedge state, lifecycle, and combined P&amp;L</li><li><code>packages/core/src/services/position-lifecycle.ts</code> — entry, exit, and fee reconstruction</li><li><code>packages/core/src/services/snapshot.ts</code> and <code>history.ts</code> — persisted history</li><li><code>apps/cli/src/index.ts</code> and API routes — machine-readable access</li></ul></div><div class="rounded-2xl bg-white p-6 ring-1 ring-stone-200"><h3 class="font-semibold">Recommended additions</h3><ul class="mt-3 space-y-2 text-sm leading-6 text-stone-600"><li><code>services/regime.ts</code> — one sign-aware policy implementation</li><li><code>services/rerange.ts</code> — range and trend simulations</li><li><code>services/hedge-advisor.ts</code> — sizing and override rules</li><li><code>services/risk-check.ts</code> — hard limits and vetoes</li><li><code>services/decision-ledger.ts</code> — proposal, approval, execution, outcome</li><li>Execution and reconciliation adapters only after shadow-mode validation</li></ul></div></div>
+    </section>
+
+    <section class="mt-14">
+      <h2 class="text-3xl font-bold tracking-tight">Performance feedback</h2>
+      <p class="prose-copy mt-3 leading-7 text-stone-600">Judge the strategy by attribution, not by whether the token rose. Every decision should be evaluated against counterfactuals.</p>
+      <div class="mermaid mt-6">
+        flowchart LR
+          A[Executed decision] --> B[Immediate execution quality]
+          B --> C[Daily fees, carry, delta, risk]
+          C --> D[Lifecycle P&L attribution]
+          D --> E[Monthly policy evaluation]
+          E --> F[Update thresholds, prompts, and tests]
+          F --> A
+      </div>
+      <div class="mt-6 rounded-2xl bg-stone-900 p-6 text-stone-100"><p class="font-mono text-sm leading-8">Net P&amp;L = LP capital appreciation + fee income + hedge price P&amp;L + funding − transaction costs − financing costs</p><p class="mt-3 text-sm leading-6 text-stone-400">Compare against holding the original inventory, LP without hedging, LP without reranging, and the rejected alternative.</p></div>
+    </section>
+
+    <section class="mt-14">
+      <h2 class="text-3xl font-bold tracking-tight">Rollout recommendation</h2>
+      <div class="mt-6 grid gap-4 md:grid-cols-4"><article class="rounded-2xl border-2 border-amber-400 bg-white p-5"><p class="text-sm font-bold text-amber-700">01</p><h3 class="mt-2 font-semibold">Shadow mode</h3><p class="mt-2 text-sm leading-6 text-stone-600">Generate proposals and score them without trading.</p></article><article class="rounded-2xl bg-white p-5 ring-1 ring-stone-200"><p class="text-sm font-bold text-stone-500">02</p><h3 class="mt-2 font-semibold">Human approval</h3><p class="mt-2 text-sm leading-6 text-stone-600">Execute only an explicitly approved, hashed intent.</p></article><article class="rounded-2xl bg-white p-5 ring-1 ring-stone-200"><p class="text-sm font-bold text-stone-500">03</p><h3 class="mt-2 font-semibold">Bounded automation</h3><p class="mt-2 text-sm leading-6 text-stone-600">Automate low-risk actions within strict limits.</p></article><article class="rounded-2xl bg-white p-5 ring-1 ring-stone-200"><p class="text-sm font-bold text-stone-500">04</p><h3 class="mt-2 font-semibold">Emergency controls</h3><p class="mt-2 text-sm leading-6 text-stone-600">Permit only predefined safety reductions or closures.</p></article></div>
+    </section>
+
+    <section class="mt-14 border-t border-stone-300 pt-8"><h2 class="text-2xl font-bold">Summary</h2><p class="prose-copy mt-3 leading-7 text-stone-600">The safest architecture is a deep deterministic tool layer wrapped by a deliberately constrained agentic workflow. Codify facts, calculations, simulations, thresholds, and reconciliation. Keep judgment, explanation, and approval agentic. Start with observation and shadow decisions; add execution last.</p></section>
+    <footer class="mt-12 text-sm text-stone-500">Grounded in <code>PLAYBOOK.md</code> and the current core, CLI, API, and hedge/P&amp;L architecture. Proposed execution modules are explicitly future work.</footer>
+  </main>
+</body>
+</html>

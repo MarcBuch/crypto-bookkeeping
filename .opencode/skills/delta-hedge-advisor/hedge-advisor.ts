@@ -70,6 +70,7 @@ interface HedgeReport {
   tokenId: string;
   pair: string;
   fetchedAt: string;
+  currentPriceSource: string;
 
   // Position
   entryPrice: number;
@@ -84,9 +85,9 @@ interface HedgeReport {
   ilUsd: number;
   feesUsd: number;
   netVsHodlUsd: number;
-  daysOpen: number;
-  dailyFeeUsd: number;
-  annualizedFeeYield: number; // as decimal
+  daysOpen: number | null;
+  dailyFeeUsd: number | null;
+  annualizedFeeYield: number | null; // as decimal
 
   // Delta
   hypeExposure: number;             // current HYPE in LP
@@ -100,7 +101,7 @@ interface HedgeReport {
   dailyFundingRate: number;
   annualizedFundingRate: number;
   dailyFundingEarned: number; // if short placed
-  fundingAsPctOfFees: number;
+  fundingAsPctOfFees: number | null;
   openInterest: number;        // open interest in HYPE from metaAndAssetCtxs
 
   // Regime
@@ -116,8 +117,8 @@ interface HedgeReport {
   hedgeBreakEvenDays: number | null;
 
   // Capital preservation framing
-  dailyIlRate: number;                // USD of IL accumulating per day
-  hedgeCostToIlRatio: number;         // daily hedge cost / daily IL rate  (<1 means hedge is cheap vs IL)
+  dailyIlRate: number | null;                // USD of IL accumulating per day
+  hedgeCostToIlRatio: number | null;         // daily hedge cost / daily IL rate  (<1 means hedge is cheap vs IL)
   downsideScenarios: {
     dropPct: number;                  // e.g. 0.10 = 10% drop
     deltaLossUsd: number;             // directional loss on HYPE notional
@@ -156,7 +157,7 @@ interface HedgeReport {
     shortLossUsd: number;
     lpGainUsd: number;                // LP value increase at that price
     netCombinedLossUsd: number;       // shortLoss - lpGain
-    daysFeesToRecover: number;        // netCombinedLoss / dailyFeeUsd
+    daysFeesToRecover: number | null;  // netCombinedLoss / dailyFeeUsd
     maxSizeForFeeConstraint: number;  // largest short (HYPE) where net loss <= 7 days of fees
   }[];
 
@@ -184,23 +185,41 @@ async function fetchLpPositions(): Promise<LpPosition[]> {
   }
 }
 
-async function fetchFundingAndOI(coin: string): Promise<{ fundingRate: number; openInterest: number }> {
-  const res = await fetch(HL_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "metaAndAssetCtxs" }),
-  });
-  if (!res.ok) throw new Error(`Hyperliquid API error: ${res.status}`);
-  const data = (await res.json()) as [
-    { universe: { name: string }[] },
-    { funding: string; markPx: string; openInterest: string }[],
-  ];
-  const idx = data[0].universe.findIndex((a) => a.name === coin);
-  if (idx === -1) throw new Error(`Coin ${coin} not found in Hyperliquid`);
-  return {
-    fundingRate: parseFloat(data[1][idx].funding),
-    openInterest: parseFloat(data[1][idx].openInterest),
-  };
+async function fetchFundingOiAndLivePrice(
+  coin: string,
+  fallbackPrice: number,
+): Promise<{ fundingRate: number; openInterest: number; currentPrice: number; currentPriceSource: string }> {
+  try {
+    const res = await fetch(HL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+    });
+    if (!res.ok) throw new Error(`Hyperliquid API error: ${res.status}`);
+    const data = (await res.json()) as [
+      { universe: { name: string }[] },
+      { funding: string; markPx: string; openInterest: string }[],
+    ];
+    const idx = data[0].universe.findIndex((a) => a.name === coin);
+    if (idx === -1) throw new Error(`Coin ${coin} not found in Hyperliquid`);
+    const markPx = Number.parseFloat(data[1][idx].markPx);
+    const currentPrice = Number.isFinite(markPx) && markPx > 0 ? markPx : fallbackPrice;
+    return {
+      fundingRate: parseFloat(data[1][idx].funding),
+      openInterest: parseFloat(data[1][idx].openInterest),
+      currentPrice,
+      currentPriceSource: Number.isFinite(markPx) && markPx > 0
+        ? "hyperliquid.metaAndAssetCtxs.markPx"
+        : "position.exitPrice (fallback: missing markPx)",
+    };
+  } catch {
+    return {
+      fundingRate: 0,
+      openInterest: 0,
+      currentPrice: fallbackPrice,
+      currentPriceSource: "position.exitPrice (fallback: metaAndAssetCtxs unavailable)",
+    };
+  }
 }
 
 async function fetchDriftVolRatio(coin: string): Promise<{
@@ -294,11 +313,18 @@ async function fetchOpenTimestamp(tokenId: string): Promise<number | null> {
 
 function verdictFromSignals(
   ilUsd: number,
-  dailyFeeUsd: number,
+  dailyFeeUsd: number | null,
   regime: string,
   driftVolRatio: number,
   pctToLowerBound: number,
 ): { verdict: HedgeReport["verdict"]; reason: string } {
+  if (dailyFeeUsd == null || !Number.isFinite(dailyFeeUsd) || dailyFeeUsd <= 0) {
+    return {
+      verdict: "no-hedge",
+      reason: "Fee run-rate unavailable, so fee-optimisation verdict stays conservative and does not infer break-even timing.",
+    };
+  }
+
   if (regime === "strong-trend") {
     return {
       verdict: "hedge-recommended",
@@ -307,7 +333,7 @@ function verdictFromSignals(
     };
   }
 
-  const ilCoveredInDays = dailyFeeUsd > 0 ? ilUsd / dailyFeeUsd : Infinity;
+  const ilCoveredInDays = ilUsd / dailyFeeUsd;
 
   if (regime === "range-bound" && ilCoveredInDays < 2 && pctToLowerBound > 20) {
     return {
@@ -347,11 +373,18 @@ function verdictFromSignals(
  */
 function capitalPreservationVerdictFn(
   hypeNotionalUsd: number,
-  dailyFundingCost: number,
-  dailyIlRate: number,
+  dailyFundingCost: number | null,
+  dailyIlRate: number | null,
   pct7dChange: number,
   downsideScenarios: HedgeReport["downsideScenarios"],
 ): { verdict: HedgeReport["capitalPreservationVerdict"]; reason: string } {
+  if (dailyFundingCost == null || dailyIlRate == null) {
+    return {
+      verdict: "no-hedge",
+      reason: "Capital preservation inputs are incomplete, so no downside hedge conclusion is drawn.",
+    };
+  }
+
   const scenario20 = downsideScenarios.find((s) => s.dropPct === 0.20);
   const hedgeCarry7d = dailyFundingCost * 7;
 
@@ -461,16 +494,22 @@ function recommendedHedgeSize(
   currentHype: number,
   currentPrice: number,
   entryPrice: number,
-  dailyFeeUsd: number,
+  dailyFeeUsd: number | null,
   dailyFundingRate: number,
 ): { hype: number; reason: string } {
-  const income7d = (dailyFeeUsd + currentHype * currentPrice * dailyFundingRate) * 7;
+  const feeComponent = dailyFeeUsd != null && Number.isFinite(dailyFeeUsd) && dailyFeeUsd > 0 ? dailyFeeUsd : null;
+  const income7d = ((feeComponent ?? 0) + currentHype * currentPrice * dailyFundingRate) * 7;
   const priceGapToEntry = entryPrice - currentPrice;
 
   let target: number;
   let reason: string;
 
-  if (priceGapToEntry > 0) {
+  if (feeComponent == null) {
+    target = Math.min(currentHype * 0.3, hypeAtLower * 0.5);
+    reason =
+      `Fee run-rate unavailable, so income-parity sizing is not reliable. Using a conservative ${Math.round(target * 10) / 10} HYPE (` +
+      `30% of current delta, capped at 50% of lower-bound exposure).`;
+  } else if (priceGapToEntry > 0) {
     // Size so that close trigger lands at LP entry price
     const maxByUpside = income7d / priceGapToEntry;
     const maxByGamma = hypeAtLower * 0.5;
@@ -502,23 +541,37 @@ function recommendedHedgeSize(
 function hedgeTriggers(
   currentPrice: number,
   recommendedHype: number,
-  dailyFeeUsd: number,
+  dailyFeeUsd: number | null,
   dailyFundingRate: number,
+  dailyVol: number,
 ): { closePrice: number; reducePrice: number; reason: string } {
   const notional = recommendedHype * currentPrice;
+  const minBufferPct = Math.max(1.5 * dailyVol, 0.03);
+  if (dailyFeeUsd == null || !Number.isFinite(dailyFeeUsd) || notional <= 0 || !Number.isFinite(dailyFundingRate)) {
+    const closePrice = currentPrice * (1 + minBufferPct);
+    const reducePrice = currentPrice * (1 + minBufferPct / 2);
+    return {
+      closePrice: Math.round(closePrice * 100) / 100,
+      reducePrice: Math.round(reducePrice * 100) / 100,
+      reason:
+        `Fee income unavailable, so trigger placement uses the ${(minBufferPct * 100).toFixed(1)}% volatility floor only. ` +
+        `Close at ${usdFmt(closePrice)} and reduce at ${usdFmt(reducePrice)}.`,
+    };
+  }
+
   const dailyIncome = dailyFeeUsd + notional * dailyFundingRate;
   const income7d = dailyIncome * 7;
   // income7d = notional * movePct → movePct = income7d / notional
   const closeMovePct = income7d / notional;
-  const closePrice = currentPrice * (1 + closeMovePct);
-  const reducePrice = currentPrice * (1 + closeMovePct / 2);
+  const closePrice = Math.max(currentPrice * (1 + closeMovePct), currentPrice * (1 + minBufferPct));
+  const reducePrice = Math.max(currentPrice * (1 + closeMovePct / 2), currentPrice * (1 + minBufferPct / 2));
   return {
     closePrice: Math.round(closePrice * 100) / 100,
     reducePrice: Math.round(reducePrice * 100) / 100,
     reason:
-      `Close at ${usdFmt(closePrice)} (+${(closeMovePct * 100).toFixed(1)}% from current): ` +
-      `7-day income (${usdFmt(income7d)}) equals total short loss at that price. ` +
-      `Reduce to 50% at ${usdFmt(reducePrice)} (+${(closeMovePct / 2 * 100).toFixed(1)}%).`,
+      `Close at ${usdFmt(closePrice)} (+${(((closePrice / currentPrice) - 1) * 100).toFixed(1)}% from current): ` +
+      `7-day income (${usdFmt(income7d)}) is the sanity check, but a ${(minBufferPct * 100).toFixed(1)}% volatility floor keeps the trigger away from spot. ` +
+      `Reduce to 50% at ${usdFmt(reducePrice)}.`,
   };
 }
 
@@ -538,22 +591,21 @@ async function main() {
   // Determine perp symbol (strip W prefix from wrapped token)
   const perpSymbol = pos.token0Symbol.replace(/^W/, "");
 
-  const [{ fundingRate, openInterest }, { ratio: driftVolRatio, regime, pct7dChange, dailyVol, high7d, low7d }, openTs] = await Promise.all([
-    fetchFundingAndOI(perpSymbol),
+  const [{ fundingRate, openInterest, currentPrice, currentPriceSource }, { ratio: driftVolRatio, regime, pct7dChange, dailyVol, high7d, low7d }, openTs] = await Promise.all([
+    fetchFundingOiAndLivePrice(perpSymbol, pos.exitPrice),
     fetchDriftVolRatio(perpSymbol),
     fetchOpenTimestamp(pos.tokenId),
   ]);
 
   const now = Date.now() / 1000;
-  const daysOpen = openTs ? (now - openTs) / 86400 : null;
-  const dailyFeeUsd = daysOpen && daysOpen > 0 ? pos.feesValueInToken1 / daysOpen : null;
-
-  const currentPrice = pos.exitPrice;
+  const daysOpen = openTs != null && openTs > 0 ? (now - openTs) / 86400 : null;
+  const dailyFeeUsd = daysOpen != null && daysOpen > 0 ? pos.feesValueInToken1 / daysOpen : null;
   const hypeExposure = pos.exitAmount0;
   const hypeNotionalUsd = hypeExposure * currentPrice;
 
   // V3 liquidity constant and gamma-aware exposure bounds
-  const liquidityConstant = v3Liquidity(hypeExposure, currentPrice, pos.priceUpper);
+  const gammaPrice = currentPrice >= pos.priceUpper ? pos.priceUpper * 0.999999999 : currentPrice;
+  const liquidityConstant = v3Liquidity(hypeExposure, gammaPrice, pos.priceUpper);
   const hypeExposureAtLowerBound = v3HypeAtPrice(liquidityConstant, pos.priceLower, pos.priceLower, pos.priceUpper);
   const hypeExposureAtUpperBound = 0; // all HYPE sold by the time price reaches upper bound
 
@@ -565,7 +617,7 @@ async function main() {
   const dailyFundingRate = fundingRate * 24;
   const annualizedFundingRate = dailyFundingRate * 365;
   const dailyFundingEarned = dailyFundingRate * hypeNotionalUsd;
-  const fundingAsPctOfFees = dailyFeeUsd ? dailyFundingEarned / dailyFeeUsd : 0;
+  const fundingAsPctOfFees = dailyFeeUsd != null && dailyFeeUsd > 0 ? dailyFundingEarned / dailyFeeUsd : null;
 
   // Range proximity
   const pctToLowerBound = ((currentPrice - pos.priceLower) / currentPrice) * 100;
@@ -573,17 +625,17 @@ async function main() {
 
   // Annualized fee yield
   const annualizedFeeYield =
-    daysOpen && daysOpen > 0
+    daysOpen != null && daysOpen > 0
       ? (pos.feesValueInToken1 / pos.entryValueInToken1) * (365 / daysOpen)
-      : 0;
+      : null;
 
   // Hedge break-even: how many days until funding earned = IL
   const hedgeBreakEvenDays =
-    dailyFundingEarned > 0 ? ilUsd / dailyFundingEarned : null;
+    dailyFundingEarned > 0 && Number.isFinite(dailyFundingEarned) ? ilUsd / dailyFundingEarned : null;
 
   // ── Capital preservation metrics ──────────────────────────────────────────
   // Daily IL rate: IL accumulated per day (not the same as fee run rate)
-  const dailyIlRate = daysOpen && daysOpen > 0 ? ilUsd / daysOpen : 0;
+  const dailyIlRate = daysOpen != null && daysOpen > 0 ? ilUsd / daysOpen : null;
 
   // Daily funding cost of a FULL delta hedge.
   // When funding is positive (longs pay shorts), a short position *earns* funding —
@@ -592,21 +644,21 @@ async function main() {
   // funding flips negative (shorts pay longs). The capital preservation logic below
   // assumes positive funding; if annualizedFundingRate turns negative the hedge carry
   // flips sign and the recommendations should be treated as conservative.
-  const dailyHedgeCost = dailyFundingEarned; // symmetric — earn funding while short (positive-funding assumption)
+  const dailyHedgeCost = Number.isFinite(dailyFundingEarned) ? dailyFundingEarned : null; // symmetric — earn funding while short (positive-funding assumption)
 
-  const hedgeCostToIlRatio = dailyIlRate > 0 ? dailyHedgeCost / dailyIlRate : Infinity;
+  const hedgeCostToIlRatio = dailyIlRate != null && dailyIlRate > 0 && dailyHedgeCost != null ? dailyHedgeCost / dailyIlRate : null;
 
   // Downside scenarios: how much notional delta loss at -10%, -20%, -30%
   const SCENARIO_DROPS = [0.10, 0.20, 0.30];
   const downsideScenarios = SCENARIO_DROPS.map((dropPct) => ({
     dropPct,
     deltaLossUsd: hypeNotionalUsd * dropPct,
-    hedgeCarryToDateUsd: dailyHedgeCost * 7, // 7-day carry as reference horizon
+    hedgeCarryToDateUsd: (dailyHedgeCost ?? 0) * 7, // 7-day carry as reference horizon
   }));
 
   // Upside scenarios: LP sheds HYPE as price rises — short becomes overhedged
   const { hype: recommendedHedgeHype, reason: recommendedHedgeReason } =
-    recommendedHedgeSize(hypeExposureAtLowerBound, hypeExposure, currentPrice, pos.entryPrice, dailyFeeUsd ?? 0, dailyFundingRate);
+    recommendedHedgeSize(hypeExposureAtLowerBound, hypeExposure, currentPrice, pos.entryPrice, dailyFeeUsd, dailyFundingRate);
 
   const SCENARIO_RISES = [0.05, 0.10, 0.15, 0.20];
   const currentLpValue = v3LpValue(liquidityConstant, currentPrice, pos.priceLower, pos.priceUpper);
@@ -631,13 +683,13 @@ async function main() {
   const lpValueAtLower = v3LpValue(liquidityConstant, pos.priceLower, pos.priceLower, pos.priceUpper);
   const lpLossAtLower = currentLpValue - lpValueAtLower;
   const priceDrop = currentPrice - pos.priceLower;
-  const breakEvenSize = Math.round((lpLossAtLower / priceDrop) * 10) / 10;
+  const breakEvenSize = priceDrop > 0 ? Math.round((lpLossAtLower / priceDrop) * 10) / 10 : 0;
   const breakEvenHedge = {
     sizeHype: breakEvenSize,
     notionalUsd: Math.round(breakEvenSize * currentPrice),
     lpLossAtLowerUsd: Math.round(lpLossAtLower * 100) / 100,
     lpValueAtLowerUsd: Math.round(lpValueAtLower * 100) / 100,
-    verificationUsd: Math.round((lpValueAtLower + priceDrop * breakEvenSize) * 100) / 100,
+    verificationUsd: Math.round((priceDrop > 0 ? lpValueAtLower + priceDrop * breakEvenSize : currentLpValue) * 100) / 100,
   };
 
   // ── Stop loss scenarios ───────────────────────────────────────────────────
@@ -681,7 +733,7 @@ async function main() {
       const lpGainUsd = v3LpValue(liquidityConstant, stopPrice, pos.priceLower, pos.priceUpper) - currentLpValue;
       const netCombinedLossUsd = Math.round((shortLossUsd - lpGainUsd) * 100) / 100;
       const bufferPct = ((stopPrice - currentPrice) / currentPrice) * 100;
-      const daysFeesToRecover = (dailyFeeUsd ?? 0) > 0 ? netCombinedLossUsd / (dailyFeeUsd ?? 1) : Infinity;
+      const daysFeesToRecover = dailyFeeUsd != null && dailyFeeUsd > 0 ? netCombinedLossUsd / dailyFeeUsd : null;
       // Max size so net loss (shortLoss - lpGain) ≤ 7-day fee budget
       // netLoss = size * (stopPrice - currentPrice) - lpGainUsd
       // size ≤ (maxLossPerStop + lpGainUsd) / (stopPrice - currentPrice)
@@ -694,13 +746,13 @@ async function main() {
         shortLossUsd: Math.round(shortLossUsd * 100) / 100,
         lpGainUsd: Math.round(lpGainUsd * 100) / 100,
         netCombinedLossUsd,
-        daysFeesToRecover: Math.round(daysFeesToRecover * 10) / 10,
+        daysFeesToRecover: daysFeesToRecover != null ? Math.round(daysFeesToRecover * 10) / 10 : null,
         maxSizeForFeeConstraint,
       };
     });
 
   const { closePrice: hedgeCloseTriggerPrice, reducePrice: hedgeReduceTriggerPrice, reason: hedgeCloseTriggerReason } =
-    hedgeTriggers(currentPrice, recommendedHedgeHype, dailyFeeUsd ?? 0, dailyFundingRate);
+    hedgeTriggers(currentPrice, recommendedHedgeHype, dailyFeeUsd, dailyFundingRate, dailyVol);
 
   const { verdict: capitalPreservationVerdict, reason: capitalPreservationReason } =
     capitalPreservationVerdictFn(
@@ -713,7 +765,7 @@ async function main() {
 
   const { verdict, reason: verdictReason } = verdictFromSignals(
     ilUsd,
-    dailyFeeUsd ?? 0,
+    dailyFeeUsd,
     regime,
     driftVolRatio,
     pctToLowerBound,
@@ -723,6 +775,7 @@ async function main() {
     tokenId: pos.tokenId,
     pair: pos.pair,
     fetchedAt: new Date().toISOString(),
+    currentPriceSource,
     entryPrice: pos.entryPrice,
     currentPrice,
     priceLower: pos.priceLower,
@@ -733,8 +786,8 @@ async function main() {
     ilUsd,
     feesUsd: pos.feesValueInToken1,
     netVsHodlUsd: pos.netVsHodlPercent * pos.entryValueInToken1,
-    daysOpen: daysOpen ?? 0,
-    dailyFeeUsd: dailyFeeUsd ?? 0,
+    daysOpen,
+    dailyFeeUsd,
     annualizedFeeYield,
     hypeExposure,
     hypeNotionalUsd,
@@ -795,10 +848,12 @@ async function main() {
   console.log(`  Divergence loss:  ${pct(-ilPercent)}  (${usd(-ilUsd)})`);
   console.log(`  Fees earned:      ${usd(report.feesUsd)}`);
   console.log(`  Net vs HODL:      ${usd(report.netVsHodlUsd)}`);
-  if (daysOpen) {
+  if (daysOpen != null && report.dailyFeeUsd != null && report.annualizedFeeYield != null) {
     console.log(
-      `  Days open:        ${daysOpen.toFixed(1)}  →  ${usd(report.dailyFeeUsd)}/day  (${pct(annualizedFeeYield)} annualized)`,
+      `  Days open:        ${daysOpen.toFixed(1)}  →  ${usd(report.dailyFeeUsd)}/day  (${pct(report.annualizedFeeYield)} annualized)`,
     );
+  } else {
+    console.log("  Days open / fee run-rate: unavailable");
   }
 
   console.log("\n### Delta Exposure (V3 gamma-aware)");
@@ -813,11 +868,12 @@ async function main() {
   );
 
   console.log("\n### Funding Rate (Hyperliquid Perps)");
+  console.log(`  Live price source: ${report.currentPriceSource}`);
   console.log(`  Hourly:      ${pct(fundingRate, 5)}`);
   console.log(`  Daily:       ${pct(dailyFundingRate, 4)}`);
   console.log(`  Annualized:  ${pct(annualizedFundingRate, 2)}`);
   console.log(
-    `  Shorts earn: ${usd(dailyFundingEarned)}/day  (${pct(fundingAsPctOfFees)} of fee income)`,
+    `  Shorts earn: ${usd(dailyFundingEarned)}/day  (${fundingAsPctOfFees != null ? pct(fundingAsPctOfFees) : "n/a"} of fee income)`,
   );
 
   console.log("\n### Market Regime");
@@ -835,11 +891,11 @@ async function main() {
   }
 
   console.log("\n### Capital Preservation");
-  console.log(`  Daily IL rate:         ${usd(report.dailyIlRate)}/day`);
-  console.log(`  Daily hedge carry:     ${usd(dailyHedgeCost)}/day`);
+  console.log(`  Daily IL rate:         ${report.dailyIlRate != null ? usd(report.dailyIlRate) + "/day" : "n/a"}`);
+  console.log(`  Daily hedge carry:     ${dailyHedgeCost != null ? usd(dailyHedgeCost) + "/day" : "n/a"}`);
   console.log(
-    `  Hedge cost / IL rate:  ${(report.hedgeCostToIlRatio * 100).toFixed(1)}%  ` +
-      `(${report.hedgeCostToIlRatio < 1 ? "hedge cheaper than IL" : "hedge costs more than IL"})`,
+    `  Hedge cost / IL rate:  ${report.hedgeCostToIlRatio != null ? (report.hedgeCostToIlRatio * 100).toFixed(1) + "%" : "n/a"}  ` +
+      `${report.hedgeCostToIlRatio != null ? `(${report.hedgeCostToIlRatio < 1 ? "hedge cheaper than IL" : "hedge costs more than IL"})` : ""}`,
   );
 
   console.log(`\n  Downside scenarios (full delta at current ${hypeExposure.toFixed(1)} HYPE):`);
@@ -900,7 +956,7 @@ async function main() {
       `  ${("-" + usd(s.shortLossUsd)).padEnd(11)}` +
       `  ${("+" + usd(s.lpGainUsd)).padEnd(9)}` +
       `  ${("-" + usd(s.netCombinedLossUsd)).padEnd(10)}` +
-      `  ${s.daysFeesToRecover.toFixed(1)} days`.padEnd(11) +
+      `  ${s.daysFeesToRecover != null ? s.daysFeesToRecover.toFixed(1) : "n/a"} days`.padEnd(11) +
       `  ${s.maxSizeForFeeConstraint} ${perpSymbol}`,
     );
   }

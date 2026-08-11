@@ -8,7 +8,7 @@ description: Use when the user wants to know if a delta hedge on HYPE perps is w
 Combines all inputs needed to decide whether to place a delta hedge on an active LP position:
 
 1. **LP position data** — delta exposure, IL, fees, range proximity
-2. **Live funding rate** — from Hyperliquid perps API (hourly, annualized)
+2. **Live funding rate / live mark** — from Hyperliquid `metaAndAssetCtxs` (hourly, annualized; markPx is the hedge price source)
 3. **Fee run rate** — derived from open tx timestamp + total fees earned
 4. **Market regime** — 30-day drift/vol ratio from Hyperliquid candleSnapshot
 
@@ -190,6 +190,7 @@ Evaluated in priority order; first matching rule wins:
 - A short HYPE hedge protects **delta** (directional price exposure), not IL specifically. IL is bidirectional; a short only covers the downside tail.
 - When funding is positive (longs pay shorts), the short **earns carry** — the hedge has negative carry cost.
 - `hedgeBreakEvenDays` = how long before funding alone pays off the current IL. This is an optimistic estimate — it treats current IL as fixed and ignores the additional IL that will accumulate while waiting.
+- Close/reduce triggers keep an explicit volatility buffer; income-parity is only a sanity check, not the sole trigger.
 - HYPE exposure in LP (`hypeExposure`) shifts as price moves. As price rises the LP sells HYPE; as it falls the LP accumulates HYPE. The reported value is the current snapshot.
 - **Sizing discipline:** Always set the stop at a technically valid level first (`high7d * 1.01` or `1.5σ vol stop`), then use `maxSizeForFeeConstraint` to determine the position size. Never work backwards from break-even size to find the stop — that was the failure mode that produced the oversized hedge closed at a loss on Jun 12.
 - **Stop candidates** are derived dynamically: LP entry price, LP upper-third trigger, 1.5σ vol stop (`currentPrice × (1 + 1.5 × dailyVol)`), and 7d structural high +1%. Hardcoded stops are not used.

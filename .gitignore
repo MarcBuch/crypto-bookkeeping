@@ -8,7 +8,7 @@ data/*.db-shm
 bun.lockb
 config.json
 bunfig.toml
-ca.crt
+ca.pem
 
 # OpenCode mission state
 .opencode/handoffs.jsonl

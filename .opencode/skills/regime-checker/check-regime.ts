@@ -64,6 +64,8 @@ interface RegimeReport {
   dailyDrift: number;
   dailyVol: number;
   ratio: number;
+  signedRatio: number;
+  direction: "uptrend" | "downtrend" | "flat";
   regime: Regime;
   action: string;
   positionGuidance: string;
@@ -75,8 +77,11 @@ interface RegimeReport {
   dailyDrift7d: number;
   dailyVol7d: number;
   ratio7d: number;
+  signedRatio7d: number;
+  direction7d: "uptrend" | "downtrend" | "flat";
   regime7d: Regime;
   windowsDiverge: boolean; // true when 30d and 7d regimes disagree
+  windowDivergenceInterpretation: string | null;
 }
 
 // ─── Fetch ─────────────────────────────────────────────────────────────────────
@@ -151,6 +156,37 @@ function stddev(xs: number[]): number {
   return Math.sqrt(variance);
 }
 
+function classifyDirection(
+  dailyDrift: number,
+  flatThreshold = 0.0015,
+): "uptrend" | "downtrend" | "flat" {
+  if (dailyDrift > flatThreshold) return "uptrend";
+  if (dailyDrift < -flatThreshold) return "downtrend";
+  return "flat";
+}
+
+function signedDriftVolRatio(dailyDrift: number, dailyVol: number): number {
+  return dailyVol > 0 ? dailyDrift / dailyVol : 0;
+}
+
+function divergenceInterpretation(
+  direction30d: "uptrend" | "downtrend" | "flat",
+  direction7d: "uptrend" | "downtrend" | "flat",
+  regime30d: Regime,
+  regime7d: Regime,
+): string {
+  if (direction30d === direction7d) {
+    return `Same direction, but ${regime7d} is the nearer-term read.`;
+  }
+  if (direction30d === "flat") {
+    return `30d is flat while 7d is ${direction7d}; short-term momentum is emerging.`;
+  }
+  if (direction7d === "flat") {
+    return `7d is flat while 30d is ${direction30d}; recent momentum has cooled.`;
+  }
+  return `30d is ${direction30d} while 7d flipped to ${direction7d}; near-term bias has reversed.`;
+}
+
 // ─── Classification ────────────────────────────────────────────────────────────
 
 function classify(ratio: number): Regime {
@@ -214,6 +250,8 @@ async function main() {
   const dailyDrift = mean(returns);
   const dailyVol = stddev(returns);
   const ratio = dailyVol > 0 ? Math.abs(dailyDrift) / dailyVol : 0;
+  const signedRatio = signedDriftVolRatio(dailyDrift, dailyVol);
+  const direction = classifyDirection(dailyDrift);
   const regime = classify(ratio);
 
   const currentPrice = prices[prices.length - 1];
@@ -226,10 +264,15 @@ async function main() {
   const dailyDrift7d = mean(returns7d);
   const dailyVol7d = stddev(returns7d);
   const ratio7d = dailyVol7d > 0 ? Math.abs(dailyDrift7d) / dailyVol7d : 0;
+  const signedRatio7d = signedDriftVolRatio(dailyDrift7d, dailyVol7d);
+  const direction7d = classifyDirection(dailyDrift7d);
   const regime7d = classify(ratio7d);
   const priceChange7d =
     ((prices7d[prices7d.length - 1] - prices7d[0]) / prices7d[0]) * 100;
   const windowsDiverge = regime !== regime7d;
+  const windowDivergenceInterpretation = windowsDiverge
+    ? divergenceInterpretation(direction, direction7d, regime, regime7d)
+    : null;
 
   const report: RegimeReport = {
     coin,
@@ -242,6 +285,8 @@ async function main() {
     dailyDrift,
     dailyVol,
     ratio,
+    signedRatio,
+    direction,
     regime,
     action: REGIME_ACTIONS[regime],
     positionGuidance: REGIME_ACTIONS[regime],
@@ -251,8 +296,11 @@ async function main() {
     dailyDrift7d,
     dailyVol7d,
     ratio7d,
+    signedRatio7d,
+    direction7d,
     regime7d,
     windowsDiverge,
+    windowDivergenceInterpretation,
   };
 
   if (jsonMode) {
@@ -279,12 +327,12 @@ async function main() {
   console.log(`  7d change:  ${fmtPct(priceChange7d / 100)}`);
 
   console.log("\n### Regime Metrics");
-  console.log(`  Window        drift       vol         ratio    regime`);
+  console.log(`  Window        drift       vol         ratio    signed   direction`);
   console.log(
-    `  30d (${returns.length} days)  ${fmtPct(dailyDrift).padEnd(10)}  ${fmtPct(dailyVol, false).padEnd(10)}  ${ratio.toFixed(3).padEnd(7)}  ${REGIME_LABELS[regime]}`,
+    `  30d (${returns.length} days)  ${fmtPct(dailyDrift).padEnd(10)}  ${fmtPct(dailyVol, false).padEnd(10)}  ${ratio.toFixed(3).padEnd(7)}  ${signedRatio.toFixed(3).padEnd(7)}  ${direction}`,
   );
   console.log(
-    `  7d  (7 days)   ${fmtPct(dailyDrift7d).padEnd(10)}  ${fmtPct(dailyVol7d, false).padEnd(10)}  ${ratio7d.toFixed(3).padEnd(7)}  ${REGIME_LABELS[regime7d]}`,
+    `  7d  (7 days)   ${fmtPct(dailyDrift7d).padEnd(10)}  ${fmtPct(dailyVol7d, false).padEnd(10)}  ${ratio7d.toFixed(3).padEnd(7)}  ${signedRatio7d.toFixed(3).padEnd(7)}  ${direction7d}`,
   );
   console.log(`\n  30d bar: ${bar(ratio)}`);
   console.log(`  7d  bar: ${bar(ratio7d)}`);
@@ -293,19 +341,17 @@ async function main() {
     console.log(
       `\n  ** DIVERGENCE: 30d is ${REGIME_LABELS[regime].toUpperCase()} but 7d is ${REGIME_LABELS[regime7d].toUpperCase()} **`,
     );
-    console.log(
-      `  The short-term regime is shifting. Use the 7d reading to inform near-term decisions.`,
-    );
+    console.log(`  ${windowDivergenceInterpretation}`);
   }
 
   console.log("\n### Regime (30d — primary)");
   console.log(
-    `  ${REGIME_LABELS[regime].toUpperCase()}  (ratio = ${ratio.toFixed(3)})`,
+    `  ${REGIME_LABELS[regime].toUpperCase()}  (ratio = ${ratio.toFixed(3)}, signed = ${signedRatio.toFixed(3)}, direction = ${direction})`,
   );
 
   console.log("\n### Regime (7d — near-term)");
   console.log(
-    `  ${REGIME_LABELS[regime7d].toUpperCase()}  (ratio = ${ratio7d.toFixed(3)})`,
+    `  ${REGIME_LABELS[regime7d].toUpperCase()}  (ratio = ${ratio7d.toFixed(3)}, signed = ${signedRatio7d.toFixed(3)}, direction = ${direction7d})`,
   );
 
   console.log("\n### Market Context");
@@ -317,6 +363,7 @@ async function main() {
   if (windowsDiverge) {
     console.log(`  Based on 30d: ${REGIME_ACTIONS[regime]}`);
     console.log(`  Based on 7d:  ${REGIME_ACTIONS[regime7d]}`);
+    console.log(`  Interpretation: ${windowDivergenceInterpretation}`);
   } else {
     console.log(`  ${REGIME_ACTIONS[regime]}`);
   }
@@ -331,3 +378,5 @@ main().catch((err: Error) => {
   console.error("Error:", err.message);
   process.exit(1);
 });
+
+export {};

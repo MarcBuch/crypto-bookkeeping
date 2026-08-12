@@ -5,7 +5,7 @@ description: Use when the user asks about the current market regime, drift/vol r
 
 # Skill: Regime Checker
 
-Fetches 30+ days of daily candle data from Hyperliquid and computes the drift/vol ratio as defined in PLAYBOOK.md. Maps the ratio to a regime and outputs the corresponding playbook action. Also surfaces open interest from Hyperliquid perp markets.
+Fetches 30+ days of daily candle data from Hyperliquid and computes the drift/vol ratio as defined in PLAYBOOK.md. Maps the ratio to a regime, adds a sign-aware direction label, and outputs the corresponding playbook action. Also surfaces open interest from Hyperliquid perp markets.
 
 ## When to use
 
@@ -33,6 +33,12 @@ bun "$SKILL_DIR/check-regime.ts" BTC --json 2>/dev/null
 
 The coin argument (positional) is the **Hyperliquid perp ticker** (e.g. `HYPE`, `BTC`, `ETH`), not a CoinGecko slug.
 
+## Direction Labels
+
+- `direction` / `direction7d` are derived from `dailyDrift` with a small near-zero threshold
+- values: `uptrend`, `downtrend`, `flat`
+- `signedRatio` / `signedRatio7d` preserve the sign of drift while keeping the existing absolute `ratio` unchanged
+
 ## JSON Output Schema
 
 ```json
@@ -46,6 +52,8 @@ The coin argument (positional) is the **Hyperliquid perp ticker** (e.g. `HYPE`, 
   "dailyDrift": 0.0155,
   "dailyVol": 0.0547,
   "ratio": 0.283,
+  "signedRatio": 0.283,
+  "direction": "uptrend",
   "regime": "range-bound",
   "action": "Full position. Normal rerange discipline (outer-third trigger).",
   "positionGuidance": "Full position. Normal rerange discipline (outer-third trigger).",
@@ -55,8 +63,11 @@ The coin argument (positional) is the **Hyperliquid perp ticker** (e.g. `HYPE`, 
   "dailyDrift7d": 0.0058,
   "dailyVol7d": 0.0431,
   "ratio7d": 0.135,
+  "signedRatio7d": 0.135,
+  "direction7d": "uptrend",
   "regime7d": "range-bound",
-  "windowsDiverge": false
+  "windowsDiverge": false,
+  "windowDivergenceInterpretation": null
 }
 ```
 
@@ -90,7 +101,9 @@ ratio      = abs(dailyDrift) / dailyVol
 bun "$SKILL_DIR/check-regime.ts" --json 2>/dev/null
 ```
 
-Parse `ratio`, `regime`, and `openInterest` from JSON output.
+Parse `ratio`, `signedRatio`, `direction`, `regime`, and `openInterest` from JSON output.
+
+If `windowsDiverge` is true, also read `windowDivergenceInterpretation` for the concise 7d vs 30d read.
 
 ### Step 2: Cross-reference with position state
 

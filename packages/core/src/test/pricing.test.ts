@@ -131,6 +131,47 @@ describe("getUsdPrices", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("falls back to Hyperliquid mids for HYPE and BTC when CoinGecko fails", async () => {
+    setNow(Date.now() + 60_001);
+    const calls: FetchCall[] = [];
+    setFetchMock(async (input) => {
+      const url = getRequestUrl(input);
+      calls.push({ url });
+      if (url.includes("coingecko.com")) {
+        return jsonResponse({ error: "forbidden" }, { status: 403 });
+      }
+      return jsonResponse({ HYPE: "80.25", BTC: "77750.5" });
+    });
+
+    const result = await getUsdPrices(
+      {
+        pricing: {
+          coingeckoIds: { WHYPE: "hyperliquid", UBTC: "bitcoin" },
+        },
+      },
+      [
+        { symbol: "WHYPE", address: "0xaaa" },
+        { symbol: "UBTC", address: "0xbbb" },
+      ],
+    );
+
+    expect(result).toEqual({ "0xaaa": 80.25, "0xbbb": 77750.5 });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toBe("https://api.hyperliquid.xyz/info");
+  });
+
+  it("does not use Hyperliquid fallback for unrelated CoinGecko assets", async () => {
+    const calls = mockFetchJson({ error: "forbidden" }, { status: 403 });
+
+    const result = await getUsdPrices(
+      { pricing: { coingeckoIds: { OTHER_FALLBACK_TOKEN: "ethereum" } } },
+      ["OTHER_FALLBACK_TOKEN"],
+    );
+
+    expect(result).toEqual({ OTHER_FALLBACK_TOKEN: null });
+    expect(calls).toHaveLength(1);
+  });
+
   it("returns null without throwing when fetch rejects", async () => {
     const calls = mockFetchReject();
 

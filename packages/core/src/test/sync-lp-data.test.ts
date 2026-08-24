@@ -90,6 +90,22 @@ const fakeConfig = {
   },
 };
 
+const fakePosData = {
+  tokenId: 12345n,
+  nonce: 0n,
+  operator: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+  token0: "0x0000000000000000000000000000000000000aaa" as `0x${string}`,
+  token1: "0x0000000000000000000000000000000000000bbb" as `0x${string}`,
+  fee: 3000,
+  tickLower: -100,
+  tickUpper: 100,
+  liquidity: 1000000000000000000n,
+  feeGrowthInside0LastX128: 0n,
+  feeGrowthInside1LastX128: 0n,
+  tokensOwed0: 0n,
+  tokensOwed1: 0n,
+};
+
 const fakePositionView = {
   tokenId: "12345",
   token0: { address: "0xabc", symbol: "WHYPE", decimals: 18 },
@@ -141,6 +157,30 @@ const fakePnLView = {
   netVsHodlPercent: 0.05,
   priceLower: 0.8,
   priceUpper: 2.0,
+};
+
+const cachedPnLViewWithUsd = {
+  ...fakePnLView,
+  tokenId: "12345",
+  token0UsdPrice: 123.45,
+  token1UsdPrice: 1.0,
+  feesCollected0Usd: 12.34,
+  feesCollected1Usd: 5.67,
+  feesValueUsd: 18.01,
+  usdPriceSource: "coingecko" as const,
+  pendingFeesValueUsd: 9.87,
+};
+
+const freshPnLViewWithUsd = {
+  ...fakePnLView,
+  tokenId: "12345",
+  token0UsdPrice: 222.22,
+  token1UsdPrice: 1.11,
+  feesCollected0Usd: 22.22,
+  feesCollected1Usd: 6.78,
+  feesValueUsd: 29.0,
+  usdPriceSource: "coingecko" as const,
+  pendingFeesValueUsd: 10.5,
 };
 
 function expectErrorMessage(error: unknown, matcher: string | RegExp): void {
@@ -428,5 +468,37 @@ describe("syncLpData — summary result", () => {
 
     expect(result.hedgeTradesSynced).toBe(0);
     expect(result.hedgeSyncError).toContain("hyperliquid unavailable");
+  });
+});
+
+describe("syncLpData — cached USD pricing merge", () => {
+  it("preserves cached USD fields when live pricing is null", async () => {
+    mockGetAllPositions = async () => [fakePosData];
+    mockGetPnLView = async () => [fakePnLView];
+    replaceCachedPnLViews([cachedPnLViewWithUsd], "2026-06-01T00:00:00.000Z");
+
+    await syncLpData(fakeConfig);
+
+    const pnl = listCachedPnLViews();
+    expect(pnl).toHaveLength(1);
+    expect(pnl[0].token0UsdPrice).toBe(123.45);
+    expect(pnl[0].token1UsdPrice).toBe(1.0);
+    expect(pnl[0].feesValueUsd).toBe(18.01);
+    expect(pnl[0].usdPriceSource).toBe("coingecko");
+  });
+
+  it("replaces cached USD fields when fresh pricing is available", async () => {
+    mockGetAllPositions = async () => [fakePosData];
+    mockGetPnLView = async () => [freshPnLViewWithUsd];
+    replaceCachedPnLViews([cachedPnLViewWithUsd], "2026-06-01T00:00:00.000Z");
+
+    await syncLpData(fakeConfig);
+
+    const pnl = listCachedPnLViews();
+    expect(pnl).toHaveLength(1);
+    expect(pnl[0].token0UsdPrice).toBe(222.22);
+    expect(pnl[0].token1UsdPrice).toBe(1.11);
+    expect(pnl[0].feesValueUsd).toBe(29.0);
+    expect(pnl[0].pendingFeesValueUsd).toBe(10.5);
   });
 });

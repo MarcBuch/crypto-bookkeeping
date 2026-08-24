@@ -14,6 +14,7 @@ export type UsdPriceMap = Record<string, number | null>;
 
 const COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_HISTORY_URL = "https://api.coingecko.com/api/v3/coins";
+const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
 const PRICE_CACHE_TTL_MS = 60_000;
 const NEGATIVE_CACHE_TTL_MS = 5_000;
 const HISTORICAL_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -56,6 +57,54 @@ export async function getUsdPrices(
     result[key] = getCachedPrice(coinGeckoId) ?? null;
   }
 
+  const missingFallbackIds = [
+    ...new Set(
+      [...idsByResultKey.entries()]
+        .filter(([key]) => result[key] === null)
+        .map(([, coinGeckoId]) => coinGeckoId)
+        .filter((coinGeckoId) => hyperliquidCoin(coinGeckoId) !== null),
+    ),
+  ];
+  if (missingFallbackIds.length > 0) {
+    const fallbackPrices = await fetchHyperliquidUsdPrices(missingFallbackIds);
+    for (const [key, coinGeckoId] of idsByResultKey) {
+      result[key] ??= fallbackPrices[coinGeckoId] ?? null;
+    }
+  }
+
+  return result;
+}
+
+function hyperliquidCoin(coinGeckoId: string): string | null {
+  if (coinGeckoId === "hyperliquid") return "HYPE";
+  if (coinGeckoId === "bitcoin") return "BTC";
+  return null;
+}
+
+async function fetchHyperliquidUsdPrices(coinGeckoIds: string[]): Promise<UsdPriceMap> {
+  const result: UsdPriceMap = {};
+  try {
+    const response = await fetch(HYPERLIQUID_INFO_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "allMids" }),
+    });
+    if (!response.ok) return result;
+
+    const data = await response.json();
+    if (!isRecord(data)) return result;
+
+    for (const coinGeckoId of coinGeckoIds) {
+      const coin = hyperliquidCoin(coinGeckoId);
+      const rawPrice = coin ? data[coin] : undefined;
+      const price = typeof rawPrice === "string" ? Number(rawPrice) : rawPrice;
+      if (typeof price === "number" && Number.isFinite(price) && price > 0) {
+        result[coinGeckoId] = price;
+      }
+    }
+  } catch {
+    // USD pricing is optional; preserve the existing null result on failure.
+  }
   return result;
 }
 

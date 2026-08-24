@@ -84,6 +84,7 @@ await mock.module("../services/pnl.js", () => ({
 import {
   listCachedPositionViews,
   listCachedPnLViews,
+  replaceCachedPnLViews,
   upsertPositionViewCache,
 } from "../db/store.js";
 import { syncSinglePosition } from "../services/positions.js";
@@ -150,6 +151,30 @@ const fakePnLView = {
   netVsHodlPercent: 0.05,
   priceLower: 0.8,
   priceUpper: 2.0,
+};
+
+const cachedPnLViewWithUsd = {
+  ...fakePnLView,
+  tokenId: "42",
+  token0UsdPrice: 123.45,
+  token1UsdPrice: 1.0,
+  feesCollected0Usd: 12.34,
+  feesCollected1Usd: 5.67,
+  feesValueUsd: 18.01,
+  usdPriceSource: "coingecko" as const,
+  pendingFeesValueUsd: 9.87,
+};
+
+const freshPnLViewWithUsd = {
+  ...fakePnLView,
+  tokenId: "42",
+  token0UsdPrice: 222.22,
+  token1UsdPrice: 1.11,
+  feesCollected0Usd: 22.22,
+  feesCollected1Usd: 6.78,
+  feesValueUsd: 29.0,
+  usdPriceSource: "coingecko" as const,
+  pendingFeesValueUsd: 10.5,
 };
 
 function expectErrorMessage(error: unknown, matcher: string | RegExp): void {
@@ -277,6 +302,34 @@ describe("syncSinglePosition — RPC error propagation", () => {
 // ---------------------------------------------------------------------------
 
 describe("syncSinglePosition — partial failure and idempotency", () => {
+  it("preserves cached USD fields when live pricing is null", async () => {
+    replaceCachedPnLViews([cachedPnLViewWithUsd], "2026-06-01T00:00:00.000Z");
+    mockGetPnLView = async () => [fakePnLView];
+
+    await syncSinglePosition(fakeConfig, "42");
+
+    const pnlViews = listCachedPnLViews();
+    expect(pnlViews).toHaveLength(1);
+    expect(pnlViews[0].token0UsdPrice).toBe(123.45);
+    expect(pnlViews[0].token1UsdPrice).toBe(1.0);
+    expect(pnlViews[0].feesValueUsd).toBe(18.01);
+    expect(pnlViews[0].usdPriceSource).toBe("coingecko");
+  });
+
+  it("replaces cached USD fields when fresh pricing is available", async () => {
+    replaceCachedPnLViews([cachedPnLViewWithUsd], "2026-06-01T00:00:00.000Z");
+    mockGetPnLView = async () => [freshPnLViewWithUsd];
+
+    await syncSinglePosition(fakeConfig, "42");
+
+    const pnlViews = listCachedPnLViews();
+    expect(pnlViews).toHaveLength(1);
+    expect(pnlViews[0].token0UsdPrice).toBe(222.22);
+    expect(pnlViews[0].token1UsdPrice).toBe(1.11);
+    expect(pnlViews[0].feesValueUsd).toBe(29.0);
+    expect(pnlViews[0].pendingFeesValueUsd).toBe(10.5);
+  });
+
   it("existing cache row is preserved when getPositionData throws", async () => {
     // Pre-seed the DB with an existing cache row
     const originalData = { version: "original", tokenId: "42" };

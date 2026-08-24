@@ -2,14 +2,44 @@ import { createClient } from "../chain/client.js";
 import { getAllPositions, getPositionData, type PositionData } from "../chain/positions.js";
 import type { Config } from "../config.js";
 import {
+  listCachedPnLViews,
   replaceLpCaches,
   upsertLpSyncState,
   upsertPositionViewCache,
   upsertPnLViewCache,
 } from "../db/store.js";
 import { getHedgeView, snapshotHedge, syncHyperliquidHedgeTrades } from "./hedge.js";
+import type { PnLView } from "./pnl.js";
 import { getPnLView } from "./pnl.js";
 import { createPositionLifecycleContext, projectCurrentPosition } from "./position-lifecycle.js";
+
+type CachedPnLView = Record<string, unknown>;
+
+function readCachedNumber(view: CachedPnLView | undefined, key: keyof PnLView): number | null {
+  const value = view?.[key];
+  return typeof value === "number" ? value : null;
+}
+
+function mergeCachedUsdFields(fresh: PnLView, cached?: CachedPnLView): PnLView {
+  if (!cached || fresh.token0UsdPrice !== null || fresh.token1UsdPrice !== null) {
+    return fresh;
+  }
+
+  return {
+    ...fresh,
+    token0UsdPrice: readCachedNumber(cached, "token0UsdPrice"),
+    token1UsdPrice: readCachedNumber(cached, "token1UsdPrice"),
+    feesCollected0Usd: readCachedNumber(cached, "feesCollected0Usd"),
+    feesCollected1Usd: readCachedNumber(cached, "feesCollected1Usd"),
+    feesValueUsd: readCachedNumber(cached, "feesValueUsd"),
+    usdPriceSource: cached.usdPriceSource === "coingecko" ? "coingecko" : null,
+    pendingFeesValueUsd: readCachedNumber(cached, "pendingFeesValueUsd"),
+  };
+}
+
+function cachedPnlViewsByTokenId(): Map<string, CachedPnLView> {
+  return new Map(listCachedPnLViews().map((row) => [String(row.tokenId), row]));
+}
 
 export interface PositionView {
   tokenId: string;
@@ -99,11 +129,13 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
   );
   const positions = await getPositionsView(config, rawPositions);
   const pnlViews = await getPnLView(config, undefined, rawPositions);
+  const cachedPnlViews = cachedPnlViewsByTokenId();
+  const mergedPnlViews = pnlViews.map((view) => mergeCachedUsdFields(view, cachedPnlViews.get(view.tokenId)));
 
   const syncedAt = new Date().toISOString();
 
   // Atomically replace both caches in a single transaction
-  replaceLpCaches(positions, pnlViews, syncedAt);
+  replaceLpCaches(positions, mergedPnlViews, syncedAt);
 
   // Update sync state
   upsertLpSyncState({ wallet: config.wallet, last_synced_at: syncedAt });
@@ -189,7 +221,8 @@ export async function syncSinglePosition(
   const syncedAt = new Date().toISOString();
   upsertPositionViewCache(tokenId, positionView, syncedAt);
   if (pnlView) {
-    upsertPnLViewCache(tokenId, pnlView, syncedAt);
+    const cachedPnlView = cachedPnlViewsByTokenId().get(tokenId);
+    upsertPnLViewCache(tokenId, mergeCachedUsdFields(pnlView, cachedPnlView), syncedAt);
   }
 
   // 7. Snapshot hedge if configured (swallow errors — LP sync must complete)

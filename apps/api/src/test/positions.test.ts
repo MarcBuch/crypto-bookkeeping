@@ -53,6 +53,21 @@ const fakePosition2 = {
   tokenId: "456",
 };
 
+const fakePosition3 = {
+  ...fakePosition,
+  tokenId: "12",
+};
+
+const fakePosition4 = {
+  ...fakePosition,
+  tokenId: "7",
+};
+
+const fakePosition5 = {
+  ...fakePosition,
+  tokenId: "99",
+};
+
 // --- Standalone MockRpcError for use in tests (also used as RpcError in the mock) ---
 class MockRpcError extends Error {
   code?: number;
@@ -65,6 +80,7 @@ class MockRpcError extends Error {
 
 // --- Mutable mock function references ---
 let mockListCachedPositionViews: (...args: unknown[]) => unknown = () => [];
+let mockListCachedPnLViews: (...args: unknown[]) => unknown = () => [];
 let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
 let mockSyncLpData: (...args: unknown[]) => unknown = async () => ({ synced: 0 });
 let mockSyncSinglePosition: (config: unknown, tokenId: string) => Promise<unknown> = async () => ({
@@ -82,7 +98,7 @@ await installCoreMock({
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
   listCachedPositionViews: (...args: unknown[]) => mockListCachedPositionViews(...args),
-  listCachedPnLViews: () => [],
+  listCachedPnLViews: (...args: unknown[]) => mockListCachedPnLViews(...args),
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
   syncLpData: (...args: unknown[]) => mockSyncLpData(...args),
   syncSinglePosition: (config: unknown, tokenId: string) => mockSyncSinglePosition(config, tokenId),
@@ -149,6 +165,10 @@ describe("GET /positions", () => {
 
   it("returns 200 with 2 positions", async () => {
     mockListCachedPositionViews = () => [fakePosition, fakePosition2];
+    mockListCachedPnLViews = () => [
+      { tokenId: "123", openedAt: "2026-02-01T00:00:00.000Z" },
+      { tokenId: "456", openedAt: "2026-01-01T00:00:00.000Z" },
+    ];
 
     const res = await server.inject({ method: "GET", url: "/positions" });
     expect(res.statusCode).toBe(200);
@@ -156,6 +176,81 @@ describe("GET /positions", () => {
     expect(body.positions).toHaveLength(2);
     expect(body.positions[0].tokenId).toBe("123");
     expect(body.positions[1].tokenId).toBe("456");
+  });
+
+  it("sorts by cached PnL openedAt newest first", async () => {
+    mockListCachedPositionViews = () => [
+      { ...fakePosition, tokenId: "1" },
+      { ...fakePosition2, tokenId: "2" },
+      { ...fakePosition3, tokenId: "3" },
+    ];
+    mockListCachedPnLViews = () => [
+      { tokenId: "1", openedAt: "2026-01-01T00:00:00.000Z" },
+      { tokenId: "2", openedAt: "2026-03-01T00:00:00.000Z" },
+      { tokenId: "3", openedAt: "2026-02-01T00:00:00.000Z" },
+    ];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions.map((position: { tokenId: string }) => position.tokenId)).toEqual([
+      "2",
+      "3",
+      "1",
+    ]);
+  });
+
+  it("puts missing, null, or invalid openedAt last and tie-breaks equal timestamps by tokenId ascending", async () => {
+    mockListCachedPositionViews = () => [
+      { ...fakePosition4, tokenId: "10" },
+      { ...fakePosition5, tokenId: "2" },
+      { ...fakePosition, tokenId: "20" },
+      { ...fakePosition3, tokenId: "11" },
+      { ...fakePosition2, tokenId: "3" },
+      { ...fakePosition5, tokenId: "99" },
+    ];
+    mockListCachedPnLViews = () => [
+      { tokenId: "10", openedAt: "2026-04-01T00:00:00.000Z" },
+      { tokenId: "2", openedAt: "2026-04-01T00:00:00.000Z" },
+      { tokenId: "20", openedAt: "not-a-date" },
+      { tokenId: "11", openedAt: "2026-05-01T00:00:00.000Z" },
+      { tokenId: "3", openedAt: null },
+      { tokenId: "99", openedAt: undefined },
+    ];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions.map((position: { tokenId: string }) => position.tokenId)).toEqual([
+      "11",
+      "2",
+      "10",
+      "3",
+      "20",
+      "99",
+    ]);
+  });
+
+  it("uses deterministic plain-string tie-breaks when tokenIds differ only by numeric-aware ordering", async () => {
+    mockListCachedPositionViews = () => [
+      { ...fakePosition, tokenId: "2" },
+      { ...fakePosition2, tokenId: "10" },
+      { ...fakePosition3, tokenId: "a2" },
+      { ...fakePosition4, tokenId: "a10" },
+    ];
+    mockListCachedPnLViews = () => [
+      { tokenId: "2", openedAt: "2026-04-01T00:00:00.000Z" },
+      { tokenId: "10", openedAt: "2026-04-01T00:00:00.000Z" },
+      { tokenId: "a2", openedAt: "2026-04-01T00:00:00.000Z" },
+      { tokenId: "a10", openedAt: "2026-04-01T00:00:00.000Z" },
+    ];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions.map((position: { tokenId: string }) => position.tokenId)).toEqual([
+      "2",
+      "10",
+      "a2",
+      "a10",
+    ]);
   });
 
   it("attaches configured hedge metadata to matching positions only", async () => {

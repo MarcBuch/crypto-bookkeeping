@@ -2,6 +2,7 @@ import {
   syncLpData,
   syncSinglePosition,
   listCachedPositionViews,
+  listCachedPnLViews,
   getPositionsCacheSyncedAt,
 } from "@lp-tracker/core";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
@@ -35,6 +36,18 @@ function attachConfiguredHedge(
   const hedge = tokenId ? config.positions?.[tokenId]?.hedge : undefined;
 
   return hedge ? { ...view, hedge } : view;
+}
+
+function parseTimestamp(value: unknown): number {
+  if (typeof value !== "string") return NaN;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : NaN;
+}
+
+function compareTokenIds(aTokenId: unknown, bTokenId: unknown): number {
+  const a = typeof aTokenId === "string" ? aTokenId : "";
+  const b = typeof bTokenId === "string" ? bTokenId : "";
+  return a.localeCompare(b, undefined, { numeric: true }) || a.localeCompare(b);
 }
 
 export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -159,9 +172,30 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /positions — read from cache (no live RPC)
   fastify.get("/positions", async (_request: FastifyRequest, _reply: FastifyReply) => {
-    const positions = listCachedPositionViews().map((view) =>
-      attachConfiguredHedge(view, fastify.lpConfig),
+    const pnlByTokenId = new Map(
+      listCachedPnLViews()
+        .filter((view) => typeof view.tokenId === "string")
+        .map((view) => [view.tokenId, parseTimestamp(view.openedAt)] as const),
     );
+
+    const positions = listCachedPositionViews()
+      .map((view) => attachConfiguredHedge(view, fastify.lpConfig))
+      .toSorted((a, b) => {
+        const aOpenedAt =
+          typeof a.tokenId === "string" ? (pnlByTokenId.get(a.tokenId) ?? NaN) : NaN;
+        const bOpenedAt =
+          typeof b.tokenId === "string" ? (pnlByTokenId.get(b.tokenId) ?? NaN) : NaN;
+        const aValid = Number.isFinite(aOpenedAt);
+        const bValid = Number.isFinite(bOpenedAt);
+
+        if (aValid && bValid) {
+          if (aOpenedAt !== bOpenedAt) return bOpenedAt - aOpenedAt;
+          return compareTokenIds(a.tokenId, b.tokenId);
+        }
+
+        if (aValid !== bValid) return aValid ? -1 : 1;
+        return compareTokenIds(a.tokenId, b.tokenId);
+      });
     const syncedAt = getPositionsCacheSyncedAt();
     return { positions, syncedAt };
   });

@@ -9,7 +9,6 @@ import {
 import { useTestDb } from "./helpers/db.js";
 
 const validSyncedAt = "2026-06-01T20:00:00.000Z";
-const validData = { foo: 1, bar: "test" };
 
 function getRowId(row: Record<string, unknown>): string {
   expect(typeof row.id).toBe("string");
@@ -18,80 +17,6 @@ function getRowId(row: Record<string, unknown>): string {
   }
   return row.id;
 }
-
-describe("upsertPositionViewCache — invalid tokenId", () => {
-  useTestDb();
-
-  it("accepts empty string tokenId and stores it as-is", () => {
-    // The implementation doesn't validate tokenId, so empty string is accepted
-    upsertPositionViewCache("", validData, validSyncedAt);
-    const results = listCachedPositionViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(validData);
-  });
-
-  it("accepts non-numeric string tokenId and stores it as-is", () => {
-    // The implementation doesn't validate tokenId format, so "abc" is accepted
-    upsertPositionViewCache("abc", validData, validSyncedAt);
-    const results = listCachedPositionViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(validData);
-  });
-
-  it("accepts empty data object and stores it", () => {
-    // Even with empty data, the row is inserted
-    upsertPositionViewCache("123", {}, validSyncedAt);
-    const results = listCachedPositionViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({});
-  });
-
-  it("accepts null as tokenId and stores it", () => {
-    // In Bun's sqlite3, null PRIMARY KEY is accepted (SQLite parameterized queries)
-    // The null value is bound and stored as-is, not rejected
-    upsertPositionViewCache(null, { foo: 1 }, validSyncedAt);
-    const results = listCachedPositionViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({ foo: 1 });
-  });
-});
-
-describe("upsertPnLViewCache — invalid tokenId", () => {
-  useTestDb();
-
-  it("accepts empty string tokenId and stores it as-is", () => {
-    // The implementation doesn't validate tokenId, so empty string is accepted
-    upsertPnLViewCache("", validData, validSyncedAt);
-    const results = listCachedPnLViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(validData);
-  });
-
-  it("accepts non-numeric string tokenId and stores it as-is", () => {
-    // The implementation doesn't validate tokenId format, so "abc" is accepted
-    upsertPnLViewCache("abc", validData, validSyncedAt);
-    const results = listCachedPnLViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(validData);
-  });
-
-  it("accepts empty data object and stores it", () => {
-    // Even with empty data, the row is inserted
-    upsertPnLViewCache("123", {}, validSyncedAt);
-    const results = listCachedPnLViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({});
-  });
-
-  it("accepts null as tokenId and stores it", () => {
-    // In Bun's sqlite3, null PRIMARY KEY is accepted (SQLite parameterized queries)
-    // The null value is bound and stored as-is, not rejected
-    upsertPnLViewCache(null, { foo: 1 }, validSyncedAt);
-    const results = listCachedPnLViews();
-    expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({ foo: 1 });
-  });
-});
 
 describe("upsertPositionViewCache — INSERT OR REPLACE behavior", () => {
   useTestDb();

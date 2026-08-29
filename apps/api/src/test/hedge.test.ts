@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
 import type { Config } from "../config.js";
+import { installCoreMock } from "./core-mock.js";
 
 // --- Minimal fake config (no real config.json needed) ---
 const fakeConfig = {
@@ -94,7 +95,7 @@ let mockAssignHedgeEventCallCount = 0;
 let mockHedgeEvents = structuredClone(baseHedgeEvents);
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-await mock.module("@lp-tracker/core", () => ({
+await installCoreMock({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
@@ -135,7 +136,7 @@ await mock.module("@lp-tracker/core", () => ({
       this.name = "ValidationError";
     }
   },
-}));
+});
 
 let server: FastifyInstance;
 

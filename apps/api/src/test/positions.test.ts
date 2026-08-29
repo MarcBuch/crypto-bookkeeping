@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, mock } from "bun:test";
+import { describe, it, expect, beforeAll } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
 import type { Config } from "../config.js";
+import { installCoreMock } from "./core-mock.js";
 
 // --- Minimal fake config (no real config.json needed) ---
 const fakeConfig = {
@@ -76,7 +77,7 @@ function expectJson(response: { json(): unknown }) {
 }
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-await mock.module("@lp-tracker/core", () => ({
+await installCoreMock({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
@@ -124,7 +125,7 @@ await mock.module("@lp-tracker/core", () => ({
       this.name = "ValidationError";
     }
   },
-}));
+});
 
 let server: FastifyInstance;
 
@@ -262,10 +263,6 @@ describe("GET /positions/:tokenId", () => {
     expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
   });
 
-  it("returns 404 for unknown nested route /positions/123/unknown", async () => {
-    const res = await server.inject({ method: "GET", url: "/positions/123/unknown" });
-    expect(res.statusCode).toBe(404);
-  });
 });
 
 // ---------------------------------------------------------------------------

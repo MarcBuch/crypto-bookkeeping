@@ -1,8 +1,9 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
 import type { Config } from "../config.js";
+import { installCoreMock } from "./core-mock.js";
 
 const fakeConfig = {
   rpc: "http://test-rpc",
@@ -16,7 +17,7 @@ const fakeConfig = {
   },
 } satisfies Config;
 
-await mock.module("@lp-tracker/core", () => ({
+await installCoreMock({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
@@ -60,7 +61,7 @@ await mock.module("@lp-tracker/core", () => ({
     }
   },
   ValidationError: class ValidationError extends Error {},
-}));
+});
 
 let buildServer: (config?: Config) => Promise<FastifyInstance>;
 

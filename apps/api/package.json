@@ -6,7 +6,7 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
     "check": "bun run tsc --noEmit",
-    "test": "bun test src/test"
+    "test": "bun test --isolate src/test"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

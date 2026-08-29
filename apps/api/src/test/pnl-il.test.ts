@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
 import type { Config } from "../config.js";
+import { installCoreMock } from "./core-mock.js";
 
 // --- Minimal fake config ---
 const fakeConfig = {
@@ -128,7 +129,7 @@ let mockUpdateCachedPnLView: (tokenId: string, update: { openedAt: string }) => 
   undefined;
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
-await mock.module("@lp-tracker/core", () => ({
+await installCoreMock({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   getPositionsView: async () => [],
@@ -170,7 +171,7 @@ await mock.module("@lp-tracker/core", () => ({
   NotFoundError: MockNotFoundError,
   RpcError: MockRpcError,
   ValidationError: MockValidationError,
-}));
+});
 
 let server: FastifyInstance;
 

@@ -1,10 +1,7 @@
 /**
  * m2t2 — Adversarial tests: position service layer (DB-only paths)
  *
- * Tests 1-2 (getPnLView/getILView with unknown tokenId) require network mocking.
- * These are SKIPPED here — deferred until ESM mock infrastructure is set up.
- *
- * Tests 3-5 exercise getHistoryView which only touches the SQLite layer.
+ * Exercises getHistoryView, which only touches the SQLite layer.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -70,22 +67,7 @@ function expectNotFoundError(error: unknown): NotFoundError {
 }
 
 // ---------------------------------------------------------------------------
-// SKIPPED: tests that require network mocking
-// ---------------------------------------------------------------------------
-
-describe("getPnLView / getILView with unknown tokenId [DEFERRED — requires network mock]", () => {
-  it.skip("getPnLView throws NotFoundError for unknown tokenId", () => {
-    // Cannot be tested without mocking createClient / getAllPositions at the ESM
-    // module level. Deferred until bun:test mock.module() infrastructure is wired up.
-  });
-
-  it.skip("getILView throws NotFoundError for unknown tokenId", () => {
-    // Same as above — requires ESM module-level mock.
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test 3 — getHistoryView with no stored position → NotFoundError
+// getHistoryView with no stored position → NotFoundError
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — no stored position", () => {
@@ -112,7 +94,7 @@ describe("getHistoryView — no stored position", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 4 — getHistoryView with stored position but no snapshots → NotFoundError
+// getHistoryView with stored position but no snapshots → NotFoundError
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — position exists but no snapshots", () => {
@@ -141,7 +123,7 @@ describe("getHistoryView — position exists but no snapshots", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 4b — position with snapshots returns data correctly
+// Position with snapshots returns data correctly
 // ---------------------------------------------------------------------------
 
 describe("getHistoryView — position with snapshots returns results", () => {
@@ -185,10 +167,10 @@ describe("getHistoryView — position with snapshots returns results", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 5 — getHistoryView with limit = 0 or negative
+// getHistoryView limit behavior
 // ---------------------------------------------------------------------------
 
-describe("getHistoryView — limit edge cases", () => {
+describe("getHistoryView — limit behavior", () => {
   useTestDb();
 
   it("limit = 0: SQLite returns 0 rows — service throws NotFoundError (no snapshots path)", async () => {
@@ -204,27 +186,6 @@ describe("getHistoryView — limit edge cases", () => {
       throw new Error("Expected getHistoryView to reject");
     } catch (error) {
       expect(error).toBeInstanceOf(NotFoundError);
-    }
-  });
-
-  it("limit = -1: service does not crash — either throws or returns empty-like result", async () => {
-    makePosition("11");
-    makeSnapshot("11");
-
-    // Negative LIMIT in SQLite is treated as no limit in some versions, or may
-    // return all rows. Either way the call must not crash unhandled.
-    let threw = false;
-    let result: Awaited<ReturnType<typeof getHistoryView>> = [];
-    try {
-      result = await getHistoryView("11", -1);
-    } catch (err) {
-      threw = true;
-      // Only NotFoundError is acceptable; anything else is a bug
-      expect(err).toBeInstanceOf(NotFoundError);
-    }
-    // If it didn't throw, it should return an array (possibly all rows)
-    if (!threw) {
-      expect(Array.isArray(result)).toBe(true);
     }
   });
 

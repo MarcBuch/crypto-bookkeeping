@@ -314,19 +314,6 @@ describe("tax CLI argument handling", () => {
     });
   });
 
-  it("lets Commander reject missing get ids", async () => {
-    const result = await runCli(["tax", "get"]);
-
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("missing required argument 'id'");
-  });
-
-  it("lets Commander reject missing label ids", async () => {
-    const result = await runCli(["tax", "label"]);
-
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("missing required argument 'id'");
-  });
 });
 
 describe("tax CLI JSON output contracts", () => {

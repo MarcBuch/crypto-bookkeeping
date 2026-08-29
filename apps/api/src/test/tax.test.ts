@@ -1,8 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 
 import type { FastifyInstance } from "fastify";
 
 import type { Config } from "../config.js";
+import { installCoreMock } from "./core-mock.js";
 
 const fakeConfig: Config = {
   rpc: "http://test-rpc",
@@ -52,7 +53,7 @@ function expectJson(response: { json(): unknown }) {
   return expect(response.json());
 }
 
-await mock.module("@lp-tracker/core", () => ({
+await installCoreMock({
   loadConfig: () => fakeConfig,
   resolveConfigPath: () => "/fake/config.json",
   syncLpData: async () => ({ synced: 0 }),
@@ -120,7 +121,7 @@ await mock.module("@lp-tracker/core", () => ({
   enrichTaxTransactionsEurValues: (...args: unknown[]) => {
     return mockEnrichTaxTransactionsEurValues(...args);
   },
-}));
+});
 
 let server: FastifyInstance;
 

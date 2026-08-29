@@ -356,7 +356,7 @@ describe("syncSinglePosition — partial failure and idempotency", () => {
     // Verify the original cache row is still there (was NOT overwritten)
     cachedPositions = listCachedPositionViews();
     expect(cachedPositions).toHaveLength(1);
-    expect(cachedPositions[0].version).toBe("original");
+    expect((cachedPositions[0] as Record<string, unknown>).version).toBe("original");
   });
 
   it("successful sync on second call overwrites previous data (idempotency)", async () => {
@@ -388,7 +388,7 @@ describe("syncSinglePosition — partial failure and idempotency", () => {
     // Verify cache has 1 row with V1 data
     let cachedPositions = listCachedPositionViews();
     expect(cachedPositions).toHaveLength(1);
-    expect(cachedPositions[0].liquidity).toBe("1000000000000000000");
+    expect((cachedPositions[0] as Record<string, unknown>).liquidity).toBe("1000000000000000000");
 
     // Second call: sync with position data V2 (same tokenId, different data)
     mockGetPositionData = async () => positionDataV2;
@@ -399,7 +399,7 @@ describe("syncSinglePosition — partial failure and idempotency", () => {
     // Verify cache still has only 1 row (not 2), with V2 data
     cachedPositions = listCachedPositionViews();
     expect(cachedPositions).toHaveLength(1);
-    expect(cachedPositions[0].liquidity).toBe("2000000000000000000");
+    expect((cachedPositions[0] as Record<string, unknown>).liquidity).toBe("2000000000000000000");
   });
 
   it("two different tokenIds can be synced independently without interfering", async () => {

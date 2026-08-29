@@ -207,25 +207,26 @@ export async function syncSinglePosition(
     BigInt(tokenId),
   );
 
-  // 4. Get position view for just this one position
-  const [positionView] = await getPositionsView(config, [rawPosition]);
+  // 4. Get position view and PnL view for just this one position concurrently
+  const [positionView, pnlView] = await Promise.all([
+    getPositionsView(config, [rawPosition]),
+    getPnLView(config, tokenId, [rawPosition]),
+  ]);
   if (positionView === undefined) {
     throw new Error(`Position #${tokenId} not found or has no view data`);
   }
 
-  // 5. Get PnL view for just this one position
-  const [pnlView] = await getPnLView(config, tokenId, [rawPosition]);
   // pnlView may be undefined/null if no PnL data exists — that's OK, don't throw
 
-  // 6. Upsert only this position's cache rows (leave all other positions untouched)
+  // 5. Upsert only this position's cache rows (leave all other positions untouched)
   const syncedAt = new Date().toISOString();
-  upsertPositionViewCache(tokenId, positionView, syncedAt);
-  if (pnlView) {
+  upsertPositionViewCache(tokenId, positionView[0], syncedAt);
+  if (pnlView[0]) {
     const cachedPnlView = cachedPnlViewsByTokenId().get(tokenId);
-    upsertPnLViewCache(tokenId, mergeCachedUsdFields(pnlView, cachedPnlView), syncedAt);
+    upsertPnLViewCache(tokenId, mergeCachedUsdFields(pnlView[0], cachedPnlView), syncedAt);
   }
 
-  // 7. Snapshot hedge if configured (swallow errors — LP sync must complete)
+  // 6. Snapshot hedge if configured (swallow errors — LP sync must complete)
   if (hedgePromise) {
     const hedgeResult = await hedgePromise;
     if ("hedgeView" in hedgeResult) {
@@ -237,6 +238,6 @@ export async function syncSinglePosition(
     }
   }
 
-  // 8. Return summary
+  // 7. Return summary
   return { tokenId, syncedAt };
 }

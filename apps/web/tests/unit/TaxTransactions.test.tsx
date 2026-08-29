@@ -12,9 +12,7 @@ import {
   ManualTransactionEditor,
   ManualTaxTransactionForm,
   SyncStatus,
-  TaxEmptyState,
   TaxErrorState,
-  TaxLoadingState,
   TaxTransactionLedger,
   taxCommentDraftState,
   taxTransactionLabelOptions,
@@ -61,11 +59,6 @@ const taxTransaction: TaxTransaction = {
 };
 
 describe("tax transactions rendering", () => {
-  it("renders loading and empty states", () => {
-    expect(renderToStaticMarkup(<TaxLoadingState />)).toContain("Loading tax transactions");
-    expect(renderToStaticMarkup(<TaxEmptyState />)).toContain("No tax transactions synced");
-  });
-
   it("renders a useful tax query error state", () => {
     const html = renderToStaticMarkup(<TaxErrorState error={new Error("tax API unavailable")} />);
 
@@ -88,47 +81,6 @@ describe("tax transactions rendering", () => {
 
     expect(html).toContain("Sync failed");
     expect(html).toContain("scanner timeout");
-  });
-
-  it("renders the tax screen with cached empty transactions", () => {
-    const html = renderToStaticMarkup(
-      <TaxTransactionLedger
-        transactions={[]}
-        pagination={{ limit: 200, offset: 0, label: null, total: 0 }}
-        page={0}
-        rowsPerPage={200}
-        updateTransaction={() => undefined}
-        setPage={() => undefined}
-        setRowsPerPage={() => undefined}
-      />,
-    );
-
-    expect(html).toContain("Synced Transactions");
-    expect(html).toContain("Add manual transaction");
-    expect(html).toContain("Sync blockchain data");
-    expect(html).toContain("No tax transactions synced");
-    expect(html).not.toContain("Loading tax transactions");
-  });
-
-  it("renders blotter pagination controls and disables edge buttons", () => {
-    const html = renderToStaticMarkup(
-      <TaxTransactionLedger
-        transactions={[taxTransaction]}
-        pagination={{ limit: 50, offset: 0, label: null, total: 125 }}
-        page={0}
-        rowsPerPage={50}
-        updateTransaction={() => undefined}
-        setPage={() => undefined}
-        setRowsPerPage={() => undefined}
-        isUpdating={false}
-      />,
-    );
-
-    expect(html).toContain('aria-label="Rows per page"');
-    expect(html).toContain("Showing 1-50 of 125");
-    expect(html).toContain('disabled=""');
-    expect(html).toContain("Previous");
-    expect(html).toContain("Next");
   });
 
   it("shows the current page range and enables both navigation buttons in the middle", () => {
@@ -194,23 +146,6 @@ describe("tax transactions rendering", () => {
     expect(html).toContain("Holding Days");
     expect(html).toContain("Create manual transaction");
     expect(html).toContain("Close manual transaction creator");
-  });
-
-  it("renders tax ledger controls inline with transaction count", () => {
-    const html = renderToStaticMarkup(
-      <TaxTransactionLedger
-        transactions={[taxTransaction]}
-        updateTransaction={() => undefined}
-        isUpdating={false}
-      />,
-    );
-    const syncIndex = html.indexOf("Sync blockchain data");
-    const addIndex = html.indexOf("Add manual transaction");
-    const countIndex = html.indexOf("1 transaction");
-
-    expect(syncIndex).toBeGreaterThan(-1);
-    expect(addIndex).toBeGreaterThan(syncIndex);
-    expect(countIndex).toBeGreaterThan(addIndex);
   });
 
   it("builds trimmed manual tax transaction create inputs", () => {

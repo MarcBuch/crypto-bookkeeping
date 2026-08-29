@@ -241,12 +241,7 @@ describe("useSyncPositions polling logic", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 3. Unmount stops polling — SKIPPED (needs jsdom + @testing-library/react)
-  // -------------------------------------------------------------------------
-  it.todo("stops polling on unmount (requires jsdom / @testing-library/react — not available in this project)", () => {});
-
-  // -------------------------------------------------------------------------
-  // 4a. Cache IS invalidated on completed
+  // 3. Cache IS invalidated on completed
   // -------------------------------------------------------------------------
   it("invalidates dashboardPositions cache on completed", async () => {
     const syncMock = mock(async () => ({ message: "ok" }));

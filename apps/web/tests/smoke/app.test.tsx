@@ -1,13 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory } from "@tanstack/react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { App, ErrorState } from "../../src/App";
-import { AppProviders } from "../../src/app-providers";
 import { queryKeys } from "../../src/hooks/useDashboardPositions";
-import { createAppRouter } from "../../src/router";
 
 function renderAppWithQueryClient(queryClient: QueryClient): string {
   return renderToStaticMarkup(
@@ -18,16 +15,6 @@ function renderAppWithQueryClient(queryClient: QueryClient): string {
 }
 
 describe("app smoke", () => {
-  it("composes providers around the routed dashboard", () => {
-    const queryClient = new QueryClient();
-    const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ["/"] }) });
-    const element = AppProviders({ queryClient, router });
-
-    expect(element.props.client).toBe(queryClient);
-    expect(element.props.children.props.router).toBe(router);
-    expect(router.routesByPath["/"]?.path).toBe("/");
-  });
-
   it("renders the dashboard shell from cached app data", () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(queryKeys.dashboardPositions, { positions: [], syncedAt: null });

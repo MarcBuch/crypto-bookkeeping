@@ -352,12 +352,7 @@ describe("useSyncPosition polling logic (single position)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 5. Unmount stops polling — SKIPPED (needs jsdom + @testing-library/react)
-  // -------------------------------------------------------------------------
-  it.todo("stops polling on unmount (requires jsdom / @testing-library/react — not available in this project)", () => {});
-
-  // -------------------------------------------------------------------------
-  // 6. Multiple instances with different tokenIds are independent
+  // 5. Multiple instances with different tokenIds are independent
   // -------------------------------------------------------------------------
   it("two instances with different tokenIds poll independently", async () => {
     const syncMockA = mock(async (_tokenId: string) => ({ message: "ok" }));

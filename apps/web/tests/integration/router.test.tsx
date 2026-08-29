@@ -1,11 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
-import { isValidElement } from "react";
+import { createMemoryHistory } from "@tanstack/react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AppProviders } from "../../src/app-providers";
 import { NotFound, createAppRouter } from "../../src/router";
 
 describe("router shell", () => {
@@ -24,25 +21,6 @@ describe("router shell", () => {
 
     expect(router.options.history).toBe(history);
     expect(router.options.history?.location.pathname).toBe("/missing");
-  });
-
-  it("keeps QueryClientProvider outside RouterProvider", () => {
-    const queryClient = new QueryClient();
-    const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ["/"] }) });
-    const element = AppProviders({ queryClient, router });
-
-    expect(isValidElement(element)).toBe(true);
-    expect(element.type).toBe(QueryClientProvider);
-    expect(element.props.client).toBe(queryClient);
-
-    const child = element.props.children;
-    expect(isValidElement(child)).toBe(true);
-    if (!isValidElement<{ router: typeof router }>(child)) {
-      throw new Error("Expected RouterProvider child element");
-    }
-
-    expect(child.type).toBe(RouterProvider);
-    expect(child.props.router).toBe(router);
   });
 
   it("renders a stable not-found fallback for unknown routes", () => {

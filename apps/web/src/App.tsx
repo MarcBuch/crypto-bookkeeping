@@ -624,7 +624,7 @@ function ActivePositionRow({
 
   return (
     <div>
-      <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_1.55fr_auto] lg:items-center">
+      <article className="grid gap-5 px-5 py-5 text-neutral-950 sm:px-7 lg:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)] lg:items-stretch lg:gap-8">
         <div className="flex min-w-0 items-center gap-3">
           <TokenPairIcon token0={position.token0.symbol} token1={position.token1.symbol} />
           <div className="min-w-0">
@@ -642,6 +642,8 @@ function ActivePositionRow({
           </div>
         </div>
 
+        <div className="grid min-w-0 gap-5">
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr))_auto] xl:items-center">
         <DarkStat
           label="Balance"
           value={balance == null ? "USD unavailable" : formatUsd(balance)}
@@ -654,6 +656,12 @@ function ActivePositionRow({
               ? formatUsdFeeValue(pnl.pendingFeesValueUsd)
               : undefined
           }
+        />
+        <DarkStat
+          label="Fee APR"
+          value={formatEarningsApr(position) ?? "n/a"}
+          detail={formatEarningsUsdRate(position) ?? "n/a"}
+          tooltip="Annualized lifetime fee income using the position's current USD valuation as the denominator. USD/day = lifetime USD fees divided by elapsed days. APR shown instead of APY because no compounding is modeled."
         />
         <DarkStat
           label="ROI"
@@ -695,6 +703,17 @@ function ActivePositionRow({
           }
         />
 
+        <div className="flex items-center xl:justify-end">
+          <button
+            onClick={() => void syncPosition()}
+            disabled={isSyncingPosition}
+            className="rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-40"
+          >
+            {isSyncingPosition ? "Syncing…" : "Sync"}
+          </button>
+        </div>
+          </div>
+
         <div className="min-w-0 font-mono text-xs font-bold">
           <div className="mb-1 flex justify-between gap-3 text-neutral-600">
             <span>{formatPrice(position.priceLower)}</span>
@@ -729,14 +748,6 @@ function ActivePositionRow({
           </div>
         </div>
 
-        <div className="flex items-center lg:justify-end">
-          <button
-            onClick={() => void syncPosition()}
-            disabled={isSyncingPosition}
-            className="rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.18em] text-neutral-600 uppercase transition hover:border-neutral-950 hover:text-neutral-950 disabled:opacity-40"
-          >
-            {isSyncingPosition ? "Syncing…" : "Sync"}
-          </button>
         </div>
       </article>
 
@@ -1342,7 +1353,7 @@ export function formatUsd(value: number): string {
   }).format(value);
 }
 
-function tokenUsdPrice(symbol: string, price: number | null | undefined): number | null {
+export function tokenUsdPrice(symbol: string, price: number | null | undefined): number | null {
   if (isFiniteNumber(price)) {
     return price;
   }
@@ -1354,7 +1365,7 @@ function isUsdStablecoin(symbol: string): boolean {
   return /^(?:USDC|USDT|USDE|DAI)$/i.test(symbol);
 }
 
-function feeValueUsd(pnl: PnLView): number | null {
+export function feeValueUsd(pnl: PnLView): number | null {
   if (isFiniteNumber(pnl.feesValueUsd)) {
     return pnl.feesValueUsd;
   }
@@ -1616,6 +1627,33 @@ function calculateThirtyDayPortfolioCarryRunRate(positions: DashboardPosition[])
   }
 
   return (totalFeesUsd / elapsedMs) * 1000 * 60 * 60 * 24 * 30;
+}
+
+export function formatEarningsApr(position: DashboardPosition, nowMs: number = Date.now()): string | null {
+  const pnl = position.pnl;
+  if (!pnl) return null;
+
+  const feesUsd = feeValueUsd(pnl);
+  const openedAt = pnl.openedAt ? new Date(pnl.openedAt).getTime() : NaN;
+  const elapsedDays = (nowMs - openedAt) / (1000 * 60 * 60 * 24);
+  const currentUsd = currentBalanceUsd(position);
+  if (!isFiniteNumber(feesUsd) || !Number.isFinite(elapsedDays) || elapsedDays <= 0 || !isFiniteNumber(currentUsd) || currentUsd <= 0) {
+    return null;
+  }
+
+  return formatPercent((feesUsd * (365 / elapsedDays)) / currentUsd);
+}
+
+export function formatEarningsUsdRate(position: DashboardPosition, nowMs: number = Date.now()): string | null {
+  const pnl = position.pnl;
+  if (!pnl || !pnl.openedAt) return null;
+
+  const feesUsd = feeValueUsd(pnl);
+  const openedAt = new Date(pnl.openedAt).getTime();
+  const elapsedDays = (nowMs - openedAt) / (1000 * 60 * 60 * 24);
+  if (!isFiniteNumber(feesUsd) || !Number.isFinite(elapsedDays) || elapsedDays <= 0) return null;
+
+  return `${formatUsd(feesUsd / elapsedDays)}/day`;
 }
 
 function venueLabel(position: DashboardPosition): { name: string; dotClass: string } {

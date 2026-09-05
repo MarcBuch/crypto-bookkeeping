@@ -1,5 +1,6 @@
-import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
+import { AppShell } from "./AppShell";
 import { App } from "./App";
 import { TaxTransactions } from "./TaxTransactions";
 
@@ -22,7 +23,7 @@ export function NotFound() {
 }
 
 const rootRoute = createRootRoute({
-  component: Outlet,
+  component: AppShell,
   notFoundComponent: NotFound,
 });
 

@@ -32,16 +32,11 @@ export function App() {
   const unassignedHedges = unassignedHedgesData?.hedges ?? [];
 
   return (
-    <main className="min-h-screen bg-white text-neutral-950">
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="rounded-3xl border border-neutral-200 bg-white px-5 py-3 shadow-sm sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
-            <span>HyperEVM ProjectX</span>
-            <span className="flex flex-wrap items-center gap-3 text-neutral-700">
-              <a className="transition hover:text-neutral-950" href="/tax">
-                Tax Ledger
-              </a>
-              <span className="h-3 w-px bg-neutral-300" />
+    <div className="min-w-0 flex flex-col gap-6 text-neutral-950">
+      <header className="rounded-3xl border border-neutral-200 bg-white px-5 py-3 shadow-sm sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[0.68rem] font-semibold tracking-[0.22em] text-neutral-500 uppercase">
+          <span>HyperEVM ProjectX</span>
+          <span className="flex flex-wrap items-center gap-3 text-neutral-700">
               <button
                 onClick={() => syncPositions()}
                 disabled={isSyncing}
@@ -90,8 +85,7 @@ export function App() {
             unassignedHedgesError={unassignedHedgesError}
           />
         ) : null}
-      </section>
-    </main>
+    </div>
   );
 }
 

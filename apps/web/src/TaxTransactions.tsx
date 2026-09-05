@@ -536,8 +536,7 @@ export function TaxTransactions() {
   const updateMutation = useUpdateTaxTransaction();
 
   return (
-    <main className="min-h-screen bg-white text-neutral-950">
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
+    <div className="min-w-0 flex flex-col gap-6 text-neutral-950">
         {isLoading ? <TaxLoadingState /> : null}
         {error ? <TaxErrorState error={error} /> : null}
         {!isLoading && !error && data ? (
@@ -559,8 +558,7 @@ export function TaxTransactions() {
             isUpdating={updateMutation.isPending}
           />
         ) : null}
-      </section>
-    </main>
+    </div>
   );
 }
 

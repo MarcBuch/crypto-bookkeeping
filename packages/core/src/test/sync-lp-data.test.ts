@@ -169,6 +169,9 @@ const cachedPnLViewWithUsd = {
   feesValueUsd: 18.01,
   usdPriceSource: "coingecko" as const,
   pendingFeesValueUsd: 9.87,
+  pnlUsd: 42,
+  pnlUsdCompleteness: "complete" as const,
+  pnlUsdSource: "mixed" as const,
 };
 
 const freshPnLViewWithUsd = {
@@ -181,6 +184,9 @@ const freshPnLViewWithUsd = {
   feesValueUsd: 29.0,
   usdPriceSource: "coingecko" as const,
   pendingFeesValueUsd: 10.5,
+  pnlUsd: 50,
+  pnlUsdCompleteness: "complete" as const,
+  pnlUsdSource: "mixed" as const,
 };
 
 function expectErrorMessage(error: unknown, matcher: string | RegExp): void {

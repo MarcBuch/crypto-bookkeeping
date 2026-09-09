@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { getHistoricalPrice, getUsdPrices } from "../services/pricing.js";
+import { getHistoricalPrice, getHistoricalPriceResult, getUsdPrices } from "../services/pricing.js";
 import { getRequestUrl, jsonResponse, setFetchMock } from "./helpers/http.js";
 
 const originalFetch = globalThis.fetch;
@@ -35,6 +35,34 @@ function setNow(now: number): void {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   Date.now = originalDateNow;
+});
+
+describe("historical pricing fallbacks", () => {
+  it("uses the nearest Hyperliquid candle after CoinGecko failure", async () => {
+    const target = Date.parse("2026-08-01T12:20:00.000Z");
+    setFetchMock(async (input, init) => {
+      if (getRequestUrl(input).includes("coingecko.com")) return jsonResponse({}, { status: 403 });
+      expect(JSON.parse(String(init?.body))).toMatchObject({ type: "candleSnapshot", req: { coin: "HYPE", interval: "1h" } });
+      return jsonResponse([
+        { t: target - 80 * 60_000, c: "39" },
+        { t: target + 10 * 60_000, c: "41.25" },
+        { t: target + 50 * 60_000, c: "44" },
+      ]);
+    });
+    expect(await getHistoricalPriceResult(
+      { pricing: { coingeckoIds: { WHYPE: "hyperliquid" } } },
+      "WHYPE", new Date(target).toISOString(), "usd",
+    )).toEqual({ price: 41.25, source: "hyperliquid-candle", observedAt: new Date(target + 10 * 60_000).toISOString() });
+  });
+
+  it("uses canonical USDC peg with explicit provenance and no request", async () => {
+    const calls = mockFetchJson({});
+    const timestamp = "2026-08-01T12:20:00.000Z";
+    expect(await getHistoricalPriceResult(
+      { pricing: { coingeckoIds: { USDC: "usd-coin" } } }, "USDC", timestamp, "usd",
+    )).toEqual({ price: 1, source: "stablecoin-peg", observedAt: timestamp });
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe("getUsdPrices", () => {
@@ -632,7 +660,7 @@ describe("getHistoricalPrice — USD — unknown assets and invalid inputs", () 
     const config = { pricing: { coingeckoIds: { HYPE: "hyperliquid" } } };
     const result = await getHistoricalPrice(config, "HYPE", "2024-01-15T00:00:00.000Z", "usd");
     expect(result).toBeNull();
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
   });
 });
 

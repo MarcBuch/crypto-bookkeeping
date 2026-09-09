@@ -20,25 +20,76 @@ function readCachedNumber(view: CachedPnLView | undefined, key: keyof PnLView): 
   return typeof value === "number" ? value : null;
 }
 
-function mergeCachedUsdFields(fresh: PnLView, cached?: CachedPnLView): PnLView {
-  if (!cached || fresh.token0UsdPrice !== null || fresh.token1UsdPrice !== null) {
-    return fresh;
+const usdValuationKeys = [
+  "token0UsdPrice",
+  "token1UsdPrice",
+  "entryToken0UsdPrice",
+  "entryToken1UsdPrice",
+  "entryValueUsd",
+  "feesCollected0Usd",
+  "feesCollected1Usd",
+  "feesValueUsd",
+  "pendingFeesValueUsd",
+  "pnlUsd",
+  "usdPriceSource",
+  "pnlUsdCompleteness",
+  "pnlUsdSource",
+] as const;
+
+function cachedUsdSnapshot(cached: CachedPnLView): Partial<PnLView> {
+  return Object.fromEntries(
+    usdValuationKeys.filter((key) => key in cached).map((key) => [key, cached[key]]),
+  ) as Partial<PnLView>;
+}
+
+export function mergeCachedUsdFields(fresh: PnLView, cached?: CachedPnLView): PnLView {
+  if (!cached) return fresh;
+  if (typeof fresh.pnlUsd === "number") return fresh;
+  const cachedPnlUsd = readCachedNumber(cached, "pnlUsd");
+  const hasLegacyCachedSnapshot =
+    readCachedNumber(cached, "token0UsdPrice") !== null ||
+    readCachedNumber(cached, "token1UsdPrice") !== null;
+  if (cachedPnlUsd === null && !hasLegacyCachedSnapshot) return fresh;
+
+  const preservedUsd = Object.fromEntries(
+    Object.entries(cachedUsdSnapshot(cached)).filter(([, value]) => value != null),
+  ) as Partial<PnLView>;
+  const merged: PnLView = {
+    ...fresh,
+    ...preservedUsd,
+    pnlUsdCompleteness:
+      cached.pnlUsdCompleteness === "complete" || cached.pnlUsdCompleteness === "partial"
+        ? cached.pnlUsdCompleteness
+        : cachedPnlUsd !== null
+          ? "partial"
+          : "unpriced",
+    pnlUsdSource:
+      cached.pnlUsdSource === "event_time" || cached.pnlUsdSource === "live" || cached.pnlUsdSource === "mixed"
+        ? cached.pnlUsdSource
+        : null,
+  };
+
+  if (
+    merged.entryValueUsd == null &&
+    merged.entryToken0UsdPrice == null &&
+    merged.entryToken1UsdPrice == null &&
+    merged.token0UsdPrice == null &&
+    merged.token1UsdPrice == null &&
+    merged.feesValueUsd == null &&
+    cachedPnlUsd != null
+  ) {
+    merged.pnlUsd = cachedPnlUsd;
   }
 
-  return {
-    ...fresh,
-    token0UsdPrice: readCachedNumber(cached, "token0UsdPrice"),
-    token1UsdPrice: readCachedNumber(cached, "token1UsdPrice"),
-    feesCollected0Usd: readCachedNumber(cached, "feesCollected0Usd"),
-    feesCollected1Usd: readCachedNumber(cached, "feesCollected1Usd"),
-    feesValueUsd: readCachedNumber(cached, "feesValueUsd"),
-    usdPriceSource: cached.usdPriceSource === "coingecko" ? "coingecko" : null,
-    pendingFeesValueUsd: readCachedNumber(cached, "pendingFeesValueUsd"),
-  };
+  return merged;
 }
 
 function cachedPnlViewsByTokenId(): Map<string, CachedPnLView> {
   return new Map(listCachedPnLViews().map((row) => [String(row.tokenId), row]));
+}
+
+function cachedPnlView(tokenId: string): CachedPnLView | undefined {
+  return listCachedPnLViews().find((row) => String(row.tokenId) === tokenId);
 }
 
 export interface PositionView {
@@ -222,8 +273,7 @@ export async function syncSinglePosition(
   const syncedAt = new Date().toISOString();
   upsertPositionViewCache(tokenId, positionView[0], syncedAt);
   if (pnlView[0]) {
-    const cachedPnlView = cachedPnlViewsByTokenId().get(tokenId);
-    upsertPnLViewCache(tokenId, mergeCachedUsdFields(pnlView[0], cachedPnlView), syncedAt);
+    upsertPnLViewCache(tokenId, mergeCachedUsdFields(pnlView[0], cachedPnlView(tokenId)), syncedAt);
   }
 
   // 6. Snapshot hedge if configured (swallow errors — LP sync must complete)

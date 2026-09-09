@@ -189,12 +189,18 @@ export function Dashboard({
   const carryRunRateUsd = calculateThirtyDayPortfolioCarryRunRate(positions);
   const totals = positions.reduce(
     (acc, position) => {
-      acc.pnl +=
-        buildBlotterPnl(
-          position.pnl,
-          undefined,
-          assignedHedgesByTokenId.get(position.tokenId) ?? [],
-        ).displayedPnlInToken1 ?? 0;
+      const blotter = buildBlotterPnl(
+        position.pnl,
+        undefined,
+        assignedHedgesByTokenId.get(position.tokenId) ?? [],
+      );
+      if (blotter.displayedPnlUsd != null) {
+        acc.pnl += blotter.displayedPnlUsd;
+        acc.pricedCount += 1;
+      } else {
+        acc.mtmPartial = true;
+      }
+      if (position.pnl?.pnlUsdCompleteness !== "complete" || blotter.hedgeFundingUnknown || blotter.hedgePnlUnavailable) acc.mtmPartial = true;
       acc.fees += position.pnl?.feesValueInToken1 ?? 0;
       const feesUsd = position.pnl ? feeValueUsd(position.pnl) : null;
       if (feesUsd !== null) {
@@ -203,7 +209,7 @@ export function Dashboard({
       }
       return acc;
     },
-    { pnl: 0, fees: 0, feesUsd: 0, feesUsdCount: 0 },
+    { pnl: 0, fees: 0, feesUsd: 0, feesUsdCount: 0, pricedCount: 0, mtmPartial: false },
   );
 
   const token1Symbol = positions.find((p) => p.pnl)?.pnl?.token1Symbol ?? "token1";
@@ -222,7 +228,11 @@ export function Dashboard({
           />
           <MetricCard
             label="Total MTM P&L"
-            value={`${formatNumber(totals.pnl)} ${token1Symbol}`}
+            value={
+              totals.pricedCount === 0
+                ? "USD unavailable"
+                : `${formatUsd(totals.pnl)}${totals.mtmPartial ? " · partial" : ""}`
+            }
             detail="Mark-to-market"
             valueClassName={pnlToneClass(totals.pnl)}
           />
@@ -1467,8 +1477,7 @@ export function buildBlotterPnl(
   const lpPnlInToken1 = pnl?.absolutePnlInToken1 ?? null;
   const displayedPnlInToken1 =
     lpPnlInToken1 != null ? lpPnlInToken1 + (hedgePnlInToken1 ?? 0) : null;
-  const displayedPnlUsd =
-    displayedPnlInToken1 != null && token1Usd != null ? displayedPnlInToken1 * token1Usd : null;
+  const displayedPnlUsd = pnl?.pnlUsd != null ? pnl.pnlUsd + (hedgePnlUsd ?? 0) : null;
 
   return {
     lpPnlInToken1,

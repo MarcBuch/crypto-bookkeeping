@@ -58,6 +58,10 @@ const activePosition: DashboardPosition = {
     feesValueInToken1: 12.345,
     pendingFeesValueInToken1: 0,
     feesValueUsd: 3.23,
+    entryValueUsd: 100,
+    pnlUsd: 25.5,
+    pnlUsdCompleteness: "complete",
+    pnlUsdSource: "mixed",
     token0UsdPrice: 12.3,
     token1UsdPrice: 1,
     usdPriceSource: "coingecko",
@@ -83,6 +87,7 @@ const closedPosition: DashboardPosition = {
     ...activePosition.pnl!,
     tokenId: "456",
     absolutePnlInToken1: -10,
+    pnlUsd: -10,
     absolutePnlPercent: -0.1,
     netVsHodlPercent: -0.04,
   },
@@ -382,7 +387,7 @@ describe("dashboard rendering", () => {
     );
 
     expect(html).toContain("Total MTM P&amp;L");
-    expect(html).toContain("37 USDC");
+    expect(html).toContain("$37.00");
   });
 
   it("uses closed and active assigned hedge totals in dashboard MTM", () => {
@@ -465,7 +470,7 @@ describe("dashboard rendering", () => {
     );
 
     expect(html).toContain("Total MTM P&amp;L");
-    expect(html).toContain("1,046.5 USDC");
+    expect(html).toContain("$1,046.50");
     expect(html).toContain("1 active assigned");
     expect(html).toContain("2 closed assigned");
     expect(html).toContain("funding partial");

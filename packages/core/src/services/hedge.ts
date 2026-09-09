@@ -958,11 +958,9 @@ export function buildNetHedgePnL(pnl: PnLView, hedge: HedgeView): NetHedgePnL {
         : null
       : hedge.unrealizedPnl + hedge.fundingEarned;
 
-  const lpPnlUsd: number | null =
-    pnl.token1UsdPrice != null ? pnl.absolutePnlInToken1 * pnl.token1UsdPrice : null;
+  const lpPnlUsd: number | null = pnl.pnlUsd;
 
-  const lpEntryUsd: number | null =
-    pnl.token1UsdPrice != null ? pnl.entryValueInToken1 * pnl.token1UsdPrice : null;
+  const lpEntryUsd: number | null = pnl.entryValueUsd;
 
   const combinedPnlUsd = lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
 

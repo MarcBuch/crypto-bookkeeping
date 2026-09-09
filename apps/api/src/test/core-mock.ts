@@ -14,6 +14,7 @@ export function createCoreMock(): Record<string, unknown> {
     syncLpData: async () => ({ synced: 0 }),
     syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
     getPnLView: async () => [],
+    mergeCachedUsdFields: (fresh: unknown) => fresh,
     getILView: async () => [],
     getHistoryView: async () => [],
     getHedgeView: async () => null,

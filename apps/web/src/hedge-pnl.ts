@@ -32,10 +32,9 @@ function buildCombinedNetHedgePnL(
   pnl: PnLView | undefined,
   hedgePnlUsd: number | null,
 ): NetHedgePnL {
-  const token1Usd = pnl ? tokenUsdPrice(pnl.token1Symbol, pnl.token1UsdPrice) : null;
-  const lpPnlUsd: number | null = token1Usd != null ? pnl!.absolutePnlInToken1 * token1Usd : null;
+  const lpPnlUsd: number | null = pnl?.pnlUsd ?? null;
 
-  const lpEntryUsd: number | null = token1Usd != null ? pnl!.entryValueInToken1 * token1Usd : null;
+  const lpEntryUsd: number | null = pnl?.entryValueUsd ?? null;
 
   const combinedPnlUsd = lpPnlUsd != null && hedgePnlUsd != null ? lpPnlUsd + hedgePnlUsd : null;
 
@@ -45,14 +44,6 @@ function buildCombinedNetHedgePnL(
       : null;
 
   return { lpPnlUsd, hedgePnlUsd, lpEntryUsd, combinedPnlUsd, combinedRoiPct };
-}
-
-function tokenUsdPrice(symbol: string, price: number | null | undefined): number | null {
-  if (typeof price === "number" && Number.isFinite(price)) {
-    return price;
-  }
-
-  return /^(?:USDC|USDT|USDE|DAI)$/i.test(symbol) ? 1 : null;
 }
 
 export function buildNetHedgePnL(pnl: PnLView | undefined, hedge: HedgeView): NetHedgePnL {

@@ -208,7 +208,7 @@ describe("active positions → live USD pricing via getUsdPrices", () => {
 
     expect(result.length).toBe(1);
     expect(liveCallCount).toBeGreaterThan(0);
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // entry cash flow, once per token
     expect(result[0].token0UsdPrice).toBe(50.0);
     expect(result[0].token1UsdPrice).toBe(1.0);
   });
@@ -256,7 +256,7 @@ describe("closed positions with close_block → historical USD pricing", () => {
 
     expect(result.length).toBe(1);
     expect(liveCallCount).toBe(0);
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // entry cash flow still needs event-time prices
     expect(result[0].token0UsdPrice).toBe(42.5);
     expect(result[0].token1UsdPrice).toBe(1.25);
   });
@@ -310,13 +310,13 @@ describe("closed positions with close_block → historical USD pricing", () => {
 
     // First call: slow path, fetches and persists
     await getPnLView(baseConfig, undefined, [fakeClosedPos]);
-    expect(historicalCallCount).toBe(2); // once per token
+    expect(historicalCallCount).toBe(4); // entry and close, once per token
 
     // Second call: fast path, no historical network call
     historicalCallCount = 0;
     const result = await getPnLView(baseConfig, undefined, [fakeClosedPos]);
 
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // close is cached; entry is fetched
     expect(result[0].token0UsdPrice).toBe(100.0);
     expect(result[0].token1UsdPrice).toBe(2.5);
   });
@@ -381,7 +381,7 @@ describe("closed positions without close_block → live pricing fallback", () =>
     await getPnLView(baseConfig, undefined, [fakeClosedPos]);
 
     expect(liveCallCount).toBeGreaterThan(0);
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // entry cash flow is historical
   });
 });
 
@@ -412,7 +412,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
 
     // Should NOT use the stored 1.5; should fetch both
     expect(result.length).toBe(1);
-    expect(historicalCallCount).toBe(2); // both tokens fetched
+    expect(historicalCallCount).toBe(4); // both tokens at entry and close
     expect(result[0].token0UsdPrice).toBe(100.0);
     expect(result[0].token1UsdPrice).toBe(2.5);
   });
@@ -446,7 +446,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
     // Verify closed branch taken (no live call), fast path used (stored prices used)
     expect(result.length).toBe(1);
     expect(liveCallCount).toBe(0);
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // entry cash flow is historical
     expect(result[0].token0UsdPrice).toBe(42.0);
     expect(result[0].token1UsdPrice).toBe(1.0);
   });
@@ -478,7 +478,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
     // Verify that active/live branch is taken (null close_block)
     expect(result.length).toBe(1);
     expect(liveCallCount).toBeGreaterThan(0);
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // entry cash flow is historical
     expect(result[0].token0UsdPrice).toBe(50.0);
     expect(result[0].token1UsdPrice).toBe(1.0);
   });
@@ -511,7 +511,7 @@ describe("getPnLView USD routing — boundary conditions", () => {
     // Fast path: use stored 0.0 directly, no network calls
     expect(result.length).toBe(1);
     expect(liveCallCount).toBe(0);
-    expect(historicalCallCount).toBe(0);
+    expect(historicalCallCount).toBe(2); // entry cash flow is historical
     expect(result[0].token0UsdPrice).toBe(0.0);
     expect(result[0].token1UsdPrice).toBe(0.0);
   });
@@ -540,7 +540,7 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
     expect(result[0].token1UsdPrice).toBe(3.14);
   });
 
-  it("fills missing historical close price from live prices", async () => {
+  it("does not fill a missing historical close price from live prices", async () => {
     upsertPosition(storedWithClose);
 
     let liveCallCount = 0;
@@ -561,9 +561,11 @@ describe("getPnLView closed USD — partial failures and missing metadata", () =
     const result = await getPnLView(baseConfig, undefined, [fakeClosedPos]);
 
     expect(result.length).toBe(1);
-    expect(liveCallCount).toBe(1);
+    expect(liveCallCount).toBe(0);
     expect(result[0].token0UsdPrice).toBe(88.0);
-    expect(result[0].token1UsdPrice).toBe(1.01);
+    expect(result[0].token1UsdPrice).toBeNull();
+    expect(result[0].pnlUsd).toBeNull();
+    expect(result[0].pnlUsdCompleteness).toBe("unpriced");
   });
 
   it("uses freshly discovered close block for USD prices in the same sync", async () => {

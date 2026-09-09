@@ -1,8 +1,10 @@
 import {
   createClient,
   getPosition,
+  getPnLView,
   getPositionsCacheSyncedAt,
   listCachedPnLViews,
+  mergeCachedUsdFields,
   updateCachedPnLView,
 } from "@lp-tracker/core";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
@@ -13,6 +15,39 @@ type CachedPnLView = Record<string, unknown> & {
   tokenId?: unknown;
   openedAt?: unknown;
 };
+
+const requiredUsdAccountingFields = [
+  "entryToken0UsdPrice",
+  "entryToken1UsdPrice",
+  "entryValueUsd",
+  "pendingFeesValueUsd",
+  "pnlUsd",
+  "pnlUsdCompleteness",
+  "pnlUsdSource",
+] as const;
+
+function needsUsdAccountingHydration(view: CachedPnLView): boolean {
+  return requiredUsdAccountingFields.some((field) => !(field in view) || view[field] == null);
+}
+
+async function hydrateUsdAccountingIfMissing(
+  fastify: FastifyInstance,
+  view: CachedPnLView,
+): Promise<CachedPnLView> {
+  if (!needsUsdAccountingHydration(view) || typeof view.tokenId !== "string") return view;
+
+  try {
+    const recomputed = await getPnLView(fastify.lpConfig, view.tokenId);
+    const fresh = recomputed.find((row) => row.tokenId === view.tokenId);
+    if (!fresh) return view;
+    const merged = mergeCachedUsdFields(fresh, view) as unknown as CachedPnLView;
+    updateCachedPnLView(view.tokenId, merged);
+    return merged;
+  } catch {
+    // A pricing/RPC outage must not erase a previously valid cached snapshot.
+    return view;
+  }
+}
 
 async function backfillOpenedAtIfMissing(
   fastify: FastifyInstance,
@@ -44,7 +79,12 @@ async function backfillOpenedAtIfMissing(
 
 async function readCachedPnLViews(fastify: FastifyInstance): Promise<CachedPnLView[]> {
   const cached = listCachedPnLViews() as CachedPnLView[];
-  return await Promise.all(cached.map((view) => backfillOpenedAtIfMissing(fastify, view)));
+  return await Promise.all(
+    cached.map(async (view) => {
+      const hydrated = await hydrateUsdAccountingIfMissing(fastify, view);
+      return backfillOpenedAtIfMissing(fastify, hydrated);
+    }),
+  );
 }
 
 export async function pnlRoutes(fastify: FastifyInstance): Promise<void> {

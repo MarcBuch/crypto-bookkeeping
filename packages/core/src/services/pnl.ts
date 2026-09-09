@@ -30,8 +30,14 @@ export interface PnLView {
   token1UsdPrice: number | null;
   usdPriceSource: "coingecko" | null;
   feesValueInToken1: number;
-  pendingFeesValueInToken1: number;
+  entryToken0UsdPrice: number | null;
+  entryToken1UsdPrice: number | null;
+  entryValueUsd: number | null;
   pendingFeesValueUsd: number | null;
+  pnlUsd: number | null;
+  pnlUsdCompleteness: "complete" | "partial" | "unpriced";
+  pnlUsdSource: "event_time" | "live" | "mixed" | null;
+  pendingFeesValueInToken1: number;
   entryValueInToken1: number;
   exitValueInToken1: number;
   holdValueInToken1: number;
@@ -78,6 +84,33 @@ export function calculateUsdFeeIncome(params: {
     params.token0UsdPrice !== null || params.token1UsdPrice !== null ? "coingecko" : null;
 
   return { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource };
+}
+
+function resolvePnlUsdCompleteness(params: {
+  status: "active" | "closed";
+  token0UsdPrice: number | null;
+  token1UsdPrice: number | null;
+  hasHistoricalCloseUsd: boolean;
+  hasHistoricalEntryUsd: boolean;
+}): "complete" | "partial" | "unpriced" {
+  if (params.status === "closed") {
+    // Collected fees are lifecycle totals without per-collection timestamps,
+    // so closed results remain partial even when entry/close prices are known.
+    if (params.hasHistoricalCloseUsd || params.hasHistoricalEntryUsd) {
+      return "partial";
+    }
+    return "unpriced";
+  }
+
+  return params.token0UsdPrice !== null && params.token1UsdPrice !== null ? "complete" : "partial";
+}
+
+function resolvePnlUsdSource(status: "active" | "closed"): "event_time" | "live" | "mixed" {
+  return status === "closed" ? "event_time" : "mixed";
+}
+
+function sumIfAllPriced(legs: Array<number | null>): number | null {
+  return legs.every((leg) => leg !== null) ? legs.reduce((total, leg) => total + (leg ?? 0), 0) : null;
 }
 
 export async function getPnLView(
@@ -150,6 +183,12 @@ export async function getPnLView(
     const token1PriceKey = pos.token1.toLowerCase();
     let token0UsdPrice: number | null = null;
     let token1UsdPrice: number | null = null;
+    let entryToken0UsdPrice: number | null = null;
+    let entryToken1UsdPrice: number | null = null;
+    let entryValueUsd: number | null = null;
+
+    let hasHistoricalCloseUsd = false;
+    let hasHistoricalEntryUsd = false;
 
     if (closeBlock !== null) {
       // Closed position: use historical USD price at close time
@@ -157,6 +196,7 @@ export async function getPnLView(
         // Fast path: prices already persisted in DB
         token0UsdPrice = storedPos.close_usd_price0;
         token1UsdPrice = storedPos.close_usd_price1;
+        hasHistoricalCloseUsd = true;
       } else {
         // Slow path: fetch historical price at close block timestamp
         try {
@@ -166,6 +206,7 @@ export async function getPnLView(
             getHistoricalPrice(config, t0sym, isoTimestamp, "usd"),
             getHistoricalPrice(config, t1sym, isoTimestamp, "usd"),
           ]);
+          hasHistoricalCloseUsd = token0UsdPrice !== null && token1UsdPrice !== null;
           // Persist so future calls take the fast path (COALESCE in DB prevents overwriting)
           sqlitePositionStore.persistCloseUsdPrices({
             pos,
@@ -189,19 +230,18 @@ export async function getPnLView(
         } catch {
           // Graceful degradation: leave prices as null
         }
-        // CoinGecko historical data can lag 1-2 days for recent closes. Fill any
-        // missing side from live prices so partial historical gaps don't hide USD fees.
-        if (token0UsdPrice === null || token1UsdPrice === null) {
-          try {
-            const usdPrices = await getUsdPrices(config, [
-              { symbol: t0sym, address: pos.token0 },
-              { symbol: t1sym, address: pos.token1 },
-            ]);
-            token0UsdPrice ??= usdPrices[token0PriceKey] ?? null;
-            token1UsdPrice ??= usdPrices[token1PriceKey] ?? null;
-          } catch {
-            // Live fallback is also optional.
-          }
+      }
+      if (facts.entryBlock != null && openedAt !== null) {
+        try {
+          [entryToken0UsdPrice, entryToken1UsdPrice] = await Promise.all([
+            getHistoricalPrice(config, t0sym, openedAt, "usd"),
+            getHistoricalPrice(config, t1sym, openedAt, "usd"),
+          ]);
+          hasHistoricalEntryUsd =
+            entryToken0UsdPrice !== null && entryToken1UsdPrice !== null;
+        } catch {
+          entryToken0UsdPrice = null;
+          entryToken1UsdPrice = null;
         }
       }
     } else {
@@ -216,7 +256,24 @@ export async function getPnLView(
       } catch {
         // Live USD pricing is optional; token1-denominated P&L must still succeed.
       }
+      if (facts.entryBlock != null && openedAt !== null) {
+        try {
+          [entryToken0UsdPrice, entryToken1UsdPrice] = await Promise.all([
+            getHistoricalPrice(config, t0sym, openedAt, "usd"),
+            getHistoricalPrice(config, t1sym, openedAt, "usd"),
+          ]);
+          hasHistoricalEntryUsd =
+            entryToken0UsdPrice !== null && entryToken1UsdPrice !== null;
+        } catch {
+          // Do not silently substitute current prices for the entry cash flow.
+        }
+      }
     }
+
+    entryValueUsd = sumIfAllPriced([
+      facts.entryAmount0 != null && entryToken0UsdPrice != null ? economics.entryAmount0 * entryToken0UsdPrice : null,
+      facts.entryAmount1 != null && entryToken1UsdPrice != null ? economics.entryAmount1 * entryToken1UsdPrice : null,
+    ]);
 
     const { feesCollected0Usd, feesCollected1Usd, feesValueUsd, usdPriceSource } =
       calculateUsdFeeIncome({
@@ -225,10 +282,36 @@ export async function getPnLView(
         token0UsdPrice,
         token1UsdPrice,
       });
-    const pendingFeesValueUsd =
+  const pendingFeesValueUsd =
       token0UsdPrice !== null && token1UsdPrice !== null
         ? economics.pendingFees0 * token0UsdPrice + economics.pendingFees1 * token1UsdPrice
         : null;
+    const realizedFeesUsd = sumIfAllPriced([
+      feesCollected0Usd,
+      feesCollected1Usd,
+    ]);
+    const exitPlusFlowsUsd =
+      closeBlock !== null
+        ? sumIfAllPriced([
+            token0UsdPrice !== null ? economics.exitAmount0 * token0UsdPrice : null,
+            token1UsdPrice !== null ? economics.exitAmount1 * token1UsdPrice : null,
+            realizedFeesUsd,
+          ])
+        : sumIfAllPriced([
+            token0UsdPrice !== null ? economics.exitAmount0 * token0UsdPrice : null,
+            token1UsdPrice !== null ? economics.exitAmount1 * token1UsdPrice : null,
+            realizedFeesUsd,
+            pendingFeesValueUsd,
+          ]);
+    const pnlUsd = exitPlusFlowsUsd != null && entryValueUsd != null ? exitPlusFlowsUsd - entryValueUsd : null;
+    const pnlUsdCompleteness = resolvePnlUsdCompleteness({
+      status: facts.status,
+      token0UsdPrice,
+      token1UsdPrice,
+      hasHistoricalCloseUsd,
+      hasHistoricalEntryUsd,
+    });
+    const pnlUsdSource = resolvePnlUsdSource(facts.status);
 
     result.push({
       tokenId: pos.tokenId.toString(),
@@ -249,12 +332,18 @@ export async function getPnLView(
       feesCollected0Usd,
       feesCollected1Usd,
       feesValueUsd,
+      entryToken0UsdPrice,
+      entryToken1UsdPrice,
+      entryValueUsd,
       token0UsdPrice,
       token1UsdPrice,
       usdPriceSource,
       feesValueInToken1: economics.totalFeesValueInToken1,
-      pendingFeesValueInToken1: economics.pendingFeesValueInToken1,
       pendingFeesValueUsd,
+      pnlUsd,
+      pnlUsdCompleteness,
+      pnlUsdSource,
+      pendingFeesValueInToken1: economics.pendingFeesValueInToken1,
       entryValueInToken1: economics.entryValueInToken1,
       exitValueInToken1: economics.exitValueInToken1,
       holdValueInToken1: economics.holdValueInToken1,

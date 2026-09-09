@@ -122,10 +122,12 @@ let mockListCachedPnLViews: (...args: unknown[]) => unknown = () => [];
 let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
 let mockGetILView: (...args: unknown[]) => unknown = async () => [];
 let mockGetPosition: (...args: unknown[]) => unknown = () => null;
+let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
+let mockMergeCachedUsdFields: (...args: unknown[]) => unknown = (fresh) => fresh;
 let mockCreateClient: (...args: unknown[]) => unknown = () => ({
   getBlock: async () => ({ timestamp: 1700000000n }),
 });
-let mockUpdateCachedPnLView: (tokenId: string, update: { openedAt: string }) => void = () =>
+let mockUpdateCachedPnLView: (tokenId: string, update: Record<string, unknown>) => void = () =>
   undefined;
 
 // --- Mock @lp-tracker/core BEFORE importing server ---
@@ -138,11 +140,12 @@ await installCoreMock({
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
   getPosition: (...args: unknown[]) => mockGetPosition(...args),
   createClient: (...args: unknown[]) => mockCreateClient(...args),
-  updateCachedPnLView: (tokenId: string, update: { openedAt: string }) =>
+  updateCachedPnLView: (tokenId: string, update: Record<string, unknown>) =>
     mockUpdateCachedPnLView(tokenId, update),
   syncLpData: async () => ({ synced: 0 }),
   syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
-  getPnLView: async () => [],
+  getPnLView: (...args: unknown[]) => mockGetPnLView(...args),
+  mergeCachedUsdFields: (...args: unknown[]) => mockMergeCachedUsdFields(...args),
   getILView: (...args: unknown[]) => mockGetILView(...args),
   getHistoryView: async () => [],
   getHedgeView: async () => ({
@@ -186,6 +189,8 @@ beforeEach(() => {
   mockGetPositionsCacheSyncedAt = () => null;
   mockGetILView = async () => [];
   mockGetPosition = () => null;
+  mockGetPnLView = async () => [];
+  mockMergeCachedUsdFields = (fresh) => fresh;
   mockCreateClient = () => ({
     getBlock: async () => ({ timestamp: 1700000000n }),
   });
@@ -252,8 +257,8 @@ describe("GET /pnl", () => {
     mockCreateClient = () => ({
       getBlock: async () => ({ timestamp: 1760000000n }),
     });
-    mockUpdateCachedPnLView = (tokenId: string, update: { openedAt: string }) => {
-      updates.push({ tokenId, openedAt: update.openedAt });
+    mockUpdateCachedPnLView = (tokenId: string, update: Record<string, unknown>) => {
+      updates.push({ tokenId, openedAt: String(update.openedAt) });
     };
 
     const res = await server.inject({ method: "GET", url: "/pnl" });
@@ -262,6 +267,48 @@ describe("GET /pnl", () => {
       positions: [{ tokenId: "123", openedAt: "2025-10-09T08:53:20.000Z" }],
     });
     expect(updates).toEqual([{ tokenId: "123", openedAt: "2025-10-09T08:53:20.000Z" }]);
+  });
+
+  it("hydrates and persists missing USD accounting fields for a legacy row", async () => {
+    const legacy = { ...fakePnLView } as Record<string, unknown>;
+    delete legacy.entryToken0UsdPrice;
+    const hydrated = {
+      ...fakePnLView,
+      entryToken0UsdPrice: 1700,
+      entryToken1UsdPrice: 1,
+      entryValueUsd: 3500,
+      pendingFeesValueUsd: 5,
+      pnlUsd: 235,
+      pnlUsdCompleteness: "complete",
+      pnlUsdSource: "mixed",
+    };
+    const updates: Array<{ tokenId: string; update: Record<string, unknown> }> = [];
+    mockListCachedPnLViews = () => [legacy];
+    mockGetPnLView = async () => [hydrated];
+    mockMergeCachedUsdFields = (fresh) => fresh;
+    mockUpdateCachedPnLView = (tokenId, update) => updates.push({ tokenId, update });
+
+    const res = await server.inject({ method: "GET", url: "/pnl" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions[0]).toMatchObject({ tokenId: "123", pnlUsd: 235 });
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ tokenId: "123", update: { pnlUsd: 235 } });
+  });
+
+  it("retains a valid cached snapshot when legacy hydration fails", async () => {
+    const legacy = { ...fakePnLView, pnlUsd: 88 } as Record<string, unknown>;
+    delete legacy.entryToken0UsdPrice;
+    const updates: unknown[] = [];
+    mockListCachedPnLViews = () => [legacy];
+    mockGetPnLView = async () => {
+      throw new Error("pricing unavailable");
+    };
+    mockUpdateCachedPnLView = (...args) => updates.push(args);
+
+    const res = await server.inject({ method: "GET", url: "/pnl" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions[0].pnlUsd).toBe(88);
+    expect(updates).toEqual([]);
   });
 });
 
@@ -332,8 +379,8 @@ describe("GET /positions/:tokenId/pnl", () => {
     mockCreateClient = () => ({
       getBlock: async () => ({ timestamp: 1760000000n }),
     });
-    mockUpdateCachedPnLView = (tokenId: string, update: { openedAt: string }) => {
-      updates.push({ tokenId, openedAt: update.openedAt });
+    mockUpdateCachedPnLView = (tokenId: string, update: Record<string, unknown>) => {
+      updates.push({ tokenId, openedAt: String(update.openedAt) });
     };
 
     const res = await server.inject({ method: "GET", url: "/positions/123/pnl" });

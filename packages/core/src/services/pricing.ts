@@ -24,6 +24,14 @@ type PriceCacheEntry = {
   expiresAt: number;
 };
 
+export type HistoricalPriceSource = "coingecko" | "hyperliquid-candle" | "stablecoin-peg";
+export interface HistoricalPriceResult {
+  price: number | null;
+  source: HistoricalPriceSource | null;
+  /** Timestamp of the selected market observation. */
+  observedAt: string | null;
+}
+
 const priceCache = new Map<string, PriceCacheEntry>();
 const historicalPriceCache = new Map<string, PriceCacheEntry>();
 
@@ -214,19 +222,36 @@ export async function getHistoricalPrice(
   isoTimestamp: string,
   currency: "eur" | "usd",
 ): Promise<number | null> {
+  return (await getHistoricalPriceResult(config, symbol, isoTimestamp, currency)).price;
+}
+
+export async function getHistoricalPriceResult(
+  config: Pick<Config, "pricing">,
+  symbol: string,
+  isoTimestamp: string,
+  currency: "eur" | "usd",
+): Promise<HistoricalPriceResult> {
   const coinGeckoId = resolveCoinGeckoId(config, symbol);
-  if (!coinGeckoId) return null;
+  if (!coinGeckoId) return { price: null, source: null, observedAt: null };
+
+  const requestedAt = new Date(isoTimestamp);
+  if (isNaN(requestedAt.getTime())) return { price: null, source: null, observedAt: null };
+  if (currency === "usd" && coinGeckoId === "usd-coin") {
+    return { price: 1, source: "stablecoin-peg", observedAt: isoTimestamp };
+  }
 
   let dateStr: string;
   try {
     dateStr = isoToddmmyyyy(isoTimestamp);
   } catch {
-    return null;
+    return { price: null, source: null, observedAt: null };
   }
 
   const cacheKey = `${currency}:${coinGeckoId}:${dateStr}`;
   const cached = getCachedHistoricalPrice(cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    return { price: cached, source: cached === null ? null : "coingecko", observedAt: null };
+  }
 
   try {
     const url = `${COINGECKO_HISTORY_URL}/${coinGeckoId}/history?date=${dateStr}&localization=false`;
@@ -236,7 +261,7 @@ export async function getHistoricalPrice(
         price: null,
         expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
       });
-      return null;
+      return await historicalFallback(coinGeckoId, requestedAt, currency, cacheKey);
     }
 
     const data = await response.json();
@@ -252,19 +277,57 @@ export async function getHistoricalPrice(
         price: null,
         expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
       });
-      return null;
+      return await historicalFallback(coinGeckoId, requestedAt, currency, cacheKey);
     }
 
     historicalPriceCache.set(cacheKey, {
       price,
       expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS,
     });
-    return price;
+    return { price, source: "coingecko", observedAt: isoTimestamp };
   } catch {
-    historicalPriceCache.set(cacheKey, {
-      price: null,
-      expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS,
-    });
-    return null;
+    return await historicalFallback(coinGeckoId, requestedAt, currency, cacheKey);
   }
+}
+
+async function historicalFallback(
+  coinGeckoId: string,
+  requestedAt: Date,
+  currency: "eur" | "usd",
+  cacheKey: string,
+): Promise<HistoricalPriceResult> {
+  const coin = currency === "usd" ? hyperliquidCoin(coinGeckoId) : null;
+  if (!coin) {
+    historicalPriceCache.set(cacheKey, { price: null, expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS });
+    return { price: null, source: null, observedAt: null };
+  }
+  try {
+    const target = requestedAt.getTime();
+    const response = await fetch(HYPERLIQUID_INFO_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "candleSnapshot",
+        req: { coin, interval: "1h", startTime: target - 12 * 60 * 60 * 1000, endTime: target + 12 * 60 * 60 * 1000 },
+      }),
+    });
+    const data: unknown = response.ok ? await response.json() : null;
+    if (Array.isArray(data)) {
+      const candidates = data.flatMap((item) => {
+        if (!isRecord(item)) return [];
+        const time = typeof item.t === "number" ? item.t : Number(item.t);
+        const close = typeof item.c === "number" ? item.c : Number(item.c);
+        return Number.isFinite(time) && Number.isFinite(close) && close > 0 ? [{ time, close }] : [];
+      });
+      const nearest = candidates.sort((a, b) => Math.abs(a.time - target) - Math.abs(b.time - target))[0];
+      if (nearest) {
+        historicalPriceCache.set(cacheKey, { price: nearest.close, expiresAt: Date.now() + HISTORICAL_PRICE_CACHE_TTL_MS });
+        return { price: nearest.close, source: "hyperliquid-candle", observedAt: new Date(nearest.time).toISOString() };
+      }
+    }
+  } catch {
+    // Historical pricing is optional.
+  }
+  historicalPriceCache.set(cacheKey, { price: null, expiresAt: Date.now() + NEGATIVE_CACHE_TTL_MS });
+  return { price: null, source: null, observedAt: null };
 }

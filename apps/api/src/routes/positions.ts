@@ -4,10 +4,22 @@ import {
   listCachedPositionViews,
   listCachedPnLViews,
   getPositionsCacheSyncedAt,
+  getLpSyncState,
+  listLpSyncOutcomes,
 } from "@lp-tracker/core";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 
 import { isNumericString } from "../utils/validation.js";
+
+interface SyncOutcomeView {
+  tokenId: string;
+  outcome: "ok" | "stale" | "pending" | "failed";
+  entrySource?: string;
+  exitSource?: string;
+  error?: string;
+  warnings?: string[];
+  syncedAt?: string;
+}
 
 interface SyncState {
   status: "idle" | "running" | "completed" | "failed";
@@ -15,6 +27,7 @@ interface SyncState {
   finishedAt: string | null;
   error: string | null;
   positionCount: number | null;
+  outcomes?: SyncOutcomeView[];
 }
 
 let syncState: SyncState = {
@@ -36,6 +49,20 @@ function attachConfiguredHedge(
   const hedge = tokenId ? config.positions?.[tokenId]?.hedge : undefined;
 
   return hedge ? { ...view, hedge } : view;
+}
+
+/**
+ * A position is historical when it was not seen by the latest full sync —
+ * i.e. no lp_sync_outcomes row stamped with the latest lp_sync_state
+ * last_synced_at. Positions that failed during the last sync still have an
+ * outcome row and are therefore NOT historical.
+ */
+function attachHistorical(
+  view: Record<string, unknown>,
+  syncedTokenIds: Set<string>,
+): Record<string, unknown> {
+  const tokenId = typeof view.tokenId === "string" ? view.tokenId : null;
+  return { ...view, historical: tokenId === null || !syncedTokenIds.has(tokenId) };
 }
 
 function parseTimestamp(value: unknown): number {
@@ -64,6 +91,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
       finishedAt: null,
       error: null,
       positionCount: null,
+      outcomes: undefined,
     };
 
     // Fire and forget — do not await
@@ -75,6 +103,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
           finishedAt: new Date().toISOString(),
           error: null,
           positionCount: summary.positionCount,
+          outcomes: summary.outcomes,
         };
         return syncState;
       })
@@ -85,6 +114,7 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
           finishedAt: new Date().toISOString(),
           error: err instanceof Error ? err.message : String(err),
           positionCount: null,
+          outcomes: undefined,
         };
       });
 
@@ -178,8 +208,17 @@ export async function positionsRoutes(fastify: FastifyInstance): Promise<void> {
         .map((view) => [view.tokenId, parseTimestamp(view.openedAt)] as const),
     );
 
+    const latestSyncedAt = getLpSyncState(fastify.lpConfig.wallet)?.last_synced_at ?? null;
+    const syncedTokenIds = new Set(
+      listLpSyncOutcomes()
+        .filter((outcome) => latestSyncedAt !== null && outcome.syncedAt === latestSyncedAt)
+        .map((outcome) => outcome.tokenId),
+    );
+
     const positions = listCachedPositionViews()
-      .map((view) => attachConfiguredHedge(view, fastify.lpConfig))
+      .map((view) =>
+        attachHistorical(attachConfiguredHedge(view, fastify.lpConfig), syncedTokenIds),
+      )
       .toSorted((a, b) => {
         const aOpenedAt =
           typeof a.tokenId === "string" ? (pnlByTokenId.get(a.tokenId) ?? NaN) : NaN;

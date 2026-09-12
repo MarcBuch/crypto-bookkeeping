@@ -11,6 +11,8 @@ export function createCoreMock(): Record<string, unknown> {
     listCachedPositionViews: () => [],
     listCachedPnLViews: () => [],
     getPositionsCacheSyncedAt: () => null,
+    getLpSyncState: () => null,
+    listLpSyncOutcomes: () => [],
     syncLpData: async () => ({ synced: 0 }),
     syncSinglePosition: async () => ({ tokenId: "42", syncedAt: new Date().toISOString() }),
     getPnLView: async () => [],

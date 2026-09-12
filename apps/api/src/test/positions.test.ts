@@ -82,6 +82,8 @@ class MockRpcError extends Error {
 let mockListCachedPositionViews: (...args: unknown[]) => unknown = () => [];
 let mockListCachedPnLViews: (...args: unknown[]) => unknown = () => [];
 let mockGetPositionsCacheSyncedAt: (...args: unknown[]) => unknown = () => null;
+let mockGetLpSyncState: (...args: unknown[]) => unknown = () => null;
+let mockListLpSyncOutcomes: (...args: unknown[]) => unknown = () => [];
 let mockSyncLpData: (...args: unknown[]) => unknown = async () => ({ synced: 0 });
 let mockSyncSinglePosition: (config: unknown, tokenId: string) => Promise<unknown> = async () => ({
   tokenId: "42",
@@ -100,6 +102,8 @@ await installCoreMock({
   listCachedPositionViews: (...args: unknown[]) => mockListCachedPositionViews(...args),
   listCachedPnLViews: (...args: unknown[]) => mockListCachedPnLViews(...args),
   getPositionsCacheSyncedAt: (...args: unknown[]) => mockGetPositionsCacheSyncedAt(...args),
+  getLpSyncState: (...args: unknown[]) => mockGetLpSyncState(...args),
+  listLpSyncOutcomes: (...args: unknown[]) => mockListLpSyncOutcomes(...args),
   syncLpData: (...args: unknown[]) => mockSyncLpData(...args),
   syncSinglePosition: (config: unknown, tokenId: string) => mockSyncSinglePosition(config, tokenId),
   getPnLView: async () => [],
@@ -294,6 +298,86 @@ describe("GET /positions", () => {
     const body = res.json();
     expect(body.syncedAt).toBe("2026-06-01T20:00:00.000Z");
   });
+
+  it("marks positions seen by the latest full sync as not historical", async () => {
+    mockListCachedPositionViews = () => [fakePosition, fakePosition2];
+    mockListCachedPnLViews = () => [];
+    mockGetLpSyncState = () => ({
+      wallet: "0xdeadbeef",
+      last_synced_at: "2026-06-10T00:00:00.000Z",
+    });
+    mockListLpSyncOutcomes = () => [
+      {
+        tokenId: "123",
+        syncedAt: "2026-06-10T00:00:00.000Z",
+        outcome: "ok",
+        entrySource: "stored",
+        exitSource: "active",
+        error: null,
+        warnings: [],
+      },
+    ];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    const byId = new Map(
+      res.json().positions.map((position: { tokenId: string }) => [position.tokenId, position]),
+    );
+    expect((byId.get("123") as { historical: boolean }).historical).toBe(false);
+    expect((byId.get("456") as { historical: boolean }).historical).toBe(true);
+  });
+
+  it("treats failed positions from the latest sync as not historical", async () => {
+    mockListCachedPositionViews = () => [fakePosition];
+    mockListCachedPnLViews = () => [];
+    mockGetLpSyncState = () => ({
+      wallet: "0xdeadbeef",
+      last_synced_at: "2026-06-10T00:00:00.000Z",
+    });
+    mockListLpSyncOutcomes = () => [
+      {
+        tokenId: "123",
+        syncedAt: "2026-06-10T00:00:00.000Z",
+        outcome: "failed",
+        error: "boom",
+      },
+    ];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions[0].historical).toBe(false);
+  });
+
+  it("ignores outcome rows from older syncs when computing historical", async () => {
+    mockListCachedPositionViews = () => [fakePosition];
+    mockListCachedPnLViews = () => [];
+    mockGetLpSyncState = () => ({
+      wallet: "0xdeadbeef",
+      last_synced_at: "2026-06-10T00:00:00.000Z",
+    });
+    mockListLpSyncOutcomes = () => [
+      {
+        tokenId: "123",
+        syncedAt: "2026-06-01T00:00:00.000Z",
+        outcome: "ok",
+      },
+    ];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions[0].historical).toBe(true);
+  });
+
+  it("marks positions as historical when no full sync has run", async () => {
+    mockListCachedPositionViews = () => [fakePosition];
+    mockListCachedPnLViews = () => [];
+    mockGetLpSyncState = () => null;
+    mockListLpSyncOutcomes = () => [];
+
+    const res = await server.inject({ method: "GET", url: "/positions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().positions[0].historical).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -357,7 +441,6 @@ describe("GET /positions/:tokenId", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: "tokenId must be a numeric string" });
   });
-
 });
 
 // ---------------------------------------------------------------------------

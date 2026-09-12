@@ -654,7 +654,18 @@ function ActivePositionRow({
         />
         <DarkStat
           label="Pending Earnings"
-          value={pnl ? `${formatNumber(pnl.pendingFeesValueInToken1)} ${pnl.token1Symbol}` : "n/a"}
+          value={
+            pnl ? (
+              `${formatNumber(pnl.pendingFeesValueInToken1)} ${pnl.token1Symbol}`
+            ) : (
+              <ProvenanceBadge
+                variant="pending"
+                title="P&L not resolved yet — position discovery pending; check sync status"
+              >
+                pending
+              </ProvenanceBadge>
+            )
+          }
           detail={
             pnl?.pendingFeesValueUsd != null
               ? formatUsdFeeValue(pnl.pendingFeesValueUsd)
@@ -669,7 +680,18 @@ function ActivePositionRow({
         />
         <DarkStat
           label="ROI"
-          value={pnl ? formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent) : "n/a"}
+          value={
+            pnl ? (
+              formatPercent(combinedRoiPct ?? pnl.absolutePnlPercent)
+            ) : (
+              <ProvenanceBadge
+                variant="pending"
+                title="P&L not resolved yet — position discovery pending; check sync status"
+              >
+                pending
+              </ProvenanceBadge>
+            )
+          }
           valueClassName={pnl ? darkToneClass(combinedRoiPct ?? pnl.absolutePnlPercent) : undefined}
           detail={roiDetail}
           tooltip={
@@ -1064,7 +1086,7 @@ export function DarkStat({
   tooltip,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   detail?: React.ReactNode;
   valueClassName?: string;
   tooltip?: string;
@@ -1157,6 +1179,15 @@ function PositionRow({
       <td className="px-5 py-4 font-semibold whitespace-nowrap text-neutral-950">
         {position.token0.symbol}/{position.token1.symbol}
         <span className="ml-2 font-mono text-xs text-neutral-500">#{position.tokenId}</span>
+        {position.historical === true ? (
+          <ProvenanceBadge
+            variant="history"
+            title="Position no longer in wallet (NFT transferred/burned) — kept for ledger history"
+            className="ml-2"
+          >
+            history
+          </ProvenanceBadge>
+        ) : null}
       </td>
       <td className="px-5 py-4 whitespace-nowrap">
         <div className="flex gap-2">
@@ -1227,7 +1258,26 @@ function PositionRow({
       <td
         className={`px-5 py-4 font-mono font-bold whitespace-nowrap ${toneClass(blotterPnl.displayedPnlInToken1 ?? undefined)}`}
       >
-        {pnl ? `${formatNumber(blotterPnl.displayedPnlInToken1 ?? 0)} ${pnl.token1Symbol}` : "n/a"}
+        {pnl ? (
+          <span className="inline-flex items-center gap-2">
+            {`${formatNumber(blotterPnl.displayedPnlInToken1 ?? 0)} ${pnl.token1Symbol}`}
+            {isDegradedPnl(pnl) ? (
+              <ProvenanceBadge
+                variant="stale"
+                title="Some lifecycle data came from degraded sources — numbers may be incomplete until next successful sync"
+              >
+                stale
+              </ProvenanceBadge>
+            ) : null}
+          </span>
+        ) : (
+          <ProvenanceBadge
+            variant="pending"
+            title="P&L not resolved yet — position discovery pending; check sync status"
+          >
+            pending
+          </ProvenanceBadge>
+        )}
         {blotterPnl.displayedPnlUsd != null && (
           <div className="mt-0.5 text-xs font-normal text-neutral-400">
             {formatUsd(blotterPnl.displayedPnlUsd)}
@@ -1258,7 +1308,12 @@ function PositionRow({
             </p>
           </div>
         ) : (
-          "n/a"
+          <ProvenanceBadge
+            variant="pending"
+            title="P&L not resolved yet — position discovery pending; check sync status"
+          >
+            pending
+          </ProvenanceBadge>
         )}
       </td>
       <td className="px-5 py-4 whitespace-nowrap">
@@ -1302,6 +1357,38 @@ function RangeBadge({ inRange }: { inRange: boolean }) {
       {inRange ? "in range" : "out of range"}
     </span>
   );
+}
+
+function ProvenanceBadge({
+  variant,
+  title,
+  className = "",
+  children,
+}: {
+  variant: "pending" | "stale" | "history";
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const tone =
+    variant === "pending"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : variant === "stale"
+        ? "border-neutral-300 bg-neutral-100 text-neutral-600"
+        : "border-neutral-200 bg-neutral-50 text-neutral-500";
+
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase ${tone} ${className}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function isDegradedPnl(pnl: PnLView): boolean {
+  return pnl.stale === true || pnl.entrySource === "unresolved" || pnl.exitSource === "unresolved";
 }
 
 export function LoadingState() {

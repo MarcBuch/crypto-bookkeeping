@@ -14,6 +14,7 @@ export interface PositionView {
   inRange: boolean;
   currentAmount0: number;
   currentAmount1: number;
+  historical?: boolean;
   hedge?: {
     coin: string;
   };
@@ -60,6 +61,9 @@ export interface PnLView {
   netVsHodlPercent: number;
   priceLower: number;
   priceUpper: number;
+  entrySource?: string;
+  exitSource?: string;
+  stale?: boolean;
 }
 
 export interface DashboardPosition extends PositionView {
@@ -312,6 +316,15 @@ export type SyncStatus = {
   finishedAt: string | null;
   error: string | null;
   positionCount: number | null;
+  outcomes?: Array<{
+    tokenId: string;
+    outcome: "ok" | "stale" | "pending" | "failed";
+    entrySource?: string;
+    exitSource?: string;
+    error?: string;
+    warnings?: string[];
+    syncedAt?: string;
+  }>;
 };
 
 export async function getPositions(): Promise<{

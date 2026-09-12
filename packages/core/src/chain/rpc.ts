@@ -1,32 +1,33 @@
 /**
  * Rate limiting and retry utilities for HyperEVM RPC.
  *
- * Using Envio HyperRPC (https://hyperliquid.rpc.hypersync.xyz) which has
- * much more relaxed rate limits than the public Hyperliquid RPC. The delay
- * is kept low but non-zero to avoid hammering the endpoint.
+ * Pacing is per-endpoint: each URL has its own minimum interval (milliseconds)
+ * configured by the caller. This lets a slow public full node and a fast
+ * HyperRPC-compatible endpoint coexist without one throttling the other. The
+ * interval is kept low but non-zero to avoid hammering an endpoint.
  */
 
 import { RpcError } from "../services/errors.js";
 
-const MIN_DELAY_MS = 10; // HyperRPC is far more permissive than the public RPC
-let lastRequestTime = 0;
-// Mutex flag to prevent the race condition where concurrent callers all read
-// lastRequestTime before any of them update it.
-let rateLimitPromise: Promise<void> = Promise.resolve();
+// Per-URL state: the last time a request was sent, and the tail of the promise
+// chain that serializes concurrent callers so they queue up rather than all
+// reading the timestamp before any of them updates it.
+const lastRequestTimes = new Map<string, number>();
+const rateLimitPromises = new Map<string, Promise<void>>();
 
-export async function rateLimit(): Promise<void> {
-  // Chain onto the previous rate-limit promise so concurrent callers queue up
-  // rather than all firing simultaneously.
-  rateLimitPromise = rateLimitPromise.then(async () => {
-    const now = Date.now();
-    const elapsed = now - lastRequestTime;
-    if (elapsed < MIN_DELAY_MS) {
-      await sleep(MIN_DELAY_MS - elapsed);
+export async function rateLimit(url: string, minIntervalMs: number): Promise<void> {
+  // Chain onto the previous rate-limit promise for this URL so concurrent
+  // callers queue up rather than all firing simultaneously.
+  const previous = rateLimitPromises.get(url) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    const elapsed = Date.now() - (lastRequestTimes.get(url) ?? 0);
+    if (elapsed < minIntervalMs) {
+      await sleep(minIntervalMs - elapsed);
     }
-    lastRequestTime = Date.now();
-    return undefined;
+    lastRequestTimes.set(url, Date.now());
   });
-  return rateLimitPromise;
+  rateLimitPromises.set(url, next);
+  return next;
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -35,6 +36,12 @@ export function sleep(ms: number): Promise<void> {
 
 /**
  * Retry a function with exponential backoff on rate limit errors.
+ *
+ * Pacing between requests is handled by the transport layer (see
+ * `rateLimit`); this function only decides whether and how long to back off
+ * after a failed attempt. When a rate-limit error carries `retryAfterMs`
+ * (parsed from an HTTP `Retry-After` header), it is used as the minimum delay
+ * for that retry, still capped by `maxDelay`.
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -44,7 +51,6 @@ export async function withRetry<T>(
 ): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      await rateLimit();
       return await fn();
     } catch (error: any) {
       const isRateLimit =
@@ -54,11 +60,15 @@ export async function withRetry<T>(
         error?.cause?.code === -32005;
 
       if (isRateLimit && attempt < maxRetries) {
-        const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
+        const backoff = Math.min(baseDelay * 2 ** attempt, maxDelay);
+        const retryAfterMs =
+          typeof error?.retryAfterMs === "number" && error.retryAfterMs > 0
+            ? error.retryAfterMs
+            : 0;
+        const delay = Math.min(Math.max(backoff, retryAfterMs), maxDelay);
         console.warn(
           `  Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`,
         );
-        lastRequestTime = Date.now() + delay;
         await sleep(delay);
         continue;
       }

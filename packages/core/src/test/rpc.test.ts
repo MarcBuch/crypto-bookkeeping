@@ -1,16 +1,21 @@
 import { describe, it, expect } from "bun:test";
 
-import { withRetry } from "../chain/rpc.js";
+import { rateLimit, withRetry } from "../chain/rpc.js";
 import { RpcError } from "../services/errors.js";
 import { captureError, expectError } from "./helpers/errors.js";
 
 // Helper: simulate a viem LimitExceededRpcError-style object
-function makeRateLimitError() {
-  return Object.assign(new Error("rate limited"), { details: "rate limited" });
+function makeRateLimitError(extra: Record<string, unknown> = {}) {
+  return Object.assign(new Error("rate limited"), { details: "rate limited" }, extra);
 }
 
 const immediateSuccessFn = async () => 42;
-const callBFn = async () => "callB done";
+
+let urlCounter = 0;
+function uniqueUrl(host: string): string {
+  urlCounter++;
+  return `https://${host}.example/${urlCounter}`;
+}
 
 function expectRpcError(error: unknown): RpcError {
   expect(error).toBeInstanceOf(RpcError);
@@ -19,6 +24,33 @@ function expectRpcError(error: unknown): RpcError {
   }
   return error;
 }
+
+describe("rateLimit — per-URL pacing", () => {
+  it("spaces sequential requests to the same URL by the configured interval", async () => {
+    const url = uniqueUrl("pace");
+    const start = Date.now();
+    await rateLimit(url, 40);
+    await rateLimit(url, 40);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(35);
+  });
+
+  it("does not pace requests to different URLs against each other", async () => {
+    const urlA = uniqueUrl("a");
+    const urlB = uniqueUrl("b");
+    await rateLimit(urlA, 1000); // first call for A establishes its clock
+    const start = Date.now();
+    await rateLimit(urlB, 1000); // first call for B must not wait on A
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+
+  it("queues concurrent callers for the same URL instead of firing together", async () => {
+    const url = uniqueUrl("queue");
+    const start = Date.now();
+    await Promise.all([rateLimit(url, 30), rateLimit(url, 30), rateLimit(url, 30)]);
+    // The first call fires immediately; the next two each wait one interval.
+    expect(Date.now() - start).toBeGreaterThanOrEqual(55);
+  });
+});
 
 describe("withRetry — retry exhaustion and passthrough", () => {
   it("resolves immediately when fn succeeds on first attempt", async () => {
@@ -83,24 +115,37 @@ describe("withRetry — retry exhaustion and passthrough", () => {
   });
 });
 
-describe("withRetry — adaptive backoff propagation", () => {
-  it("a second concurrent call waits after a rate-limit backoff advances lastRequestTime", async () => {
-    let callAAttempts = 0;
-    const callAFn = async () => {
-      callAAttempts++;
-      if (callAAttempts === 1) {
-        throw makeRateLimitError();
+describe("withRetry — retryAfterMs and backoff", () => {
+  it("uses retryAfterMs as a minimum delay when it exceeds the backoff", async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls === 1) {
+        throw makeRateLimitError({ code: -32005, retryAfterMs: 60 });
       }
-      return "callA done";
+      return "ok";
     };
+    const start = Date.now();
+    const result = await withRetry(fn, 2, 1, 5000);
+    expect(result).toBe("ok");
+    expect(calls).toBe(2);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(55);
+  });
 
-    const [resultA, resultB] = await Promise.all([
-      withRetry(callAFn, 3, 50),
-      withRetry(callBFn, 3, 50),
-    ]);
-
-    expect(resultA).toBe("callA done");
-    expect(resultB).toBe("callB done");
+  it("caps the effective delay at maxDelay even when retryAfterMs is larger", async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls === 1) {
+        throw makeRateLimitError({ code: -32005, retryAfterMs: 5000 });
+      }
+      return "ok";
+    };
+    const start = Date.now();
+    const result = await withRetry(fn, 2, 1, 20);
+    expect(result).toBe("ok");
+    expect(calls).toBe(2);
+    expect(Date.now() - start).toBeLessThan(1000);
   });
 
   it("backoff delay is capped at maxDelay", async () => {

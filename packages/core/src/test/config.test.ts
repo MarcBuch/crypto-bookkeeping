@@ -199,6 +199,53 @@ describe("loadConfig — adversarial tests", () => {
     });
   });
 
+  describe("rpcMinIntervalMs and logsRpcMinIntervalMs validation", () => {
+    function withField(key: string, value: unknown): string {
+      return JSON.stringify({
+        ...JSON.parse(validConfigJson()),
+        [key]: value,
+      });
+    }
+
+    it("loads valid positive intervals and preserves them", () => {
+      const path = writeConfig(
+        "interval-valid.json",
+        JSON.stringify({
+          ...JSON.parse(validConfigJson()),
+          rpcMinIntervalMs: 50,
+          logsRpcMinIntervalMs: 10,
+        }),
+      );
+      const cfg = loadConfig(path);
+      expect(cfg.rpcMinIntervalMs).toBe(50);
+      expect(cfg.logsRpcMinIntervalMs).toBe(10);
+    });
+
+    it("does NOT throw when both intervals are omitted", () => {
+      const path = writeConfig("interval-omitted.json", validConfigJson());
+      const cfg = loadConfig(path);
+      expect(cfg.rpcMinIntervalMs).toBeUndefined();
+      expect(cfg.logsRpcMinIntervalMs).toBeUndefined();
+    });
+
+    for (const key of ["rpcMinIntervalMs", "logsRpcMinIntervalMs"]) {
+      it(`throws when ${key} is zero`, () => {
+        const path = writeConfig(`interval-${key}-zero.json`, withField(key, 0));
+        expect(() => loadConfig(path)).toThrow(new RegExp(`"${key}" must be a positive number`));
+      });
+
+      it(`throws when ${key} is negative`, () => {
+        const path = writeConfig(`interval-${key}-negative.json`, withField(key, -5));
+        expect(() => loadConfig(path)).toThrow(new RegExp(`"${key}" must be a positive number`));
+      });
+
+      it(`throws when ${key} is a string`, () => {
+        const path = writeConfig(`interval-${key}-string.json`, withField(key, "50"));
+        expect(() => loadConfig(path)).toThrow(new RegExp(`"${key}" must be a positive number`));
+      });
+    }
+  });
+
   describe("tax.hyperSyncUrl and tax.hyperSyncApiToken validation", () => {
     // ── Happy path ────────────────────────────────────────────────────────────
 

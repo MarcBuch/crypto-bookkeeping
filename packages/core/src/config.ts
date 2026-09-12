@@ -48,6 +48,17 @@ export interface Config {
    * Format: https://hyperliquid.rpc.hypersync.xyz/<api-token>
    */
   logsRpc?: string;
+  /**
+   * Minimum milliseconds between requests to `rpc`. Default: 50 (the
+   * historical public-node pacing). Must be a positive number.
+   */
+  rpcMinIntervalMs?: number;
+  /**
+   * Minimum milliseconds between requests to the logs endpoint
+   * (`logsRpc ?? rpc`). Default: 10 (the historical HyperRPC pacing).
+   * Must be a positive number.
+   */
+  logsRpcMinIntervalMs?: number;
   chainId: number;
   wallet: Address;
   contracts: {
@@ -149,6 +160,17 @@ function validateConfig(raw: unknown, path: string): asserts raw is Config {
       throw new Error(
         `Config at ${path}: "logsFromBlock" must be a positive integer (got ${JSON.stringify(v)})`,
       );
+    }
+  }
+
+  for (const key of ["rpcMinIntervalMs", "logsRpcMinIntervalMs"] as const) {
+    const v = cfg[key];
+    if (v !== undefined && v !== null) {
+      if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
+        throw new Error(
+          `Config at ${path}: "${key}" must be a positive number (got ${JSON.stringify(v)})`,
+        );
+      }
     }
   }
 

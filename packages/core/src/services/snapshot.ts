@@ -37,16 +37,15 @@ export async function takeSnapshot(config: Config): Promise<SnapshotResult[]> {
     }
 
     const lifecycle = await resolvePositionLifecycle(lifecycleContext, pos, {
-      entryNotFound: "use_current_amounts",
+      entryFallback: "current_amounts",
     });
-    if (lifecycle.status === "rpc_error") {
-      console.error(
-        `[lp-tracker] RPC error discovering ${lifecycle.stage} event for position ${pos.tokenId.toString()}:`,
-        lifecycle.error,
+    if (lifecycle.status === "unresolved") {
+      console.warn(
+        `[lp-tracker] Skipping snapshot for position ${pos.tokenId.toString()} (${lifecycle.reason}):`,
+        lifecycle.warnings,
       );
       continue;
     }
-    if (lifecycle.status !== "resolved") continue;
     const { facts } = lifecycle;
     const { token0Info, token1Info, poolState } = facts;
     const economics = calculateLpEconomics(facts);

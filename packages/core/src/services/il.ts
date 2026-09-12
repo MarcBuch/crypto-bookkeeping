@@ -49,17 +49,13 @@ export async function getILView(config: Config, tokenId?: string): Promise<ILVie
 
   for (const pos of filteredPositions) {
     const lifecycle = await resolvePositionLifecycle(lifecycleContext, pos, {
-      entryNotFound: "skip",
       requireEntrySqrtPriceX96: true,
     });
-    if (lifecycle.status === "rpc_error") {
-      console.error(
-        `[lp-tracker] RPC error discovering ${lifecycle.stage} event for position ${pos.tokenId.toString()}:`,
-        lifecycle.error,
+    if (lifecycle.status === "unresolved") {
+      console.warn(
+        `[lp-tracker] Skipping IL for position ${pos.tokenId.toString()} (${lifecycle.reason}):`,
+        lifecycle.warnings,
       );
-      continue;
-    }
-    if (lifecycle.status === "skip") {
       continue;
     }
 

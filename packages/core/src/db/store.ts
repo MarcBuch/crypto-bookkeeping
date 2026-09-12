@@ -834,30 +834,85 @@ export function replaceCachedPnLViews(rows: Array<{ tokenId: unknown }>, syncedA
   })();
 }
 
-export function replaceLpCaches(
+export function upsertLpCacheRows(
   positionRows: Array<{ tokenId: unknown }>,
   pnlRows: Array<{ tokenId: unknown }>,
   syncedAt: string,
 ): void {
   const db = getDb();
   db.transaction(() => {
-    db.run("DELETE FROM positions_view_cache");
     for (const row of positionRows) {
-      db.run("INSERT INTO positions_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
-        String(row.tokenId),
-        JSON.stringify(row),
-        syncedAt,
-      ]);
+      upsertPositionViewCache(String(row.tokenId), row, syncedAt);
     }
-    db.run("DELETE FROM pnl_view_cache");
     for (const row of pnlRows) {
-      db.run("INSERT INTO pnl_view_cache (token_id, data, synced_at) VALUES (?, ?, ?)", [
-        String(row.tokenId),
-        JSON.stringify(row),
-        syncedAt,
-      ]);
+      upsertPnLViewCache(String(row.tokenId), row, syncedAt);
     }
   })();
+}
+
+export interface StoredLpSyncOutcome {
+  tokenId: string;
+  syncedAt: string;
+  outcome: string;
+  entrySource: string | null;
+  exitSource: string | null;
+  error: string | null;
+  warnings: string[];
+}
+
+export function upsertLpSyncOutcome(outcome: {
+  tokenId: string;
+  syncedAt: string;
+  outcome: string;
+  entrySource?: string;
+  exitSource?: string;
+  error?: string;
+  warnings?: string[];
+}): void {
+  const db = getDb();
+  db.run(
+    `INSERT OR REPLACE INTO lp_sync_outcomes
+     (token_id, synced_at, outcome, entry_source, exit_source, error, warnings)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      outcome.tokenId,
+      outcome.syncedAt,
+      outcome.outcome,
+      outcome.entrySource ?? null,
+      outcome.exitSource ?? null,
+      outcome.error ?? null,
+      outcome.warnings ? JSON.stringify(outcome.warnings) : null,
+    ],
+  );
+}
+
+type LpSyncOutcomeRow = {
+  token_id: string;
+  synced_at: string;
+  outcome: string;
+  entry_source: string | null;
+  exit_source: string | null;
+  error: string | null;
+  warnings: string | null;
+};
+
+export function listLpSyncOutcomes(): StoredLpSyncOutcome[] {
+  const db = getDb();
+  return db
+    .query<LpSyncOutcomeRow, []>(
+      `SELECT token_id, synced_at, outcome, entry_source, exit_source, error, warnings
+       FROM lp_sync_outcomes ORDER BY token_id`,
+    )
+    .all()
+    .map((row) => ({
+      tokenId: row.token_id,
+      syncedAt: row.synced_at,
+      outcome: row.outcome,
+      entrySource: row.entry_source,
+      exitSource: row.exit_source,
+      error: row.error,
+      warnings: row.warnings ? (JSON.parse(row.warnings) as string[]) : [],
+    }));
 }
 
 export function getLpSyncState(wallet: string): StoredLpSyncState | null {

@@ -86,10 +86,19 @@ export interface PositionLifecycleFacts {
   closeBlock: number | null;
 }
 
+export type EntrySource = "chain" | "stored" | "unresolved";
+export type ExitSource = "chain" | "stored" | "active" | "unresolved";
+
 export type PositionLifecycleResult =
-  | { status: "resolved"; facts: PositionLifecycleFacts }
-  | { status: "skip"; reason: "entry_not_found" }
-  | { status: "rpc_error"; stage: "entry" | "close"; error: unknown };
+  | {
+      status: "resolved";
+      facts: PositionLifecycleFacts;
+      entrySource: EntrySource;
+      exitSource: ExitSource;
+      stale: boolean;
+      warnings: string[];
+    }
+  | { status: "unresolved"; reason: string; warnings: string[]; stale: true };
 
 export async function createPositionLifecycleContext(
   config: Config,
@@ -162,7 +171,7 @@ export async function resolvePositionLifecycle(
   context: PositionLifecycleContext,
   pos: PositionData,
   options?: {
-    entryNotFound?: "skip" | "use_current_amounts";
+    entryFallback?: "current_amounts";
     requireEntrySqrtPriceX96?: boolean;
   },
 ): Promise<PositionLifecycleResult> {
@@ -201,23 +210,42 @@ export async function resolvePositionLifecycle(
     storedPos?.entry_liquidity != null && storedPos.entry_liquidity !== "0";
 
   const needsHistoricalEntrySqrtPrice = options?.requireEntrySqrtPriceX96 === true;
+  const entryFallbackRequested = options?.entryFallback === "current_amounts";
 
-  if (posConfig?.openTx) {
+  // Stored facts are the ledger of record: only consult the chain when the
+  // persisted entry is incomplete (or the required historical sqrt price is missing).
+  // A configured openTx is a discovery hint, never an override of stored facts.
+  const storedEntryComplete =
+    storedPos?.open_tx != null &&
+    storedPos.entry_amount0 != null &&
+    storedPos.entry_amount0 !== "0" &&
+    ((storedPos.entry_liquidity != null && storedPos.entry_liquidity !== "0") || isActive) &&
+    storedPos.entry_block != null &&
+    (storedPos.entry_sqrt_price_x96 != null || !needsHistoricalEntrySqrtPrice);
+
+  const warnings: string[] = [];
+  let entrySource: EntrySource = "unresolved";
+  let usedEntryFallback = false;
+
+  if (storedEntryComplete && storedPos) {
+    entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
+    entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
+    if (hasStoredLiquidity && storedPos.entry_liquidity) {
+      entryLiquidity = BigInt(storedPos.entry_liquidity);
+    }
+    entrySource = "stored";
+  } else {
     const openResult = await findOpenEvent(
       context.client,
       context.config.contracts.positionManager,
       pos.tokenId,
       context.config.wallet,
-      posConfig.openTx,
+      posConfig?.openTx,
       undefined,
       context.logsWindowBlocks,
       context.latestBlock,
       context.hyperSyncClient,
     );
-
-    if (openResult.status === "rpc_error") {
-      return { status: "rpc_error", stage: "entry", error: openResult.error };
-    }
 
     if (openResult.status === "found") {
       const openEvent = openResult.event;
@@ -242,69 +270,29 @@ export async function resolvePositionLifecycle(
       ) {
         persistPositionEntry(pos, openEvent, { token0Info, token1Info });
       }
-    } else if (options?.entryNotFound === "use_current_amounts") {
-      entryAmount0 = currentAmounts.amount0;
-      entryAmount1 = currentAmounts.amount1;
-      entryLiquidity = pos.liquidity;
-      entrySqrtPriceX96 = poolState.sqrtPriceX96;
+      entrySource = "chain";
     } else {
-      return { status: "skip", reason: "entry_not_found" };
-    }
-  } else if (storedPos?.open_tx && (!needsHistoricalEntrySqrtPrice || entrySqrtPriceX96 != null)) {
-    entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
-    entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-    if (hasStoredLiquidity && storedPos.entry_liquidity) {
-      entryLiquidity = BigInt(storedPos.entry_liquidity);
-    }
-  } else if (
-    storedPos &&
-    hasStoredEntry &&
-    (hasStoredLiquidity || isActive) &&
-    (!needsHistoricalEntrySqrtPrice || entrySqrtPriceX96 != null)
-  ) {
-    entryAmount0 = BigInt(storedPos.entry_amount0 || "0");
-    entryAmount1 = BigInt(storedPos.entry_amount1 || "0");
-    if (hasStoredLiquidity && storedPos.entry_liquidity) {
-      entryLiquidity = BigInt(storedPos.entry_liquidity);
-    }
-  } else {
-    const openResult = await findOpenEvent(
-      context.client,
-      context.config.contracts.positionManager,
-      pos.tokenId,
-      context.config.wallet,
-      undefined,
-      undefined,
-      context.logsWindowBlocks,
-      context.latestBlock,
-      context.hyperSyncClient,
-    );
-
-    if (openResult.status === "rpc_error") {
-      return { status: "rpc_error", stage: "entry", error: openResult.error };
-    }
-
-    if (openResult.status === "found") {
-      const openEvent = openResult.event;
-      entryAmount0 = openEvent.amount0;
-      entryAmount1 = openEvent.amount1;
-      entryLiquidity = openEvent.liquidity;
-      entryBlock = openEvent.blockNumber;
-      entrySqrtPriceX96 = deriveEntryPriceFromAmounts(
-        openEvent.amount0,
-        openEvent.amount1,
-        openEvent.liquidity,
-        pos.tickLower,
-        pos.tickUpper,
+      const discoveryDetail =
+        openResult.status === "rpc_error" ? ` (${describeError(openResult.error)})` : "";
+      warnings.push(
+        `Failed to discover open event for position #${pos.tokenId.toString()}${discoveryDetail}`,
       );
-      persistPositionEntry(pos, openEvent, { token0Info, token1Info });
-    } else if (options?.entryNotFound === "use_current_amounts") {
-      entryAmount0 = currentAmounts.amount0;
-      entryAmount1 = currentAmounts.amount1;
-      entryLiquidity = pos.liquidity;
-      entrySqrtPriceX96 = poolState.sqrtPriceX96;
-    } else {
-      return { status: "skip", reason: "entry_not_found" };
+
+      if (entryFallbackRequested && isActive) {
+        entryAmount0 = currentAmounts.amount0;
+        entryAmount1 = currentAmounts.amount1;
+        entryLiquidity = pos.liquidity;
+        entrySqrtPriceX96 = poolState.sqrtPriceX96;
+        entrySource = "unresolved";
+        usedEntryFallback = true;
+      } else {
+        return {
+          status: "unresolved",
+          reason: openResult.status === "rpc_error" ? "entry_rpc_error" : "entry_not_found",
+          warnings,
+          stale: true,
+        };
+      }
     }
   }
 
@@ -322,6 +310,7 @@ export async function resolvePositionLifecycle(
   let totalFees1 = 0n;
   let exitSqrtPriceX96 = poolState.sqrtPriceX96;
   let closeBlock = storedPos?.close_block ?? null;
+  let exitSource: ExitSource = isActive ? "active" : "unresolved";
 
   if (isActive) {
     if (entryBlock !== undefined && supportsLogScanning(context.client)) {
@@ -365,11 +354,10 @@ export async function resolvePositionLifecycle(
     totalFees1 = previouslyCollectedFees1 + pendingFees1;
   } else {
     const hasCachedExit =
-      storedPos?.close_tx &&
+      !!storedPos?.close_tx &&
       storedPos.exit_amount0 != null &&
       storedPos.exit_amount1 != null &&
-      storedPos.exit_sqrt_price_x96 != null &&
-      !posConfig?.closeTx;
+      storedPos.exit_sqrt_price_x96 != null;
 
     if (hasCachedExit && storedPos) {
       currentAmount0 = 0n;
@@ -383,6 +371,7 @@ export async function resolvePositionLifecycle(
       totalFees0 = previouslyCollectedFees0;
       totalFees1 = previouslyCollectedFees1;
       exitSqrtPriceX96 = BigInt(storedPos.exit_sqrt_price_x96!);
+      exitSource = "stored";
     } else {
       const latestBlock = await getLatestBlock(context);
       const closeResult = await findCloseEvent(
@@ -396,10 +385,6 @@ export async function resolvePositionLifecycle(
         latestBlock,
         context.hyperSyncClient,
       );
-
-      if (closeResult.status === "rpc_error") {
-        return { status: "rpc_error", stage: "close", error: closeResult.error };
-      }
 
       if (closeResult.status === "found") {
         const closeEvent = closeResult.event;
@@ -438,11 +423,18 @@ export async function resolvePositionLifecycle(
           exitSqrtPriceX96,
           closeEvent,
         });
+        exitSource = "chain";
       } else {
+        const discoveryDetail =
+          closeResult.status === "rpc_error" ? ` (${describeError(closeResult.error)})` : "";
+        warnings.push(
+          `Failed to discover close event for position #${pos.tokenId.toString()}${discoveryDetail}`,
+        );
         currentAmount0 = 0n;
         currentAmount1 = 0n;
         exitAmount0 = 0n;
         exitAmount1 = 0n;
+        exitSource = "unresolved";
       }
     }
   }
@@ -458,13 +450,7 @@ export async function resolvePositionLifecycle(
       poolAddress,
       poolState,
       status: isActive ? "active" : "closed",
-      entryResolution:
-        entryAmount0 === currentAmounts.amount0 &&
-        entryAmount1 === currentAmounts.amount1 &&
-        options?.entryNotFound === "use_current_amounts" &&
-        !hasStoredEntry
-          ? "fallback_current_amounts"
-          : "resolved",
+      entryResolution: usedEntryFallback ? "fallback_current_amounts" : "resolved",
       entryAmount0,
       entryAmount1,
       entryLiquidity,
@@ -485,7 +471,15 @@ export async function resolvePositionLifecycle(
       exitSqrtPriceX96,
       closeBlock,
     },
+    entrySource,
+    exitSource,
+    stale: warnings.length > 0,
+    warnings,
   };
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function getLatestBlock(context: PositionLifecycleContext): Promise<bigint> {

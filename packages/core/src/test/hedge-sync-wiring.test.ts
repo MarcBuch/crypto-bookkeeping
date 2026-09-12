@@ -23,6 +23,10 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 let mockGetPositionData: (...args: unknown[]) => Promise<unknown> = async () => ({});
 let mockGetPnLView: (...args: unknown[]) => Promise<unknown> = async () => [];
+let mockResolvePnLViewsDetailed: (...args: unknown[]) => Promise<{
+  views: unknown[];
+  outcomes: unknown[];
+}> = async () => ({ views: [], outcomes: [] });
 let mockGetHedgeView: (config: unknown, tokenId: string) => Promise<unknown> = async () => ({});
 let mockSnapshotHedge: (view: unknown) => void = () => {};
 let mockSyncHyperliquidHedgeTrades: (config: unknown) => Promise<number> = async () => 0;
@@ -71,6 +75,7 @@ await mock.module("../chain/events.js", () => ({
 
 await mock.module("../services/pnl.js", () => ({
   getPnLView: (...args: unknown[]) => mockGetPnLView(...args),
+  resolvePnLViewsDetailed: (...args: unknown[]) => mockResolvePnLViewsDetailed(...args),
   calculateUsdFeeIncome: () => ({
     feesCollected0Usd: null,
     feesCollected1Usd: null,
@@ -142,6 +147,13 @@ beforeEach(() => {
   // Reset mocks to safe defaults
   mockGetPositionData = async () => fakeRawPosition;
   mockGetPnLView = async () => [];
+  mockResolvePnLViewsDetailed = async (...args: unknown[]) => {
+    const views = (await mockGetPnLView(...args)) as Array<{ tokenId: string }>;
+    return {
+      views,
+      outcomes: views.map((view) => ({ tokenId: view.tokenId, outcome: "ok" as const })),
+    };
+  };
   mockGetHedgeView = async () => fakeHedgeView;
   mockSnapshotHedge = () => {};
   mockSyncHyperliquidHedgeTrades = async () => 0;

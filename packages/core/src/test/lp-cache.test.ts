@@ -6,7 +6,7 @@ import {
   getPositionsCacheSyncedAt,
   replaceCachedPositionViews,
   replaceCachedPnLViews,
-  replaceLpCaches,
+  upsertLpCacheRows,
   getLpSyncState,
   upsertLpSyncState,
 } from "../db/store.js";
@@ -218,7 +218,7 @@ describe("lp cache store", () => {
       expect(readStringField(requireCachedRow(after[0]), "tokenId")).toBe("original");
     });
 
-    it("replaceLpCaches rolls back both position and pnl caches when either side fails", () => {
+    it("upsertLpCacheRows rolls back both position and pnl caches when either side fails", () => {
       const originalPosition = { ...fakePositionView, tokenId: "position-original" };
       const originalPnL = { ...fakePnLView, tokenId: "pnl-original" };
 
@@ -226,16 +226,61 @@ describe("lp cache store", () => {
       replaceCachedPnLViews([originalPnL], fakeSyncedAt);
 
       const nextPosition = { ...fakePositionView, tokenId: "position-next" };
-      const dupPnL1 = { ...fakePnLView, tokenId: "duplicate" };
-      const dupPnL2 = { ...fakePnLView, tokenId: "duplicate" };
+      // Circular reference makes JSON.stringify throw mid-transaction.
+      const circularRow: { tokenId: unknown; self?: unknown } = { tokenId: "circular" };
+      circularRow.self = circularRow;
 
       expect(() => {
-        replaceLpCaches([nextPosition], [dupPnL1, dupPnL2], "2026-06-02T20:00:00.000Z");
+        upsertLpCacheRows([nextPosition], [circularRow], "2026-06-02T20:00:00.000Z");
       }).toThrow();
 
       expect(listCachedPositionViews()).toEqual([originalPosition]);
       expect(listCachedPnLViews()).toEqual([originalPnL]);
       expect(getPositionsCacheSyncedAt()).toBe(fakeSyncedAt);
+    });
+  });
+
+  describe("upsertLpCacheRows — preservation semantics", () => {
+    it("keeps existing rows for positions absent from the new set (no delete)", () => {
+      const rowA = { ...fakePositionView, tokenId: "A" };
+      const rowB = { ...fakePositionView, tokenId: "B" };
+      const pnlA = { ...fakePnLView, tokenId: "A" };
+      const pnlB = { ...fakePnLView, tokenId: "B" };
+
+      replaceCachedPositionViews([rowA, rowB], fakeSyncedAt);
+      replaceCachedPnLViews([pnlA, pnlB], fakeSyncedAt);
+
+      // A later sync only knows about A (e.g. B was burned)
+      upsertLpCacheRows([rowA], [pnlA], "2026-06-02T20:00:00.000Z");
+
+      const positions = listCachedPositionViews();
+      expect(positions).toHaveLength(2);
+      expect(
+        positions.map((row) => readStringField(requireCachedRow(row), "tokenId")).toSorted(),
+      ).toEqual(["A", "B"]);
+
+      const pnl = listCachedPnLViews();
+      expect(pnl).toHaveLength(2);
+      expect(
+        pnl.map((row) => readStringField(requireCachedRow(row), "tokenId")).toSorted(),
+      ).toEqual(["A", "B"]);
+    });
+
+    it("updates existing rows and inserts new ones in one call", () => {
+      const rowA = { ...fakePositionView, tokenId: "A", currentPrice: 1.0 };
+      replaceCachedPositionViews([rowA], fakeSyncedAt);
+
+      const updatedA = { ...fakePositionView, tokenId: "A", currentPrice: 2.0 };
+      const rowC = { ...fakePositionView, tokenId: "C" };
+      upsertLpCacheRows([updatedA, rowC], [], "2026-06-02T20:00:00.000Z");
+
+      const positions = listCachedPositionViews();
+      expect(positions).toHaveLength(2);
+      const byId = new Map(
+        positions.map((row) => [readStringField(requireCachedRow(row), "tokenId"), row]),
+      );
+      expect(byId.get("A")?.currentPrice).toBe(2.0);
+      expect(byId.get("C")?.currentPrice).toBe(1.5);
     });
   });
 

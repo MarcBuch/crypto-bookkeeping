@@ -157,7 +157,7 @@ await mock.module("../services/lp-economics.js", () => ({
 // ---------------------------------------------------------------------------
 
 import { getPosition, upsertPosition } from "../db/store.js";
-import { getPnLView } from "../services/pnl.js";
+import { getPnLView, resolvePnLViewsDetailed } from "../services/pnl.js";
 import { useTestDb } from "./helpers/db.js";
 
 // ---------------------------------------------------------------------------
@@ -343,6 +343,24 @@ describe("open_tx persistence and fast-path", () => {
     await getPnLView(baseConfig);
 
     expect(findOpenEventCallCount).toBe(0);
+  });
+
+  it("stored entry facts win over a configured openTx with zero open-event RPC calls", async () => {
+    upsertPosition({ ...fakePosWithEntry });
+    findOpenEventCallCount = 0;
+
+    const { views, outcomes } = await resolvePnLViewsDetailed({
+      ...baseConfig,
+      positions: {
+        [TOKEN_ID]: { openTx: "0xCONFIG" },
+      },
+    });
+
+    expect(findOpenEventCallCount).toBe(0);
+    expect(views).toHaveLength(1);
+    expect(views[0].entrySource).toBe("stored");
+    expect(outcomes[0].outcome).toBe("ok");
+    expect(outcomes[0].entrySource).toBe("stored");
   });
 
   it("DB fast-path does not overwrite existing open_tx with null on second sync", async () => {
@@ -621,7 +639,7 @@ describe("close_tx persistence and exit cache bypass", () => {
     expect(findCloseEventCallCount).toBe(0);
   });
 
-  it("cached close data bypasses discovery only when config closeTx is absent", async () => {
+  it("stored close data bypasses discovery even when config closeTx is present", async () => {
     mockGetAllPositions = async () => [fakePosZeroLiquidity];
     upsertPosition({
       ...fakePosWithEntry,
@@ -634,14 +652,19 @@ describe("close_tx persistence and exit cache bypass", () => {
       exit_sqrt_price_x96: "79228162514264337593543950336",
     });
 
-    await getPnLView({
+    findCloseEventCallCount = 0;
+    const { views, outcomes } = await resolvePnLViewsDetailed({
       ...baseConfig,
       positions: {
         [TOKEN_ID]: { openTx: "", closeTx: "0xCONFIG_CLOSE" },
       },
     });
 
-    expect(findCloseEventCallCount).toBeGreaterThan(0);
+    expect(findCloseEventCallCount).toBe(0);
+    expect(views).toHaveLength(1);
+    expect(views[0].exitSource).toBe("stored");
+    expect(outcomes[0].outcome).toBe("ok");
+    expect(outcomes[0].exitSource).toBe("stored");
   });
 
   it("exit cache does not overwrite existing close data on second sync", async () => {
@@ -692,26 +715,33 @@ describe("close_tx persistence and exit cache bypass", () => {
 // pnl.ts caller — EventResult rpc_error propagation
 // ---------------------------------------------------------------------------
 
-describe("pnl.ts caller — EventResult rpc_error propagation", () => {
-  it("rpc_error from findOpenEvent causes position to be skipped", async () => {
+describe("pnl.ts caller — degraded lifecycle outcomes", () => {
+  it("rpc_error from findOpenEvent with no stored facts yields no view and a pending outcome", async () => {
     mockFindOpenEvent = async () => ({ status: "rpc_error", error: new Error("RPC down") });
 
-    const result = await getPnLView(baseConfig);
+    const { views, outcomes } = await resolvePnLViewsDetailed(baseConfig);
 
-    const ids = result.map((p: { tokenId: string }) => p.tokenId);
-    expect(ids).not.toContain(TOKEN_ID);
+    expect(views).toEqual([]);
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].outcome).toBe("pending");
+    expect(outcomes[0].warnings?.some((w) => w.includes("RPC down"))).toBe(true);
   });
 
-  it("rpc_error from findCloseEvent causes closed position to be skipped", async () => {
+  it("rpc_error from findCloseEvent degrades to a stale zeroed exit instead of dropping the position", async () => {
     mockGetAllPositions = async () => [fakePosZeroLiquidity];
     upsertPosition({ ...fakePosWithEntry });
 
     mockFindCloseEvent = async () => ({ status: "rpc_error", error: new Error("RPC timeout") });
 
-    const result = await getPnLView(baseConfig);
+    const { views, outcomes } = await resolvePnLViewsDetailed(baseConfig);
 
-    const ids = result.map((p: { tokenId: string }) => p.tokenId);
-    expect(ids).not.toContain(TOKEN_ID);
+    const ids = views.map((p: { tokenId: string }) => p.tokenId);
+    expect(ids).toContain(TOKEN_ID);
+    expect(views[0].entrySource).toBe("stored");
+    expect(views[0].exitSource).toBe("unresolved");
+    expect(views[0].stale).toBe(true);
+    expect(outcomes[0].outcome).toBe("stale");
+    expect(outcomes[0].warnings?.some((w) => w.includes("RPC timeout"))).toBe(true);
   });
 
   it("rpc_error from findCloseEvent leaves previously stored lifecycle fields unchanged", async () => {

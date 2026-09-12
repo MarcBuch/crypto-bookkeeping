@@ -173,6 +173,16 @@ export function initSchema(database: Database): void {
       last_synced_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS lp_sync_outcomes (
+      token_id TEXT PRIMARY KEY,
+      synced_at TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      entry_source TEXT,
+      exit_source TEXT,
+      error TEXT,
+      warnings TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_positions_view_cache_synced_at ON positions_view_cache(synced_at);
     CREATE INDEX IF NOT EXISTS idx_pnl_view_cache_synced_at ON pnl_view_cache(synced_at);
 

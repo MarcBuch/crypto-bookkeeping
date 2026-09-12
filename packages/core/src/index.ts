@@ -53,11 +53,11 @@ export {
   listCachedPositionViews,
   listCachedPnLViews,
   getPositionsCacheSyncedAt,
-  replaceCachedPositionViews,
-  replaceCachedPnLViews,
-  replaceLpCaches,
+  upsertLpCacheRows,
   getLpSyncState,
   upsertLpSyncState,
+  upsertLpSyncOutcome,
+  listLpSyncOutcomes,
   upsertPositionViewCache,
   upsertPnLViewCache,
   updateCachedPnLView,
@@ -76,6 +76,7 @@ export type {
   TaxTransactionUpdate,
   StoredTaxSyncState,
   StoredLpSyncState,
+  StoredLpSyncOutcome,
 } from "./db/store.js";
 export * from "./db/hedge-store.js";
 export * from "./db/position-store.js";

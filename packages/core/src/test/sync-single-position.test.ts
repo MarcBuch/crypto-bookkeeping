@@ -24,6 +24,10 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 let mockGetPositionData: (...args: unknown[]) => unknown = async () => ({});
 let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
+let mockResolvePnLViewsDetailed: (...args: unknown[]) => Promise<{
+  views: unknown[];
+  outcomes: unknown[];
+}> = async () => ({ views: [], outcomes: [] });
 
 await mock.module("../chain/positions.js", () => ({
   getAllPositions: async () => [],
@@ -69,6 +73,7 @@ await mock.module("../chain/events.js", () => ({
 
 await mock.module("../services/pnl.js", () => ({
   getPnLView: (...args: unknown[]) => mockGetPnLView(...args),
+  resolvePnLViewsDetailed: (...args: unknown[]) => mockResolvePnLViewsDetailed(...args),
   calculateUsdFeeIncome: () => ({
     feesCollected0Usd: null,
     feesCollected1Usd: null,
@@ -84,6 +89,7 @@ await mock.module("../services/pnl.js", () => ({
 import {
   listCachedPositionViews,
   listCachedPnLViews,
+  listLpSyncOutcomes,
   replaceCachedPnLViews,
   upsertPositionViewCache,
 } from "../db/store.js";
@@ -207,6 +213,13 @@ beforeEach(() => {
   // Reset mocks to safe defaults
   mockGetPositionData = async () => fakeRawPosition;
   mockGetPnLView = async () => [fakePnLView];
+  mockResolvePnLViewsDetailed = async (...args: unknown[]) => {
+    const views = (await mockGetPnLView(...args)) as Array<{ tokenId: string }>;
+    return {
+      views,
+      outcomes: views.map((view) => ({ tokenId: view.tokenId, outcome: "ok" as const })),
+    };
+  };
 });
 
 afterEach(() => {
@@ -466,5 +479,35 @@ describe("syncSinglePosition — partial failure and idempotency", () => {
     expect(cached20).toBeDefined();
     expect(cached20?.liquidity).toBe("2000000000000000000");
     expect(cached20?.fee).toBe(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 4: per-position sync outcomes
+// ---------------------------------------------------------------------------
+
+describe("syncSinglePosition — sync outcome", () => {
+  it("records an ok outcome row for the synced position", async () => {
+    const result = await syncSinglePosition(fakeConfig, "12345");
+
+    const outcomes = listLpSyncOutcomes();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].tokenId).toBe("12345");
+    expect(outcomes[0].outcome).toBe("ok");
+    expect(outcomes[0].syncedAt).toBe(result.syncedAt);
+  });
+
+  it("records a pending outcome when the position is unresolved", async () => {
+    mockResolvePnLViewsDetailed = async () => ({
+      views: [],
+      outcomes: [{ tokenId: "12345", outcome: "pending", warnings: ["entry_not_found"] }],
+    });
+
+    await syncSinglePosition(fakeConfig, "12345");
+
+    const outcomes = listLpSyncOutcomes();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].outcome).toBe("pending");
+    expect(outcomes[0].warnings).toEqual(["entry_not_found"]);
   });
 });

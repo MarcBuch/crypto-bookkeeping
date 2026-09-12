@@ -373,15 +373,17 @@ describe("Cluster C: hasStoredEntry path — findOpenEvent never called, open_tx
 // Edge case: rpc_error causes position to be skipped without writing open_tx
 // ---------------------------------------------------------------------------
 
-describe("Edge: rpc_error from findOpenEvent — position skipped, no DB write", () => {
-  it("returns empty results when findOpenEvent returns rpc_error", async () => {
+describe("Edge: rpc_error from findOpenEvent — current-amounts fallback, no DB write", () => {
+  it("saves the snapshot using current amounts when findOpenEvent returns rpc_error", async () => {
     mockFindOpenEvent = async () => ({ status: "rpc_error", error: new Error("RPC down") });
 
     const results = await takeSnapshot(baseConfig);
 
-    // Position should be skipped (continue statement in snapshot.ts)
+    // Active position + failed discovery degrades to current-amounts fallback
+    // (entrySource: "unresolved", stale: true) rather than dropping the snapshot.
     const ids = results.map((r) => r.tokenId);
-    expect(ids).not.toContain(TOKEN_ID);
+    expect(ids).toContain(TOKEN_ID);
+    expect(results[0].saved).toBe(true);
   });
 
   it("does not write open_tx when rpc_error occurs", async () => {

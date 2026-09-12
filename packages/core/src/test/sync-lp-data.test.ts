@@ -2,7 +2,7 @@
  * Adversarial tests for syncLpData:
  *  1. getPnLView throws → cache unchanged
  *  2. getPositionsView throws (getAllPositions throws) → cache unchanged
- *  3. Empty wallet (zero positions) → caches cleared, sync state updated
+ *  3. Empty wallet (zero positions) → caches preserved, sync state updated
  *  4. Returns correct SyncLpDataSummary
  */
 
@@ -13,7 +13,19 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 // ---------------------------------------------------------------------------
 
 let mockGetAllPositions: () => unknown = async () => [];
-let mockGetPnLView: (config: unknown) => unknown = async () => [];
+let mockGetPnLView: (
+  config: unknown,
+  tokenId?: unknown,
+  rawPositions?: unknown,
+) => unknown = async () => [];
+let mockResolvePnLViewsDetailed: (
+  config: unknown,
+  tokenId?: unknown,
+  rawPositions?: unknown,
+) => Promise<{ views: unknown[]; outcomes: unknown[] }> = async () => ({
+  views: [],
+  outcomes: [],
+});
 let mockSyncHyperliquidHedgeTrades: (config: unknown) => Promise<number> = async () => 0;
 
 await mock.module("../chain/positions.js", () => ({
@@ -24,8 +36,10 @@ await mock.module("../chain/positions.js", () => ({
 }));
 
 await mock.module("../services/pnl.js", () => ({
-  getPnLView: (config: unknown, _tokenId?: unknown, _rawPositions?: unknown) =>
-    mockGetPnLView(config),
+  getPnLView: (config: unknown, tokenId?: unknown, rawPositions?: unknown) =>
+    mockGetPnLView(config, tokenId, rawPositions),
+  resolvePnLViewsDetailed: (config: unknown, tokenId?: unknown, rawPositions?: unknown) =>
+    mockResolvePnLViewsDetailed(config, tokenId, rawPositions),
 }));
 
 await mock.module("../services/hedge.js", () => ({
@@ -67,6 +81,7 @@ await mock.module("../chain/client.js", () => ({
 import {
   listCachedPositionViews,
   listCachedPnLViews,
+  listLpSyncOutcomes,
   getLpSyncState,
   replaceCachedPositionViews,
   replaceCachedPnLViews,
@@ -104,6 +119,11 @@ const fakePosData = {
   feeGrowthInside1LastX128: 0n,
   tokensOwed0: 0n,
   tokensOwed1: 0n,
+};
+
+const fakePosDataB = {
+  ...fakePosData,
+  tokenId: 67890n,
 };
 
 const fakePositionView = {
@@ -189,6 +209,9 @@ const freshPnLViewWithUsd = {
   pnlUsdSource: "mixed" as const,
 };
 
+const fakePositionViewB = { ...fakePositionView, tokenId: "67890" };
+const fakePnLViewB = { ...fakePnLView, tokenId: "67890" };
+
 function expectErrorMessage(error: unknown, matcher: string | RegExp): void {
   expect(error).toBeInstanceOf(Error);
   if (!(error instanceof Error)) {
@@ -231,6 +254,19 @@ beforeEach(() => {
   // Reset mocks to safe defaults
   mockGetAllPositions = async () => [];
   mockGetPnLView = async () => [];
+  mockResolvePnLViewsDetailed = async (
+    config: unknown,
+    tokenId?: unknown,
+    rawPositions?: unknown,
+  ) => {
+    const views = (await mockGetPnLView(config, tokenId, rawPositions)) as Array<{
+      tokenId: string;
+    }>;
+    return {
+      views,
+      outcomes: views.map((view) => ({ tokenId: view.tokenId, outcome: "ok" as const })),
+    };
+  };
   mockSyncHyperliquidHedgeTrades = async () => 0;
 });
 
@@ -380,7 +416,7 @@ describe("syncLpData — empty wallet", () => {
     expect(result.positionCount).toBe(0);
   });
 
-  it("clears position cache for empty wallet", async () => {
+  it("preserves existing position cache rows for empty wallet (no delete)", async () => {
     // Pre-populate
     replaceCachedPositionViews([fakePositionView], "2026-06-01T00:00:00.000Z");
     expect(listCachedPositionViews()).toHaveLength(1);
@@ -390,10 +426,12 @@ describe("syncLpData — empty wallet", () => {
 
     await syncLpData(fakeConfig);
 
-    expect(listCachedPositionViews()).toEqual([]);
+    const positions = listCachedPositionViews();
+    expect(positions).toHaveLength(1);
+    expectStringTokenId(positions[0], "12345");
   });
 
-  it("clears pnl cache for empty wallet", async () => {
+  it("preserves existing pnl cache rows for empty wallet (no delete)", async () => {
     replaceCachedPnLViews([fakePnLView], "2026-06-01T00:00:00.000Z");
     expect(listCachedPnLViews()).toHaveLength(1);
 
@@ -402,7 +440,9 @@ describe("syncLpData — empty wallet", () => {
 
     await syncLpData(fakeConfig);
 
-    expect(listCachedPnLViews()).toEqual([]);
+    const pnl = listCachedPnLViews();
+    expect(pnl).toHaveLength(1);
+    expectStringTokenId(pnl[0], "12345");
   });
 
   it("updates sync state for wallet after successful empty sync", async () => {
@@ -506,5 +546,93 @@ describe("syncLpData — cached USD pricing merge", () => {
     expect(pnl[0].token1UsdPrice).toBe(1.11);
     expect(pnl[0].feesValueUsd).toBe(29.0);
     expect(pnl[0].pendingFeesValueUsd).toBe(10.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: cache preservation — a sync never deletes rows it didn't produce
+// ---------------------------------------------------------------------------
+
+describe("syncLpData — cache preservation", () => {
+  it("keeps earlier rows for positions absent from a later, smaller sync", async () => {
+    // Previous sync produced rows for A and B
+    replaceCachedPositionViews([fakePositionView, fakePositionViewB], "2026-06-01T00:00:00.000Z");
+    replaceCachedPnLViews([fakePnLView, fakePnLViewB], "2026-06-01T00:00:00.000Z");
+
+    // Latest sync only sees A
+    mockGetAllPositions = async () => [fakePosData];
+    mockResolvePnLViewsDetailed = async () => ({
+      views: [fakePnLView],
+      outcomes: [{ tokenId: "12345", outcome: "ok" }],
+    });
+
+    await syncLpData(fakeConfig);
+
+    const positions = listCachedPositionViews();
+    expect(positions).toHaveLength(2);
+    expect(positions.map((row) => row.tokenId).sort()).toEqual(["12345", "67890"]);
+
+    const pnl = listCachedPnLViews();
+    expect(pnl).toHaveLength(2);
+    expect(pnl.map((row) => row.tokenId).sort()).toEqual(["12345", "67890"]);
+  });
+
+  it("keeps burned-NFT position rows in both cache tables (wallet no longer returns B)", async () => {
+    replaceCachedPositionViews([fakePositionView, fakePositionViewB], "2026-06-01T00:00:00.000Z");
+    replaceCachedPnLViews([fakePnLView, fakePnLViewB], "2026-06-01T00:00:00.000Z");
+
+    // Position B's NFT has been burned: the wallet only enumerates A.
+    mockGetAllPositions = async () => [fakePosData];
+    mockResolvePnLViewsDetailed = async () => ({
+      views: [fakePnLView],
+      outcomes: [{ tokenId: "12345", outcome: "ok" }],
+    });
+
+    await syncLpData(fakeConfig);
+
+    expect(listCachedPositionViews().some((row) => row.tokenId === "67890")).toBe(true);
+    expect(listCachedPnLViews().some((row) => row.tokenId === "67890")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 6: sync outcomes recorded per position
+// ---------------------------------------------------------------------------
+
+describe("syncLpData — sync outcomes", () => {
+  it("records an outcome row per wallet position (ok and pending)", async () => {
+    mockGetAllPositions = async () => [fakePosData, fakePosDataB];
+    mockResolvePnLViewsDetailed = async () => ({
+      views: [fakePnLView],
+      outcomes: [
+        { tokenId: "12345", outcome: "ok", entrySource: "stored", exitSource: "active" },
+        { tokenId: "67890", outcome: "pending", warnings: ["entry_not_found"] },
+      ],
+    });
+
+    const result = await syncLpData(fakeConfig);
+
+    const outcomes = listLpSyncOutcomes();
+    expect(outcomes).toHaveLength(2);
+    const byId = new Map(outcomes.map((outcome) => [outcome.tokenId, outcome]));
+    expect(byId.get("12345")?.outcome).toBe("ok");
+    expect(byId.get("67890")?.outcome).toBe("pending");
+    expect(byId.get("67890")?.warnings).toEqual(["entry_not_found"]);
+    // Every outcome is stamped with the same syncedAt as the sync.
+    expect(byId.get("12345")?.syncedAt).toBe(result.syncedAt);
+    expect(byId.get("67890")?.syncedAt).toBe(result.syncedAt);
+  });
+
+  it("includes outcomes on the SyncLpDataSummary", async () => {
+    mockGetAllPositions = async () => [fakePosData];
+    mockResolvePnLViewsDetailed = async () => ({
+      views: [fakePnLView],
+      outcomes: [{ tokenId: "12345", outcome: "stale", warnings: ["close rpc_error"] }],
+    });
+
+    const result = await syncLpData(fakeConfig);
+
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes[0]).toMatchObject({ tokenId: "12345", outcome: "stale" });
   });
 });

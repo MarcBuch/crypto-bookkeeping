@@ -16,6 +16,10 @@ import { mock, describe, it, expect, beforeEach, afterEach } from "bun:test";
 let mockGetAllPositionsCallCount = 0;
 let mockGetAllPositionsResult: unknown = [];
 let mockGetPnLView: (...args: unknown[]) => unknown = async () => [];
+let mockResolvePnLViewsDetailed: (...args: unknown[]) => Promise<{
+  views: unknown[];
+  outcomes: unknown[];
+}> = async () => ({ views: [], outcomes: [] });
 let mockFindOpenEventCallCount = 0;
 
 await mock.module("../chain/positions.js", () => ({
@@ -73,6 +77,8 @@ await mock.module("../chain/events.js", () => ({
 await mock.module("../services/pnl.js", () => ({
   getPnLView: (config: unknown, tokenId?: unknown, rawPositions?: unknown) =>
     mockGetPnLView(config, tokenId, rawPositions),
+  resolvePnLViewsDetailed: (config: unknown, tokenId?: unknown, rawPositions?: unknown) =>
+    mockResolvePnLViewsDetailed(config, tokenId, rawPositions),
   calculateUsdFeeIncome: () => ({
     feesCollected0Usd: null,
     feesCollected1Usd: null,
@@ -171,6 +177,13 @@ beforeEach(() => {
   mockGetAllPositionsCallCount = 0;
   mockGetAllPositionsResult = [];
   mockGetPnLView = async () => [];
+  mockResolvePnLViewsDetailed = async (...args: unknown[]) => {
+    const views = (await mockGetPnLView(...args)) as Array<{ tokenId: string }>;
+    return {
+      views,
+      outcomes: views.map((view) => ({ tokenId: view.tokenId, outcome: "ok" as const })),
+    };
+  };
   mockFindOpenEventCallCount = 0;
 });
 

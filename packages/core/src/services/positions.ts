@@ -3,14 +3,15 @@ import { getAllPositions, getPositionData, type PositionData } from "../chain/po
 import type { Config } from "../config.js";
 import {
   listCachedPnLViews,
-  replaceLpCaches,
+  upsertLpCacheRows,
+  upsertLpSyncOutcome,
   upsertLpSyncState,
   upsertPositionViewCache,
   upsertPnLViewCache,
 } from "../db/store.js";
 import { getHedgeView, snapshotHedge, syncHyperliquidHedgeTrades } from "./hedge.js";
-import type { PnLView } from "./pnl.js";
-import { getPnLView } from "./pnl.js";
+import type { PnLView, PositionSyncOutcome } from "./pnl.js";
+import { resolvePnLViewsDetailed } from "./pnl.js";
 import { createPositionLifecycleContext, projectCurrentPosition } from "./position-lifecycle.js";
 
 type CachedPnLView = Record<string, unknown>;
@@ -64,7 +65,9 @@ export function mergeCachedUsdFields(fresh: PnLView, cached?: CachedPnLView): Pn
           ? "partial"
           : "unpriced",
     pnlUsdSource:
-      cached.pnlUsdSource === "event_time" || cached.pnlUsdSource === "live" || cached.pnlUsdSource === "mixed"
+      cached.pnlUsdSource === "event_time" ||
+      cached.pnlUsdSource === "live" ||
+      cached.pnlUsdSource === "mixed"
         ? cached.pnlUsdSource
         : null,
   };
@@ -128,35 +131,41 @@ export async function getPositionsView(
   const result: PositionView[] = [];
 
   for (const pos of positions) {
-    const projection = await projectCurrentPosition(lifecycleContext, pos);
-    const amount0Human = Number(projection.currentAmount0) / 10 ** projection.token0Info.decimals;
-    const amount1Human = Number(projection.currentAmount1) / 10 ** projection.token1Info.decimals;
+    try {
+      const projection = await projectCurrentPosition(lifecycleContext, pos);
+      const amount0Human = Number(projection.currentAmount0) / 10 ** projection.token0Info.decimals;
+      const amount1Human = Number(projection.currentAmount1) / 10 ** projection.token1Info.decimals;
 
-    result.push({
-      tokenId: pos.tokenId.toString(),
-      token0: {
-        address: pos.token0,
-        symbol: projection.token0Info.symbol,
-        decimals: projection.token0Info.decimals,
-      },
-      token1: {
-        address: pos.token1,
-        symbol: projection.token1Info.symbol,
-        decimals: projection.token1Info.decimals,
-      },
-      fee: pos.fee,
-      feePercent: pos.fee / 10000,
-      tickLower: pos.tickLower,
-      tickUpper: pos.tickUpper,
-      priceLower: projection.priceLower,
-      priceUpper: projection.priceUpper,
-      currentPrice: projection.currentPrice,
-      liquidity: pos.liquidity.toString(),
-      status: projection.status,
-      inRange: projection.inRange,
-      currentAmount0: amount0Human,
-      currentAmount1: amount1Human,
-    });
+      result.push({
+        tokenId: pos.tokenId.toString(),
+        token0: {
+          address: pos.token0,
+          symbol: projection.token0Info.symbol,
+          decimals: projection.token0Info.decimals,
+        },
+        token1: {
+          address: pos.token1,
+          symbol: projection.token1Info.symbol,
+          decimals: projection.token1Info.decimals,
+        },
+        fee: pos.fee,
+        feePercent: pos.fee / 10000,
+        tickLower: pos.tickLower,
+        tickUpper: pos.tickUpper,
+        priceLower: projection.priceLower,
+        priceUpper: projection.priceUpper,
+        currentPrice: projection.currentPrice,
+        liquidity: pos.liquidity.toString(),
+        status: projection.status,
+        inRange: projection.inRange,
+        currentAmount0: amount0Human,
+        currentAmount1: amount1Human,
+      });
+    } catch (error) {
+      // Skip the position but let the rest of the loop continue; any previous
+      // cache row for this position survives untouched.
+      console.error(`[lp-tracker] Failed to project position ${pos.tokenId.toString()}:`, error);
+    }
   }
 
   return result;
@@ -168,6 +177,7 @@ export interface SyncLpDataSummary {
   positionCount: number;
   hedgeTradesSynced: number;
   hedgeSyncError?: string;
+  outcomes: PositionSyncOutcome[];
 }
 
 export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
@@ -179,17 +189,39 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
     config.wallet,
   );
   const positions = await getPositionsView(config, rawPositions);
-  const pnlViews = await getPnLView(config, undefined, rawPositions);
+  const { views: pnlViews, outcomes } = await resolvePnLViewsDetailed(
+    config,
+    undefined,
+    rawPositions,
+  );
   const cachedPnlViews = cachedPnlViewsByTokenId();
-  const mergedPnlViews = pnlViews.map((view) => mergeCachedUsdFields(view, cachedPnlViews.get(view.tokenId)));
+  const mergedPnlViews = pnlViews.map((view) =>
+    mergeCachedUsdFields(view, cachedPnlViews.get(view.tokenId)),
+  );
 
   const syncedAt = new Date().toISOString();
 
-  // Atomically replace both caches in a single transaction
-  replaceLpCaches(positions, mergedPnlViews, syncedAt);
+  // Upsert both caches in a single transaction. Never deletes: rows for
+  // positions absent from this sync (e.g. burned NFTs) are preserved.
+  upsertLpCacheRows(positions, mergedPnlViews, syncedAt);
 
   // Update sync state
   upsertLpSyncState({ wallet: config.wallet, last_synced_at: syncedAt });
+
+  // Record one outcome row per wallet position, stamped with this sync's timestamp
+  for (const pos of rawPositions) {
+    const tokenId = pos.tokenId.toString();
+    const outcome = outcomes.find((candidate) => candidate.tokenId === tokenId);
+    upsertLpSyncOutcome({
+      tokenId,
+      syncedAt,
+      outcome: outcome?.outcome ?? "failed",
+      entrySource: outcome?.entrySource,
+      exitSource: outcome?.exitSource,
+      error: outcome?.error,
+      warnings: outcome?.warnings,
+    });
+  }
 
   // Snapshot hedges for each position (if configured)
   for (const position of positions) {
@@ -219,6 +251,7 @@ export async function syncLpData(config: Config): Promise<SyncLpDataSummary> {
     syncedAt,
     positionCount: positions.length,
     hedgeTradesSynced,
+    outcomes,
   };
 
   if (hedgeSyncError) {
@@ -259,11 +292,12 @@ export async function syncSinglePosition(
   );
 
   // 4. Get position view and PnL view for just this one position concurrently
-  const [positionView, pnlView] = await Promise.all([
+  const [positionView, pnlResult] = await Promise.all([
     getPositionsView(config, [rawPosition]),
-    getPnLView(config, tokenId, [rawPosition]),
+    resolvePnLViewsDetailed(config, tokenId, [rawPosition]),
   ]);
-  if (positionView === undefined) {
+  const pnlView = pnlResult.views;
+  if (positionView[0] === undefined) {
     throw new Error(`Position #${tokenId} not found or has no view data`);
   }
 
@@ -275,6 +309,18 @@ export async function syncSinglePosition(
   if (pnlView[0]) {
     upsertPnLViewCache(tokenId, mergeCachedUsdFields(pnlView[0], cachedPnlView(tokenId)), syncedAt);
   }
+
+  // Record this position's outcome, stamped with the same syncedAt
+  const outcome = pnlResult.outcomes.find((candidate) => candidate.tokenId === tokenId);
+  upsertLpSyncOutcome({
+    tokenId,
+    syncedAt,
+    outcome: outcome?.outcome ?? "failed",
+    entrySource: outcome?.entrySource,
+    exitSource: outcome?.exitSource,
+    error: outcome?.error,
+    warnings: outcome?.warnings,
+  });
 
   // 6. Snapshot hedge if configured (swallow errors — LP sync must complete)
   if (hedgePromise) {

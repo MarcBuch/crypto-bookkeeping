@@ -29,6 +29,10 @@ let mockGetPoolState: (...args: unknown[]) => Promise<unknown> = async () => ({
   feeGrowthGlobal1X128: 0n,
 });
 let mockGetPnLView: (...args: unknown[]) => Promise<unknown> = async () => [];
+let mockResolvePnLViewsDetailed: (...args: unknown[]) => Promise<{
+  views: unknown[];
+  outcomes: unknown[];
+}> = async () => ({ views: [], outcomes: [] });
 
 await mock.module("../chain/positions.js", () => ({
   getAllPositions: (..._args: unknown[]) => mockGetAllPositions(),
@@ -51,6 +55,8 @@ await mock.module("../chain/pools.js", () => ({
 
 await mock.module("../services/pnl.js", () => ({
   getPnLView: (arg1: unknown, arg2?: unknown, arg3?: unknown) => mockGetPnLView(arg1, arg2, arg3),
+  resolvePnLViewsDetailed: (arg1: unknown, arg2?: unknown, arg3?: unknown) =>
+    mockResolvePnLViewsDetailed(arg1, arg2, arg3),
 }));
 
 await mock.module("../services/hedge.js", () => ({
@@ -238,6 +244,13 @@ beforeEach(() => {
     feeGrowthGlobal1X128: 0n,
   });
   mockGetPnLView = async () => [];
+  mockResolvePnLViewsDetailed = async (...args: unknown[]) => {
+    const views = (await mockGetPnLView(...args)) as Array<{ tokenId: string }>;
+    return {
+      views,
+      outcomes: views.map((view) => ({ tokenId: view.tokenId, outcome: "ok" as const })),
+    };
+  };
 });
 
 afterEach(() => {
@@ -249,19 +262,17 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("syncLpData — getPositionsView throws (position list sharing)", () => {
-  it("rejects when getPoolAddress throws during getPositionsView", async () => {
+  it("resolves when getPoolAddress throws during getPositionsView (bad position skipped)", async () => {
     mockGetAllPositions = async () => [fakeRawPosition];
     mockGetPoolAddress = async () => {
       throw new Error("pool lookup failed");
     };
     mockGetPnLView = async () => [];
 
-    try {
-      await syncLpData(fakeConfig);
-      throw new Error("Expected syncLpData to reject");
-    } catch (error) {
-      expectErrorMessage(error, "pool lookup failed");
-    }
+    // Per-position projection failures are tolerated: the bad position is
+    // skipped so one bad position cannot abort the whole sync.
+    const result = await syncLpData(fakeConfig);
+    expect(result.positionCount).toBe(0);
   });
 
   it("leaves position cache unchanged when getPoolAddress throws", async () => {
@@ -309,19 +320,15 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     expectStringTokenId(pnl[0], "12345");
   });
 
-  it("rejects when getSlot0 throws during getPositionsView", async () => {
+  it("resolves when getSlot0 throws during getPositionsView (bad position skipped)", async () => {
     mockGetAllPositions = async () => [fakeRawPosition];
     mockGetSlot0 = async () => {
       throw new Error("slot0 fetch failed");
     };
     mockGetPnLView = async () => [];
 
-    try {
-      await syncLpData(fakeConfig);
-      throw new Error("Expected syncLpData to reject");
-    } catch (error) {
-      expectErrorMessage(error, "slot0 fetch failed");
-    }
+    const result = await syncLpData(fakeConfig);
+    expect(result.positionCount).toBe(0);
   });
 
   it("leaves both caches unchanged when getSlot0 throws", async () => {
@@ -348,19 +355,15 @@ describe("syncLpData — getPositionsView throws (position list sharing)", () =>
     expectStringTokenId(pnl[0], "12345");
   });
 
-  it("rejects when getTokenInfo throws during getPositionsView", async () => {
+  it("resolves when getTokenInfo throws during getPositionsView (bad position skipped)", async () => {
     mockGetAllPositions = async () => [fakeRawPosition];
     mockGetTokenInfo = async () => {
       throw new Error("token info fetch failed");
     };
     mockGetPnLView = async () => [];
 
-    try {
-      await syncLpData(fakeConfig);
-      throw new Error("Expected syncLpData to reject");
-    } catch (error) {
-      expectErrorMessage(error, "token info fetch failed");
-    }
+    const result = await syncLpData(fakeConfig);
+    expect(result.positionCount).toBe(0);
   });
 
   it("leaves both caches unchanged when getTokenInfo throws", async () => {
